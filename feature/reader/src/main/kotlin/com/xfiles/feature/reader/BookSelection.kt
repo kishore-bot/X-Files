@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn

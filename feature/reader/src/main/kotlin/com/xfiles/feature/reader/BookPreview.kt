@@ -1,5 +1,8 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.platform.LocalHapticFeedback
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -48,7 +51,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.hapticfeedback.LocalHapticFeedback
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity

@@ -19,7 +19,7 @@ use document_parsers::{
 };
 use zeroize::Zeroizing;
 
-use crate::{ListenerObserver, NativePdfSource, NativePdfStroke, NativePdfToolListener, ReadError};
+use crate::{ListenerObserver, NativePdfSource, NativePdfStroke, NativePdfToolListener, NativePdfToolReport, ReadError};
 use crate::{open_for_read, open_source};
 
 /// One part of a split: zero-based and inclusive, like the engine's own pages.

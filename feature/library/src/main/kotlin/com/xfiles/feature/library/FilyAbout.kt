@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
+import com.xfiles.design.FilyMascot
+import com.xfiles.design.FilyMascotState
 import com.xfiles.fily.AssistantModel
 import com.xfiles.fily.ModelInstall
 import com.xfiles.fily.SpeechLanguageSupport
@@ -50,6 +52,15 @@ data class FilyLanguages(
     val onSelect: (String) -> Unit,
     val onRefresh: () -> Unit,
 )
+
+/**
+ * Fily's small mascot for the About screen's Fily card (anchored at the top of the card, 72dp).
+ * AboutScreen's private FilyCard calls this; it is kept here so the card and dialog share one look.
+ */
+@Composable
+fun FilyAboutMascot(modifier: Modifier = Modifier) {
+    FilyMascot(modifier = modifier, state = FilyMascotState.Idle, size = 72.dp)
+}
 
 /** Megabytes as the download sizes are shown: 379 MB, not 379220000 bytes. */
 internal fun megabytes(bytes: Long) = "${(bytes + 500_000) / 1_000_000} MB"
@@ -140,7 +151,8 @@ fun GetFilyDialog(
         onDismissRequest = onDismiss,
         title = { Text("Get Fily") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                FilyMascot(size = 120.dp)
                 Text(
                     "Fily runs entirely on your phone. Its AI model is a one-time ${megabytes(bytes)} download; " +
                         "after that, nothing you ask leaves the phone. Wi-Fi is best.",

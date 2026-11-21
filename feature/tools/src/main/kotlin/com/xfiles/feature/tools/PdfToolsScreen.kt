@@ -46,7 +46,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.core.documents.PdfAction
 import com.xfiles.core.documents.PdfPaper
 import com.xfiles.core.documents.PdfToolOptions
+import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzTextButton
+import com.xfiles.design.EzTopBar
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -87,10 +90,7 @@ internal fun DedicatedToolTiles(onOpen: (PdfDedicatedTool) -> Unit, enabled: Boo
 
 @Composable
 internal fun DedicatedToolHeader(title: String, onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onBack) { Icon(EzIcons.Back, "Back to PDF tools") }
-        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-    }
+    EzTopBar(title, onBack, backLabel = "Back to PDF tools", gutter = 0.dp)
 }
 
 /** Shows the chosen PDF, or asks for its password when it is protected. */
@@ -161,12 +161,10 @@ internal fun formatBytes(bytes: Long): String = when {
 @Composable
 private fun ToolsHeader(onBack: () -> Unit, onNewNote: () -> Unit, onTidy: () -> Unit, section: Int, onSection: (Int) -> Unit, enabled: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(EzIcons.Back, "Back to library") }
-            Text("Tools", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-            TextButton(onClick = onTidy, enabled = enabled) { Text("Tidy up") }
-            TextButton(onClick = onNewNote, enabled = enabled) { Text("New note") }
-        }
+        EzTopBar("Tools", onBack, backLabel = "Back to library", gutter = 0.dp, actions = {
+            EzTextButton("Tidy up", onTidy, enabled = enabled, color = EzColors.Text)
+            EzTextButton("New note", onNewNote, enabled = enabled, color = EzColors.Text)
+        })
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("Edit PDFs", "Create & convert").forEachIndexed { index, label ->
                 FilterChip(selected = section == index, onClick = { onSection(index) }, enabled = enabled, label = { Text(label) })

@@ -42,8 +42,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzTopBar
 import com.xfiles.design.EzShapes
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
@@ -73,11 +75,9 @@ fun TidyUpScreen(viewModel: TidyViewModel, onBack: () -> Unit, onOpen: (TidyFile
     var pendingDelete by remember { mutableStateOf<TidyFile?>(null) }
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(EzIcons.Back, "Back") }
-            Text("Tidy up", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-            if (state.report != null && state.progress == null) IconButton(onClick = viewModel::scan) { Icon(TidyIcons.Refresh, "Scan again") }
-        }
+        EzTopBar("Tidy up", onBack, backLabel = "Back", gutter = 0.dp, actions = {
+            if (state.report != null && state.progress == null) BarIconButton(TidyIcons.Refresh, "Scan again", viewModel::scan)
+        })
         CapturedAnimatedVisibility(state.progress != null) {
             state.progress?.let { progress ->
                 Column(Modifier.fillMaxWidth().glassCard().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -873,7 +873,7 @@ mod tests {
         let container = br#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
         let opf = br#"<package><manifest><item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
 <item id="c2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>"#;
-        let ch1 = br#"<html><body><p>One</p><h2 id="sec">Two</h2><p><a href="ch2.xhtml#%78">go</a> <a href="#sec">back</a></p></body></html>"#;
+        let ch1 = br##"<html><body><p>One</p><h2 id="sec">Two</h2><p><a href="ch2.xhtml#%78">go</a> <a href="#sec">back</a></p></body></html>"##;
         let ch2 = br#"<html><body><p>A</p><p id="x">B</p><hr id="rule"/><p>C</p></body></html>"#;
         let bytes = zip_with(
             &[

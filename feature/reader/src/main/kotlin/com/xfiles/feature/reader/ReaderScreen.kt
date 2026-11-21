@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.material3.TextButton
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
@@ -53,6 +54,7 @@ import com.xfiles.design.EzIcons
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.PdfMarkup
 import com.xfiles.documents.PdfMarkupKind
+import com.xfiles.design.BarIconButton
 import com.xfiles.design.glassBar
 import androidx.compose.foundation.layout.size
 import kotlinx.coroutines.flow.Flow
@@ -151,7 +153,7 @@ fun ReaderScreen(
     val inPip by LocalMediaPip.current.isInPictureInPicture.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().padding(horizontal = if (inPip) 0.dp else 12.dp, vertical = if (inPip) 0.dp else 8.dp)) {
         if (!inPip) Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = closeReader, enabled = !markup.saving) { Icon(EzIcons.Back, "Back to library") }
+            BarIconButton(EzIcons.Back, "Back to library", closeReader, enabled = !markup.saving)
             Text(
                 ready?.file?.name ?: "Reader",
                 Modifier.weight(1f),

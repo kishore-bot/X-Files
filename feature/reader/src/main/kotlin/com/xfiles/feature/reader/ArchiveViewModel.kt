@@ -96,7 +96,7 @@ class ArchiveViewModel @Inject constructor(
             saved[KEY_FOLDER] = value
         }
 
-    private var query: String
+    private var savedQuery: String
         get() = saved[KEY_QUERY] ?: ""
         set(value) {
             saved[KEY_QUERY] = value
@@ -139,7 +139,7 @@ class ArchiveViewModel @Inject constructor(
     }
 
     fun setQuery(text: String) {
-        query = text
+        savedQuery = text
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             // Short debounce so typing does not walk the whole tree on every key.
@@ -282,7 +282,7 @@ class ArchiveViewModel @Inject constructor(
         val current = tree ?: return
         val path = folder.takeIf { current.find(it) != null } ?: ""
         folder = path
-        val currentQuery = query
+        val currentQuery = savedQuery
         browseJob?.cancel()
         browseJob = viewModelScope.launch {
             val browse = withContext(Dispatchers.Default) {

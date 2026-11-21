@@ -7,6 +7,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -142,7 +143,7 @@ internal fun SpreadsheetPreview(
  * the right pane, so headers and columns stay in step with the cells.
  */
 @Composable
-private fun SheetGrid(
+private fun ColumnScope.SheetGrid(
     sheet: SheetPreview,
     palette: Map<Int, CellLook>,
     frozenRows: Int,

@@ -80,6 +80,7 @@ pub struct NativeOfficeEditor {
 
 #[uniffi::export]
 impl NativeOfficeEditor {
+    #[uniffi::constructor]
     pub fn new(path: String) -> Arc<Self> {
         Arc::new(Self {
             path: Mutex::new(path),

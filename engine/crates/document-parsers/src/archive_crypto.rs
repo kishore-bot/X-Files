@@ -567,8 +567,10 @@ mod tests {
     #[test]
     fn zip_crypto_round_trips_and_checks_the_header() {
         let plain = b"hello, encrypted world";
-        let bytes = zipcrypto_seal(b"secret", 0xAB, plain);
-        let entry = fake_entry(bytes.len() as u64, plain.len() as u64, 0, 0xAB << 24);
+        // A real writer stores the plaintext CRC32 and uses its high byte as the check byte.
+        let crc = crc32fast::hash(plain);
+        let bytes = zipcrypto_seal(b"secret", (crc >> 24) as u8, plain);
+        let entry = fake_entry(bytes.len() as u64, plain.len() as u64, 0, crc);
         let raw: Box<dyn ReadSeek> = Box::new(io::Cursor::new(bytes.clone()));
         let mut plain_entry = PlainEntry::open(raw, &entry, b"secret", CancelToken::default()).ok().unwrap();
         let mut out = Vec::new();

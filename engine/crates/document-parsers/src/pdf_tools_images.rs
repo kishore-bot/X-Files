@@ -43,6 +43,7 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use jpeg_encoder::{ColorType, Encoder, SamplingFactor};
 use zune_jpeg::JpegDecoder;
+use zune_jpeg::zune_core::bytestream::ZCursor;
 use zune_jpeg::zune_core::colorspace::ColorSpace;
 use zune_jpeg::zune_core::options::DecoderOptions;
 
@@ -1120,7 +1121,7 @@ fn device_name(channels: usize) -> &'static str {
 /// The output length must be `expected`, or the stream is refused.
 fn decode_jpeg_as(raw: &[u8], expected: usize, space: ColorSpace) -> Option<Vec<u8>> {
     let options = DecoderOptions::default().jpeg_set_out_colorspace(space);
-    let mut decoder = JpegDecoder::new_with_options(raw, options);
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(raw), options);
     let pixels = decoder.decode().ok()?;
     (pixels.len() == expected).then_some(pixels)
 }
@@ -1326,11 +1327,13 @@ mod tests {
 
     #[test]
     fn multiply_applies_the_outer_matrix_last() {
-        // Scale by 2, then translate the scaled space by (10, 20) in the outer frame.
+        // PDF 8.3.4: `cm` pre-multiplies, CTM' = M x CTM. For "2 0 0 2 0 0 cm" then
+        // "1 0 0 1 10 20 cm", the second translation lives in the already-scaled space,
+        // so it lands at (20, 40) on the page. Reversing the order gives (10, 20).
         let scale = [2.0, 0.0, 0.0, 2.0, 0.0, 0.0];
         let translate = [1.0, 0.0, 0.0, 1.0, 10.0, 20.0];
-        let m = multiply(translate, scale);
-        assert_eq!(m, [2.0, 0.0, 0.0, 2.0, 10.0, 20.0]);
+        assert_eq!(multiply(translate, scale), [2.0, 0.0, 0.0, 2.0, 20.0, 40.0]);
+        assert_eq!(multiply(scale, translate), [2.0, 0.0, 0.0, 2.0, 10.0, 20.0]);
         assert_eq!(multiply(IDENTITY, scale), scale);
     }
 
@@ -1547,7 +1550,9 @@ mod tests {
         let mut out = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
-                out.push(((x * 255 / (width - 1)) as u8).wrapping_add((y % 7) as u8));
+                // Smooth, non-wrapping ramp (max 206). A 255 -> 0 wrap is a hard edge that
+                // no q75 JPEG can reproduce within a tight bound, and is not a real photo.
+                out.push((x * 200 / (width - 1) + y % 7) as u8);
             }
         }
         out

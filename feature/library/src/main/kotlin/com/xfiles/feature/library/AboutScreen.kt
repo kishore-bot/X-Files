@@ -53,6 +53,7 @@ import com.xfiles.crash.NoCloudCrashReporting
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzOptionMenu
+import com.xfiles.design.EzTopBar
 import com.xfiles.design.EzShapes
 import androidx.compose.runtime.LaunchedEffect
 import com.xfiles.design.glassBar
@@ -87,10 +88,12 @@ fun AboutScreen(
     val (versionName, versionCode) = remember(context) { packageVersion(context) }
     val links = LocalUriHandler.current
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = back) { Icon(EzIcons.Back, if (vision) "Back to About" else "Back to library") }
-            Text(if (vision) "Why Xfiles" else "About Xfiles", style = MaterialTheme.typography.titleLarge)
-        }
+        EzTopBar(
+            title = if (vision) "Why Xfiles" else "About Xfiles",
+            onBack = back,
+            backLabel = if (vision) "Back to About" else "Back to library",
+            gutter = 0.dp,
+        )
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
             if (vision) {
                 VisionScreen()
@@ -211,6 +214,7 @@ private fun FilyCard(fily: FilyAbout) {
         Modifier.fillMaxWidth().glassCard().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        FilyAboutMascot(Modifier.align(Alignment.CenterHorizontally))
         Text("Fily", style = MaterialTheme.typography.titleMedium, color = EzColors.Text, modifier = Modifier.semantics { heading() })
         SwitchRow(
             title = "Fily and assistants",

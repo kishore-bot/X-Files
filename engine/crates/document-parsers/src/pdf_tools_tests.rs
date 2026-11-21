@@ -933,6 +933,7 @@ fn output_bounds_are_enforced() {
         encryptor: None,
         observer: &mut watcher,
         objects_since_check: 0,
+        file_id: [0; 16],
     };
     assert_eq!(output.write(b"xx").unwrap_err().kind, ErrorKind::LimitExceeded);
     assert!(output.allocate().is_ok());

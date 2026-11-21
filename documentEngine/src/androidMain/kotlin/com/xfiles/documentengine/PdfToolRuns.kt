@@ -56,23 +56,23 @@ data class PdfOverlaySummary(
 internal fun PdfPageEdit.toNative(): NativePdfPageEdit = NativePdfPageEdit(page.toUInt(), rotation)
 
 private fun PdfCompressQuality.toNative(): NativeImageQuality = when (this) {
-    PdfCompressQuality.Lossless -> NativeImageQuality.Lossless
-    PdfCompressQuality.Balanced -> NativeImageQuality.Balanced
-    PdfCompressQuality.Strong -> NativeImageQuality.Strong
+    PdfCompressQuality.Lossless -> NativeImageQuality.LOSSLESS
+    PdfCompressQuality.Balanced -> NativeImageQuality.BALANCED
+    PdfCompressQuality.Strong -> NativeImageQuality.STRONG
 }
 
 private fun PdfProtectionChoice.toNative(): NativeProtectionChoice = when (this) {
-    PdfProtectionChoice.SameAsOriginal -> NativeProtectionChoice.SameAsOriginal
-    PdfProtectionChoice.Aes256 -> NativeProtectionChoice.Aes256
+    PdfProtectionChoice.SameAsOriginal -> NativeProtectionChoice.SAME_AS_ORIGINAL
+    PdfProtectionChoice.Aes256 -> NativeProtectionChoice.AES256
 }
 
 private fun NativeProtectionOutcome.toShared(): PdfProtectionOutcome = when (this) {
-    NativeProtectionOutcome.NotProtected -> PdfProtectionOutcome.NotProtected
-    NativeProtectionOutcome.Kept -> PdfProtectionOutcome.Kept
-    NativeProtectionOutcome.Upgraded -> PdfProtectionOutcome.Upgraded
-    NativeProtectionOutcome.KeptNewOwner -> PdfProtectionOutcome.KeptNewOwner
-    NativeProtectionOutcome.OwnerPasswordOpens -> PdfProtectionOutcome.OwnerPasswordOpens
-    NativeProtectionOutcome.SavedWithoutProtection -> PdfProtectionOutcome.SavedWithoutProtection
+    NativeProtectionOutcome.NOT_PROTECTED -> PdfProtectionOutcome.NotProtected
+    NativeProtectionOutcome.KEPT -> PdfProtectionOutcome.Kept
+    NativeProtectionOutcome.UPGRADED -> PdfProtectionOutcome.Upgraded
+    NativeProtectionOutcome.KEPT_NEW_OWNER -> PdfProtectionOutcome.KeptNewOwner
+    NativeProtectionOutcome.OWNER_PASSWORD_OPENS -> PdfProtectionOutcome.OwnerPasswordOpens
+    NativeProtectionOutcome.SAVED_WITHOUT_PROTECTION -> PdfProtectionOutcome.SavedWithoutProtection
 }
 
 /** Page count and flags of [file]. Throws [PdfPasswordRequired] when it needs a password. */
@@ -248,12 +248,12 @@ private inline fun <T> guarded(block: () -> T): T = try {
 }
 
 private fun PdfWatermarkPosition.toNative(): NativeWatermarkPosition = when (this) {
-    PdfWatermarkPosition.Center -> NativeWatermarkPosition.Center
-    PdfWatermarkPosition.TopLeft -> NativeWatermarkPosition.TopLeft
-    PdfWatermarkPosition.TopCenter -> NativeWatermarkPosition.TopCenter
-    PdfWatermarkPosition.TopRight -> NativeWatermarkPosition.TopRight
-    PdfWatermarkPosition.BottomLeft -> NativeWatermarkPosition.BottomLeft
-    PdfWatermarkPosition.BottomCenter -> NativeWatermarkPosition.BottomCenter
-    PdfWatermarkPosition.BottomRight -> NativeWatermarkPosition.BottomRight
-    PdfWatermarkPosition.Tiled -> NativeWatermarkPosition.Tiled
+    PdfWatermarkPosition.Center -> NativeWatermarkPosition.CENTER
+    PdfWatermarkPosition.TopLeft -> NativeWatermarkPosition.TOP_LEFT
+    PdfWatermarkPosition.TopCenter -> NativeWatermarkPosition.TOP_CENTER
+    PdfWatermarkPosition.TopRight -> NativeWatermarkPosition.TOP_RIGHT
+    PdfWatermarkPosition.BottomLeft -> NativeWatermarkPosition.BOTTOM_LEFT
+    PdfWatermarkPosition.BottomCenter -> NativeWatermarkPosition.BOTTOM_CENTER
+    PdfWatermarkPosition.BottomRight -> NativeWatermarkPosition.BOTTOM_RIGHT
+    PdfWatermarkPosition.Tiled -> NativeWatermarkPosition.TILED
 }

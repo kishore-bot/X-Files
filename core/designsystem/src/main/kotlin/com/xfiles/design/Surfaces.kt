@@ -20,9 +20,12 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -213,59 +216,77 @@ fun Modifier.selectionPop(selected: Boolean, dip: Float = 0.9f): Modifier {
     }
 }
 
-/** Draw the reference waves with cached geometry and brushes. */
+/**
+ * Library background: the theme's gradient with red light and flowing ribbons.
+ * Drawn once per size and theme into a bitmap, then blitted on each frame, so
+ * scrolling never re-runs the gradients.
+ */
 @Composable
 fun Modifier.libraryBackground(): Modifier {
     val palette = LocalEzPalette.current
-    return drawWithCache {
-        val base = Brush.linearGradient(palette.waveBase, Offset.Zero, Offset(size.width, size.height))
-        val glowTop = Brush.radialGradient(
-            listOf(palette.waveGlowTop, Color.Transparent),
-            Offset(size.width * 0.85f, size.height * 0.08f),
-            (size.width * 0.75f).coerceAtLeast(1f),
-        )
-        val glowBottom = Brush.radialGradient(
-            listOf(palette.waveGlowBottom, Color.Transparent),
-            Offset(size.width * 0.05f, size.height * 0.75f),
-            (size.width * 0.9f).coerceAtLeast(1f),
-        )
-        val top = ribbon(palette, top = true)
-        val bottom = ribbon(palette, top = false)
-        onDrawBehind {
-            drawRect(base)
-            drawRect(glowTop)
-            drawRect(glowBottom)
-            top()
-            bottom()
-        }
-    }
+    return this.then(
+        remember(palette) {
+            Modifier.drawWithCache {
+                val image = rasterize {
+                    val base = Brush.linearGradient(palette.waveBase, Offset.Zero, Offset(size.width, size.height))
+                    val glowTop = Brush.radialGradient(
+                        listOf(palette.waveGlowTop, Color.Transparent),
+                        Offset(size.width * 0.85f, size.height * 0.08f),
+                        size.width * 0.75f,
+                    )
+                    val glowBottom = Brush.radialGradient(
+                        listOf(palette.waveGlowBottom, Color.Transparent),
+                        Offset(size.width * 0.05f, size.height * 0.75f),
+                        size.width * 0.9f,
+                    )
+                    drawRect(base)
+                    drawRect(glowTop)
+                    drawRect(glowBottom)
+                    drawRibbon(palette, top = true)
+                    drawRibbon(palette, top = false)
+                }
+                onDrawBehind { drawImage(image) }
+            }
+        },
+    )
 }
 
+/** Reader background: calmer than the library's, so the page stands out. Cached per size and theme. */
 @Composable
 fun Modifier.readerBackground(): Modifier {
     val palette = LocalEzPalette.current
-    return drawWithCache {
-        val base = Brush.verticalGradient(palette.readerBase)
-        val glow = Brush.radialGradient(
-            listOf(palette.readerGlow, Color.Transparent),
-            Offset(size.width * 0.85f, size.height * 0.2f),
-            (size.width * 0.8f).coerceAtLeast(1f),
-        )
-        val bottom = ribbon(palette, top = false, alpha = 0.55f)
-        onDrawBehind {
-            drawRect(base)
-            drawRect(glow)
-            bottom()
-        }
-    }
+    return this.then(
+        remember(palette) {
+            Modifier.drawWithCache {
+                val image = rasterize {
+                    val base = Brush.verticalGradient(palette.readerBase)
+                    val glow = Brush.radialGradient(
+                        listOf(palette.readerGlow, Color.Transparent),
+                        Offset(size.width * 0.85f, size.height * 0.2f),
+                        size.width * 0.8f,
+                    )
+                    drawRect(base)
+                    drawRect(glow)
+                    drawRibbon(palette, top = false, alpha = 0.55f)
+                }
+                onDrawBehind { drawImage(image) }
+            }
+        },
+    )
 }
 
+/** Draws [block] once into an offscreen bitmap the size of this node. */
+private fun CacheDrawScope.rasterize(block: DrawScope.() -> Unit): ImageBitmap {
+    val bitmap = ImageBitmap(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1))
+    CanvasDrawScope().draw(this, layoutDirection, Canvas(bitmap), size, block)
+    return bitmap
+}
 
 /**
  * A flowing ribbon across the top right or the bottom: a filled wave with a
  * glossy crest line along its edge, as in the mockup.
  */
-private fun CacheDrawScope.ribbon(palette: EzPalette, top: Boolean, alpha: Float = 1f): DrawScope.() -> Unit {
+private fun DrawScope.drawRibbon(palette: EzPalette, top: Boolean, alpha: Float = 1f) {
     val w = size.width
     val h = size.height
     val edge = Path()
@@ -288,16 +309,12 @@ private fun CacheDrawScope.ribbon(palette: EzPalette, top: Boolean, alpha: Float
         }
     }
     val colors = if (top) palette.ribbonTop else palette.ribbonBottom
-    val fill = Brush.linearGradient(colors, Offset(0f, h * 0.6f), Offset(w, h))
+    drawPath(path, Brush.linearGradient(colors, Offset(0f, h * 0.6f), Offset(w, h)), alpha = alpha)
     // The crest: a thin bright line that fades along the ribbon.
     val crest = Brush.horizontalGradient(
         listOf(Color.Transparent, palette.glassEdgeTop.copy(alpha = palette.glassEdgeTop.alpha * 0.7f), Color.Transparent),
     )
-    val stroke = Stroke(width = 1.5.dp.toPx())
-    return {
-        drawPath(path, fill, alpha = alpha)
-        drawPath(edge, crest, alpha = alpha, style = stroke)
-    }
+    drawPath(edge, crest, alpha = alpha, style = Stroke(width = 1.5.dp.toPx()))
 }
 
 @Composable

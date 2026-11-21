@@ -39,6 +39,9 @@ import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzOptionMenu
 import com.xfiles.design.EzShapes
+import com.xfiles.design.FilyMascot
+import com.xfiles.design.FilyMascotState
+import com.xfiles.design.FilyStatusPill
 import com.xfiles.design.glassPanel
 import com.xfiles.design.glossyPrimary
 import com.xfiles.fily.FilySession
@@ -89,6 +92,15 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                 Text("Fily", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 IconButton(onClick = close) { Icon(EzIcons.Close, "Close Fily") }
             }
+            FilyMascot(
+                state = when {
+                    recognition == SpeechState.Listening -> FilyMascotState.Listening
+                    ui.working -> FilyMascotState.Thinking
+                    speaking == TtsState.Speaking -> FilyMascotState.Speaking
+                    else -> FilyMascotState.Idle
+                },
+                size = 150.dp,
+            )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Enable Fily", Modifier.weight(1f))
                 Switch(checked = enabled, onCheckedChange = {
@@ -154,7 +166,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                             Icon(if (listening) EzIcons.Close else EzIcons.Mic, if (listening) "Finish speaking" else "Speak to Fily", tint = EzColors.OnPrimary)
                         }
                         when (recognition) {
-                            SpeechState.Listening -> Text("Listening")
+                            SpeechState.Listening -> FilyStatusPill("Listening · speak now")
                             SpeechState.NeedsLanguage -> TextButton(onClick = recognizer::downloadLanguage) { Text("Get offline English") }
                             SpeechState.Error -> Text("On-device speech recognition is unavailable.", color = MaterialTheme.colorScheme.error)
                             SpeechState.Idle -> Text(if (speaking == TtsState.Speaking) "Speaking" else "Tap to speak")

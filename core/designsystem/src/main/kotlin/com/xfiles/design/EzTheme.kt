@@ -260,6 +260,14 @@ object EzBadgeColors {
     val Steel = Color(0xFF8E96A8) to Color(0xFF4C5568)
     val Plum = Color(0xFF8B5CF6) to Color(0xFF5B21B6)
     val Pink = Color(0xFFF472B6) to Color(0xFFBE185D)
+
+    /**
+     * A type's colour as an icon or text on glass: the lighter stop on the dark
+     * theme, the deeper one on the light, so it keeps contrast in both.
+     */
+    @Composable
+    @ReadOnlyComposable
+    fun ink(pair: Pair<Color, Color>): Color = if (LocalEzPalette.current.dark) pair.first else pair.second
 }
 
 object EzShapes {
@@ -309,7 +317,7 @@ private val Typography = Typography().run {
     )
 }
 
-/** File-name style of library cards. */
+/** File names in library rows and cards. */
 val FileNameStyle = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.2).sp)
 
 private fun EzPalette.colorScheme(): ColorScheme {

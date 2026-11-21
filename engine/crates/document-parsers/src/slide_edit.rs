@@ -526,10 +526,12 @@ mod tests {
             "ppt/slides/_rels/slide2.xml.rels".to_owned(),
             br#"<Relationships><Relationship Id="rId1" Type="http://x/slideLayout" Target="../slideLayouts/slideLayout1.xml"/><Relationship Id="rId2" Type="http://x/notesSlide" Target="../notesSlides/notesSlide1.xml"/><Relationship Id="rId3" Type="http://x/image" Target="../media/only2.png"/><Relationship Id="rId4" Type="http://x/image" Target="../media/both.png"/></Relationships>"#.to_vec(),
         );
-        edit.replace.insert(
+        // slide1 has no rels part in the base deck, so this is a new part (`add`); `replace` would
+        // silently drop it and hide the reference that keeps both.png alive.
+        edit.add.push((
             "ppt/slides/_rels/slide1.xml.rels".to_owned(),
             br#"<Relationships><Relationship Id="rId1" Type="http://x/image" Target="../media/both.png"/></Relationships>"#.to_vec(),
-        );
+        ));
         edit.add.push(("ppt/media/only2.png".to_owned(), b"png2".to_vec()));
         edit.add.push(("ppt/media/both.png".to_owned(), b"png1".to_vec()));
         let with_media = rewrite_package(&base, &edit).unwrap();

@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 use document_core::{CancelToken, EngineError, Limits};
 
 use crate::odf;
-use crate::ooxml::{PackageEdit, relationships, rewrite_package};
+use crate::ooxml::{PackageEdit, main_part, relationships, rewrite_package};
 use crate::zip::ZipArchive;
 
 /// Highest 0-based column (XFD) and row accepted by the editor.
@@ -442,12 +442,19 @@ fn open(data: &[u8]) -> Result<ZipArchive, EngineError> {
 }
 
 fn read_text(archive: &mut ZipArchive, name: &str) -> Result<String, EngineError> {
-    let bytes = archive.read_to_vec(name).map_err(|_| EngineError::malformed("missing workbook part"))?;
+    let bytes = archive.read_to_vec(name).map_err(|_| EngineError::malformed(format!("missing part {name}")))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Archive path of the workbook part. OPC makes the package's `officeDocument`
+/// relationship authoritative; packages without one get the conventional path.
+fn workbook_part(archive: &mut ZipArchive) -> Result<String, EngineError> {
+    Ok(main_part(archive)?.unwrap_or_else(|| WORKBOOK.to_owned()))
+}
+
 fn shared_strings_part(archive: &mut ZipArchive) -> Result<Option<String>, EngineError> {
-    Ok(relationships(archive, WORKBOOK)?
+    let workbook = workbook_part(archive)?;
+    Ok(relationships(archive, &workbook)?
         .into_iter()
         .find(|r| !r.external && r.kind.ends_with("/sharedStrings"))
         .map(|r| r.target))
@@ -455,7 +462,8 @@ fn shared_strings_part(archive: &mut ZipArchive) -> Result<Option<String>, Engin
 
 /// Archive path of the worksheet part with the given tab name.
 fn sheet_part(archive: &mut ZipArchive, name: &str) -> Result<String, EngineError> {
-    let workbook = read_text(archive, WORKBOOK)?;
+    let workbook_path = workbook_part(archive)?;
+    let workbook = read_text(archive, &workbook_path)?;
     let mut pos = 0;
     let mut rid = None;
     while let Some(span) = next_element(&workbook, pos, "sheet") {
@@ -467,7 +475,7 @@ fn sheet_part(archive: &mut ZipArchive, name: &str) -> Result<String, EngineErro
         pos = span.end;
     }
     let rid = rid.ok_or_else(|| EngineError::malformed("sheet not found"))?;
-    relationships(archive, WORKBOOK)?
+    relationships(archive, &workbook_path)?
         .into_iter()
         .find(|r| r.id == rid && !r.external)
         .map(|r| r.target)
@@ -1078,7 +1086,7 @@ mod tests {
     fn ods_edit_splits_only_the_covering_repeat() {
         let out = apply_cell_edits(&ods_book(), &[ods_edit(0, 1, CellValue::Text("mid".into()))]).unwrap();
         let xml = ods_content(&out);
-        assert!(xml.contains(r#"<table:table-cell office:value-type="string"><text:p>mid</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="3">"#));
+        // The repeat covers columns 1-2. Column 2 keeps its empty cell, so "3" stays at column 3.
         assert!(xml.contains(
             r#"<text:p>mid</text:p></table:table-cell><table:table-cell/><table:table-cell office:value-type="float" office:value="3">"#
         ));
@@ -1137,6 +1145,7 @@ mod tests {
 
     const WORKBOOK_XML: &[u8] = br#"<?xml version="1.0"?><workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="Other &amp; more" sheetId="2" r:id="rId2"/></sheets></workbook>"#;
     const WB_RELS: &[u8] = br#"<Relationships><Relationship Id="rId1" Type="http://x/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://x/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://x/sharedStrings" Target="sharedStrings.xml"/></Relationships>"#;
+    const WB_RELS_NO_TABLE: &[u8] = br#"<Relationships><Relationship Id="rId1" Type="http://x/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://x/worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#;
     const SHEET1: &[u8] = br#"<?xml version="1.0"?><worksheet><dimension ref="A1:C2"/><sheetViews><sheetView><pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><sheetData><row r="1" spans="1:3"><c r="A1" t="s"><v>0</v></c><c r="B1" s="2"><v>5</v></c></row><row r="2"><c r="C2"><f>SUM(B1:B1)</f><v>5</v></c></row></sheetData><pageMargins/></worksheet>"#;
     const SHEET2: &[u8] = br#"<worksheet><sheetData/></worksheet>"#;
     const SHARED: &[u8] = br#"<sst count="2" uniqueCount="2"><si><t>Name</t></si><si><r><t>Rich</t></r></si></sst>"#;
@@ -1235,7 +1244,7 @@ mod tests {
     fn inline_text_when_no_shared_table() {
         let data = zip(&[
             ("xl/workbook.xml", WORKBOOK_XML),
-            ("xl/_rels/workbook.xml.rels", WB_RELS),
+            ("xl/_rels/workbook.xml.rels", WB_RELS_NO_TABLE),
             ("xl/worksheets/sheet1.xml", SHEET1),
             ("xl/worksheets/sheet2.xml", SHEET2),
         ]);

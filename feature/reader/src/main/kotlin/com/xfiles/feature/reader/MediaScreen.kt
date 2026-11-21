@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.ui.layout.boundsInWindow
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.net.Uri
