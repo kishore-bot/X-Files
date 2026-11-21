@@ -1,8 +1,11 @@
 package com.xfiles.core.documents
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Rect
 import android.net.Uri
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -26,12 +29,23 @@ class TextRecognitionRepository @Inject constructor(@ApplicationContext context:
     /** Recognized lines of [image], blocks separated by blank lines. */
     suspend fun recognize(image: Uri): String {
         val input = withContext(Dispatchers.IO) { InputImage.fromFilePath(app, image) }
-        return suspendCancellableCoroutine { continuation ->
-            recognizer.process(input)
-                .addOnSuccessListener { result ->
-                    continuation.resume(result.textBlocks.joinToString("\n\n") { it.text })
-                }
-                .addOnFailureListener { error -> continuation.resumeWithException(error) }
+        return process(input).textBlocks.joinToString("\n\n") { it.text }
+    }
+
+    /**
+     * Lines of a rendered page with their boxes, in [bitmap] pixels, in reading order of blocks.
+     * The caller keeps the bitmap alive until this returns.
+     */
+    suspend fun lines(bitmap: Bitmap): List<RecognizedLine> =
+        process(InputImage.fromBitmap(bitmap, 0)).textBlocks.flatMap { block ->
+            block.lines.mapNotNull { line -> line.boundingBox?.let { RecognizedLine(line.text, it) } }
         }
+
+    private suspend fun process(input: InputImage): Text = suspendCancellableCoroutine { continuation ->
+        recognizer.process(input)
+            .addOnSuccessListener { result -> continuation.resume(result) }
+            .addOnFailureListener { error -> continuation.resumeWithException(error) }
     }
 }
+
+data class RecognizedLine(val text: String, val box: Rect)

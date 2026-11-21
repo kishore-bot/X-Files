@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.runtime.SideEffect
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -22,7 +23,7 @@ import com.xfiles.design.EzIcons
 internal fun PdfFindBar(state: PdfFindState, onQuery: (String) -> Unit, onMove: (Int) -> Unit, onClose: () -> Unit) {
     val text = rememberTextFieldState()
     val query = text.text.toString().trim()
-    LaunchedEffect(query) { onQuery(query.take(256)) }
+    SideEffect(query) { onQuery(query.take(256)) }
 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(

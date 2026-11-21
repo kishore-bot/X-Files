@@ -148,12 +148,13 @@ object TidyModule {
 
     @Provides
     @Singleton
-    fun tidyLibrary(@ApplicationContext context: Context, folders: FolderRepository): TidyLibrary {
+    fun tidyLibrary(@ApplicationContext context: Context, folders: FolderRepository, pdfs: AndroidPdfDocument): TidyLibrary {
         val analyzer = DocumentAnalyzer(context.contentResolver)
         return object : TidyLibrary {
             override suspend fun files() = folders.scan().files.map(FileEntry::toTidyFile)
             override suspend fun plainText(file: TidyFile, maxChars: Int) =
-                analyzer.extractText(Uri.parse(file.uri), file.name, maxChars.toUInt()).takeIf { it.isNotBlank() }
+                if (file.name.endsWith(".pdf", ignoreCase = true)) pdfs.text(Uri.parse(file.uri), null, maxChars, ocr = false).takeIf { it.isNotBlank() }
+                else analyzer.extractText(Uri.parse(file.uri), file.name, maxChars.toUInt()).takeIf { it.isNotBlank() }
         }
     }
 

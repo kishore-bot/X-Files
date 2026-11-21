@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -150,6 +153,38 @@ private fun MakerCard() {
             color = EzColors.Text,
         )
         Text("Xfiles is our first project.", Modifier.padding(top = 4.dp), color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
+        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        Text("Team", style = MaterialTheme.typography.labelLarge, color = EzColors.TextSecondary)
+        Team.forEach { TeamMemberRow(it) }
+    }
+}
+
+private data class TeamMember(val name: String, val role: String, val linkedIn: String?, val email: String?)
+
+private val Team = listOf(
+    TeamMember(
+        name = "Abhijith H M",
+        role = "Market Analyst",
+        linkedIn = "https://www.linkedin.com/in/abhijith-hm-34789025b",
+        email = "hmabhijith@gmail.com",
+    ),
+)
+
+@Composable
+private fun TeamMemberRow(member: TeamMember) {
+    val links = LocalUriHandler.current
+    fun open(uri: String) = try {
+        links.openUri(uri)
+    } catch (_: Exception) {
+        Unit // No browser or mail app; nothing to open.
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(member.name, style = MaterialTheme.typography.titleSmall, color = EzColors.Text)
+            Text(member.role, style = MaterialTheme.typography.bodySmall, color = EzColors.TextSecondary)
+        }
+        member.linkedIn?.let { url -> TextButton(onClick = { open(url) }) { Text("LinkedIn") } }
+        member.email?.let { address -> TextButton(onClick = { open("mailto:$address") }) { Text("Email") } }
     }
 }
 

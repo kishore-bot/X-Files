@@ -1,10 +1,16 @@
 package com.xfiles.feature.library
 
+import androidx.compose.runtime.SideEffect
 import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -75,6 +81,7 @@ fun LibraryScreen(
     onStopSearch: () -> Unit,
     onOpen: () -> Unit,
     onFile: (FileEntry) -> Unit,
+    onShare: (FileEntry) -> Unit = {},
     onClear: () -> Unit,
     onAddFolder: () -> Unit,
     onRemoveFolder: (Uri) -> Unit,
@@ -97,11 +104,11 @@ fun LibraryScreen(
             (tab != HomeTab.Library || selected.kind == null || file.kind == selected.kind) && file.name.contains(query, ignoreCase = true)
         }
     }
-    LaunchedEffect(tab, matching, bookmarks) {
+    SideEffect(tab, matching, bookmarks) {
         onListedFiles(if (tab == HomeTab.Bookmarks) bookmarks.map { it.file } else matching)
     }
     val searchesInside = searchEnabled && tab == HomeTab.Library && !library.scanning && query.length >= 2
-    LaunchedEffect(query, searchesInside, library.files) {
+    SideEffect(query, searchesInside, library.files) {
         if (searchesInside) onSearchInside(query) else onStopSearch()
     }
     DisposableEffect(Unit) { onDispose(onStopSearch) }
@@ -183,7 +190,7 @@ fun LibraryScreen(
                     } else {
                         items(bookmarks, key = { it.key }, contentType = { "bookmark" }) { bookmark ->
                             val description = bookmark.page?.let { "Page ${it + 1}" }
-                            FileRow(bookmark.file, detail = description, onClick = { onBookmark(bookmark) })
+                            FileRow(bookmark.file, detail = description, onClick = { onBookmark(bookmark) }, onShare = { onShare(bookmark.file) })
                         }
                     }
                 } else if (matching.isEmpty()) {
@@ -204,7 +211,7 @@ fun LibraryScreen(
                     }
                 } else {
                     items(matching, key = { it.uri.toString() }, contentType = { "file" }) { file ->
-                        FileRow(file, onClick = { onFile(file) })
+                        FileRow(file, onClick = { onFile(file) }, onShare = { onShare(file) })
                     }
                 }
                 if (searchesInside && contentSearch.query == query) {
@@ -311,7 +318,9 @@ private fun EmptyLibrary(title: String, description: String?, icon: ImageVector 
 }
 
 @Composable
-private fun FileRow(file: FileEntry, detail: String? = null, onClick: () -> Unit) {
+private fun FileRow(file: FileEntry, detail: String? = null, onClick: () -> Unit, onShare: () -> Unit) {
+    var actions by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
     val icon = when (file.kind) {
         DocumentKind.Pdf -> EzIcons.PdfFile
         DocumentKind.Image -> EzIcons.Image
@@ -319,8 +328,19 @@ private fun FileRow(file: FileEntry, detail: String? = null, onClick: () -> Unit
         DocumentKind.Video -> EzIcons.Movie
         else -> EzIcons.Document
     }
+    Box {
+    // Long-press opens the file's actions; a tap still opens it.
     Row(
-        Modifier.fillMaxWidth().glassCard().clickable(onClick = onClick).heightIn(min = 56.dp)
+        Modifier.fillMaxWidth().glassCard()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    actions = true
+                },
+                onLongClickLabel = "File actions",
+            )
+            .heightIn(min = 56.dp)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -331,6 +351,19 @@ private fun FileRow(file: FileEntry, detail: String? = null, onClick: () -> Unit
             detail?.let { Text(it, color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall) }
         }
         Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary)
+    }
+    DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
+        DropdownMenuItem(
+            text = { Text("Open") },
+            leadingIcon = { Icon(EzIcons.Document, null) },
+            onClick = { actions = false; onClick() },
+        )
+        DropdownMenuItem(
+            text = { Text("Share") },
+            leadingIcon = { Icon(EzIcons.Share, null) },
+            onClick = { actions = false; onShare() },
+        )
+    }
     }
 }
 

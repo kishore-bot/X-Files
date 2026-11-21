@@ -1,5 +1,6 @@
 package com.xfiles.feature.assistant
 
+import androidx.compose.runtime.SideEffect
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -55,7 +56,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
     val recognition by recognizer.state.collectAsStateWithLifecycle()
     val speaker = rememberTextToSpeech()
     val speaking by speaker.state.collectAsStateWithLifecycle()
-    LaunchedEffect(ui.reply) { ui.reply?.let(speaker::speak) }
+    SideEffect(ui.reply) { ui.reply?.let(speaker::speak) }
 
     val microphone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) recognizer.start()

@@ -18,11 +18,6 @@ if (firebaseReports) {
 
 android {
     namespace = "com.xfiles.android"
-    sourceSets.getByName("main").kotlin.srcDir(if (firebaseReports) "src/firebase/kotlin" else "src/offline/kotlin")
-    // The overlay turns off Firebase's default collection in every build type, so none collects before consent.
-    if (firebaseReports) sourceSets.configureEach {
-        if (name in setOf("debug", "release", "benchmark")) manifest.srcFile("src/firebase/AndroidManifest.xml")
-    }
     compileSdk {
         version = release(libs.versions.compile.sdk.get().toInt()) {
             minorApiLevel = libs.versions.sdk.minor.api.get().toInt()
@@ -37,11 +32,25 @@ android {
         versionCode = 1
         versionName = "0.1.0"
     }
+    // dev: day-to-day builds, installable next to prod. prod: what users get.
+    flavorDimensions += "env"
+    productFlavors {
+        create("dev") {
+            dimension = "env"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
+        create("prod") {
+            dimension = "env"
+        }
+    }
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // AGP 9.3+ app optimization: R8 code shrinking, obfuscation and optimization, optimized resource
+            // shrinking and Android's default keep rules. Our rules: src/main/keepRules/*.keep.
+            optimization {
+                enable = true
+            }
         }
         // Release code with the debug key, for measuring startup and frame times locally.
         // Never distribute this variant.
@@ -52,7 +61,14 @@ android {
         }
     }
     // Custom build types must explicitly consume the release profiles.
-    sourceSets.getByName("benchmark").baselineProfiles.srcDir("src/release/generated/baselineProfiles")
+    sourceSets.getByName("benchmark").baselineProfiles.directories.add("src/prodRelease/generated/baselineProfiles")
+    // dev never carries Firebase; prod does only in the opt-in firebase build.
+    sourceSets.getByName("dev").kotlin.directories.add("src/offline/kotlin")
+    sourceSets.getByName("prod").kotlin.directories.add(if (firebaseReports) "src/firebase/kotlin" else "src/offline/kotlin")
+    // The overlay turns off Firebase's default collection in every prod variant, so none collects before consent.
+    if (firebaseReports) sourceSets.configureEach {
+        if (name in setOf("prodDebug", "prodRelease", "prodBenchmark")) manifest.srcFile("src/firebase/AndroidManifest.xml")
+    }
 
     buildFeatures {
         compose = true
@@ -63,13 +79,20 @@ android {
     }
 }
 
+// dev is debug-only; release (minified) and benchmark builds exist for prod alone.
+androidComponents {
+    beforeVariants { variant ->
+        if (variant.productFlavors.any { it.second == "dev" } && variant.buildType != "debug") variant.enable = false
+    }
+}
+
 dependencies {
     if (firebaseReports) {
-        implementation(platform(libs.firebase.bom))
-        implementation(libs.firebase.crashlytics)
+        "prodImplementation"(platform(libs.firebase.bom))
+        "prodImplementation"(libs.firebase.crashlytics)
         // Already shipped by this Crashlytics version; exposed for ConsentedCrashBackendFactory.
-        implementation("com.google.android.datatransport:transport-runtime:5.0.0")
-        implementation("com.google.android.datatransport:transport-backend-cct:5.0.0")
+        "prodImplementation"("com.google.android.datatransport:transport-runtime:5.0.0")
+        "prodImplementation"("com.google.android.datatransport:transport-backend-cct:5.0.0")
     }
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
@@ -92,6 +115,8 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.glance.appwidget)
     implementation(libs.glance.material3)
+    // Newer WorkManager than Glance's, for R8 full-mode safe keep rules (Room database constructor).
+    implementation(libs.work.runtime)
     // Installs the Baseline Profile on sideloaded APKs too; Play does it for bundles.
     implementation(libs.androidx.profileinstaller)
     baselineProfile(project(":baselineprofile"))
@@ -105,6 +130,8 @@ baselineProfile {
 }
 
 // Local mapping and symbol files only; uploading them to Firebase is a separate release step.
+// google-services.json knows only com.xfiles, so dev variants skip the Firebase tasks.
 tasks.configureEach {
     if (name.startsWith("uploadCrashlytics")) enabled = false
+    if (firebaseReports && name.contains("Dev") && (name.endsWith("GoogleServices") || name.contains("Crashlytics"))) enabled = false
 }

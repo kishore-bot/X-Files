@@ -24,7 +24,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.FrameRateCategory
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.preferredFrameRate
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.entryProvider
@@ -107,7 +109,7 @@ class MainActivity : ComponentActivity() {
             val navigator = remember(stack) { AppNavigator(stack, analysis, editor) }
             val draft by editor.state.collectAsStateWithLifecycle()
             val reader by analysis.state.collectAsStateWithLifecycle()
-            LaunchedEffect(reader != null, draft != null) { navigator.sync(reader != null, draft != null) }
+            SideEffect(reader != null, draft != null) { navigator.sync(reader != null, draft != null) }
 
             val openRequest by pendingOpen.collectAsStateWithLifecycle()
             LaunchedEffect(openRequest) {
@@ -136,7 +138,8 @@ class MainActivity : ComponentActivity() {
                 EzTheme(darkTheme = darkTheme) {
                     val onLibrary = navigator.top in setOf(Route.Library, Route.About, Route.Tools, Route.Tidy)
                     val background = if (onLibrary) Modifier.libraryBackground() else Modifier.readerBackground()
-                    Box(Modifier.fillMaxSize().then(background).glassScreen().safeDrawingPadding()) {
+                    // Vote for the display's top refresh rate while Xfiles is on screen (120/144 Hz panels).
+                    Box(Modifier.fillMaxSize().preferredFrameRate(FrameRateCategory.High).then(background).glassScreen().safeDrawingPadding()) {
                         NavDisplay(
                             backStack = stack,
                             onBack = navigator::back,
@@ -176,7 +179,7 @@ class MainActivity : ComponentActivity() {
                         if (showFily) FilyOverlay(navigator, { displayedFiles }, onDismiss = { showFily = false })
                         CrashReportPrompt(crashReports)
                         // The screen name only (never a file name), for the crash report.
-                        LaunchedEffect(navigator.top) { CrashBreadcrumbs.screen = (navigator.top as? Route)?.toString() }
+                        SideEffect(navigator.top) { CrashBreadcrumbs.screen = (navigator.top as? Route)?.toString() }
                     }
                 }
             }
@@ -211,6 +214,7 @@ class MainActivity : ComponentActivity() {
             onStopSearch = library::stopSearch,
             onOpen = { picker.launch(arrayOf("*/*")) },
             onFile = { navigator.openDocument(it.uri) },
+            onShare = { sharing.share(it) },
             onClear = library::clearRecents,
             onAddFolder = { folderPicker.launch(null) },
             onRemoveFolder = library::removeFolder,
@@ -291,6 +295,26 @@ class MainActivity : ComponentActivity() {
             onDispose { unbind?.invoke() }
         }
         VoiceAssistantSheet(voice, session, onDismiss = onDismiss)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        preferHighestRefreshRate()
+    }
+
+    /**
+     * Asks for the fastest display mode at the current resolution. Many phones (Xiaomi, Samsung) keep
+     * apps at 60 Hz unless the window asks; this lets scrolling, paging and video run at 90/120/144 Hz.
+     */
+    private fun preferHighestRefreshRate() {
+        val display = display ?: return
+        val current = display.mode
+        val fastest = display.supportedModes
+            .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
+            .maxByOrNull { it.refreshRate } ?: return
+        if (window.attributes.preferredDisplayModeId != fastest.modeId) {
+            window.attributes = window.attributes.apply { preferredDisplayModeId = fastest.modeId }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

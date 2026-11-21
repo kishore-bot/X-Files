@@ -25,6 +25,8 @@ navigation3 = "1.2.2"
 mlkit-text = "16.0.1"
 core-ktx = "1.19.1"
 camerax = "1.7.0"
+# Glance pulls WorkManager 2.7.1, whose keep rules break under R8 full mode; 2.8+ fixed it.
+work = "2.12.0"
 exifinterface = "1.4.2"
 glance = "1.2.0"
 # Baseline Profile generation and startup benchmarks (:baselineprofile). The plugin shares the benchmark release train.
@@ -38,6 +40,7 @@ crashlytics-plugin = "3.0.8"
 firebase-bom = "35.1.0"
 
 [libraries]
+work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
 androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "annotation" }
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }

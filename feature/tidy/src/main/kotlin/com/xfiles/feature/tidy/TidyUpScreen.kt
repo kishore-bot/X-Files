@@ -1,5 +1,6 @@
 package com.xfiles.feature.tidy
 
+import androidx.compose.animation.CapturedAnimatedVisibility
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
@@ -77,7 +78,7 @@ fun TidyUpScreen(viewModel: TidyViewModel, onBack: () -> Unit, onOpen: (TidyFile
             Text("Tidy up", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
             if (state.report != null && state.progress == null) IconButton(onClick = viewModel::scan) { Icon(TidyIcons.Refresh, "Scan again") }
         }
-        AnimatedVisibility(state.progress != null) {
+        CapturedAnimatedVisibility(state.progress != null) {
             state.progress?.let { progress ->
                 Column(Modifier.fillMaxWidth().glassCard().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(progress.label, style = MaterialTheme.typography.bodyMedium)

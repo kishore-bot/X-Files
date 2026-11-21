@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.animation.CapturedAnimatedVisibility
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -57,7 +58,7 @@ internal fun SensitiveFileHint(documentKey: String?, findings: SensitiveFindings
         }
     }
     SecureWindow(secure) // Stays on while this file is open, after the hint has gone.
-    AnimatedVisibility(
+    CapturedAnimatedVisibility(
         visible = !dismissed && findings?.any == true,
         enter = slideInVertically { -it / 2 } + fadeIn(),
         exit = slideOutVertically { -it / 2 } + fadeOut(),

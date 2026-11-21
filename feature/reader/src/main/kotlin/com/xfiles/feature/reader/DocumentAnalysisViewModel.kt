@@ -313,18 +313,21 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     fun showSummary() {
         val ready = state.value as? ReaderState.Ready ?: return
-        val text = when (val preview = ready.preview) {
+        val shown = when (val preview = ready.preview) {
             is FilePreview.Text -> preview.content
             is FilePreview.Structured -> preview.document.plainText()
             is FilePreview.Html -> preview.text.content
+            is FilePreview.Pdf -> null // Read below: text layer, or the pages by OCR.
             else -> return
         }
-        if (text.isBlank()) return
+        if (shown != null && shown.isBlank()) return
         if (ready.summary != null) return
         mutableState.value = ready.copy(summary = SummaryState.Loading)
+        val password = pdfPassword
         summaryJob = viewModelScope.launch {
             val result = try {
-                SummaryState.Ready(documents.summary(text))
+                val text = shown ?: documents.extractText(ready.file, 32_000, password)
+                if (text.isBlank()) SummaryState.Error else SummaryState.Ready(documents.summary(text))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -334,7 +337,9 @@ class DocumentAnalysisViewModel @Inject constructor(
                 Log.e("XfilesReader", "Rust analysis library unavailable", error)
                 SummaryState.Error
             }
-            mutableState.value = ready.copy(summary = result)
+            // The page may have turned while the summary was read; keep the current page.
+            val current = mutableState.value as? ReaderState.Ready ?: return@launch
+            if (current.file.uri == ready.file.uri) mutableState.value = current.copy(summary = result)
         }
     }
 

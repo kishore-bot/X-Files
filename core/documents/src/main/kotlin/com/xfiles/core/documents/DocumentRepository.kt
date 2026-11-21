@@ -49,12 +49,14 @@ sealed interface FilePreview {
 }
 
 @Singleton
-class DocumentRepository @Inject constructor(@ApplicationContext context: Context) {
+class DocumentRepository @Inject constructor(
+    @ApplicationContext context: Context,
+    private val pdfs: AndroidPdfDocument,
+) {
     private val resolver = context.contentResolver
     private val preferences = context.getSharedPreferences("library", Context.MODE_PRIVATE)
     private val analyzer = DocumentAnalyzer(resolver)
     private val structured = StructuredDocumentReader(resolver)
-    private val pdfs = AndroidPdfDocument(context)
     private val io = Dispatchers.IO.limitedParallelism(1)
 
     private val mutableRecents = MutableStateFlow<List<FileEntry>>(emptyList())
@@ -168,8 +170,12 @@ class DocumentRepository @Inject constructor(@ApplicationContext context: Contex
         }
     }
 
-    suspend fun extractText(file: FileEntry, limit: Int): String =
-        analyzer.extractText(file.uri, file.name, limit.coerceIn(1, 32_001).toUInt())
+    /** Plain text for Fily, summaries and checks. PDFs read their text layer, or their pages by OCR. */
+    suspend fun extractText(file: FileEntry, limit: Int, password: String? = null): String {
+        val bounded = limit.coerceIn(1, 32_001)
+        return if (file.kind == DocumentKind.Pdf) pdfs.text(file.uri, password, bounded, ocr = true)
+        else analyzer.extractText(file.uri, file.name, bounded.toUInt())
+    }
 
     suspend fun summary(text: String) = analyzer.summarize(text)
 

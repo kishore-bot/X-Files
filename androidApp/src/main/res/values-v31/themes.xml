@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- System splash (Android 12+): app icon, then the SAHAPRAXIS wordmark at the bottom. Drawn by the
+         system before the app's first frame, so it adds nothing to startup time. -->
+    <style name="Theme.Xfiles" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash_brand</item>
+    </style>
+</resources>

@@ -186,6 +186,8 @@ fun ReaderScreen(
             if (ready?.preview is FilePreview.Structured || (text != null && text.content.isNotBlank())) {
                 IconButton(onClick = { showSearch = !showSearch }) { Icon(EzIcons.Search, "Find in file") }
                 IconButton(onClick = onSummary) { Icon(EzIcons.Lightbulb, "At a glance") }
+            } else if (ready?.preview is FilePreview.Pdf && !editingMarkup) {
+                IconButton(onClick = onSummary) { Icon(EzIcons.Lightbulb, "At a glance") }
             }
             if (ready != null && !editingMarkup) IconButton(onClick = onFily) { Icon(EzIcons.Mic, "Voice assistant") }
             if (ready != null && !editingMarkup) {

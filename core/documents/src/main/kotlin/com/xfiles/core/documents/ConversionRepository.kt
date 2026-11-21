@@ -45,7 +45,10 @@ class UnprintableDocument : IllegalArgumentException("Sound and video files can'
  * all page work runs on one IO lane; the Rust engine keeps its own worker threads behind that lane.
  */
 @Singleton
-class ConversionRepository @Inject constructor(@ApplicationContext context: Context) {
+class ConversionRepository @Inject constructor(
+    @ApplicationContext context: Context,
+    private val pdfs: AndroidPdfDocument,
+) {
     private val app = context.applicationContext
     private val resolver = app.contentResolver
     private val analyzer = DocumentAnalyzer(resolver)
@@ -143,8 +146,8 @@ class ConversionRepository @Inject constructor(@ApplicationContext context: Cont
 
     /** The PDF's text through the Rust engine, which also reads PDFs Android's renderer has no text API for. */
     suspend fun pdfToText(file: FileEntry): String = withContext(lane) {
-        analyzer.extractText(file.uri, file.name, (MAX_TEXT + 1).toUInt()).also {
-            require(it.isNotBlank()) { "This PDF has no text layer. It may be a scan; try Picture to text on its pages." }
+        pdfs.text(file.uri, null, MAX_TEXT + 1, ocr = true, ocrPages = 200).also {
+            require(it.isNotBlank()) { "No text could be read from this PDF." }
         }.take(MAX_TEXT)
     }
 

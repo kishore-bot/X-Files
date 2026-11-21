@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.runtime.SideEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -114,7 +115,7 @@ private fun Slideshow(slides: List<PreviewSlide>, start: Int, onSlide: (Int) -> 
     val pager = rememberPagerState(initialPage = start) { slides.size }
     var chrome by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(pager.currentPage) { onSlide(pager.currentPage) }
+    SideEffect(pager.currentPage) { onSlide(pager.currentPage) }
     LaunchedEffect(chrome) {
         if (chrome) {
             delay(2_000)

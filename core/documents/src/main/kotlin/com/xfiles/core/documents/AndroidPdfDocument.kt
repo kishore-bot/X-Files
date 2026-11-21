@@ -16,7 +16,11 @@ import android.os.ext.SdkExtensions
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import android.util.LruCache
 import androidx.annotation.RequiresExtension
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
 import com.xfiles.documents.structure.DocumentError
 import com.xfiles.documents.structure.DocumentException
 import java.io.File
@@ -31,13 +35,160 @@ data class PdfMatchBox(val left: Float, val top: Float, val right: Float, val bo
 data class PdfPageMatches(val page: Int, val matches: List<List<PdfMatchBox>>)
 data class PdfSearchResult(val pages: List<PdfPageMatches>, val truncated: Boolean)
 
-class AndroidPdfDocument(context: Context) {
+/**
+ * Android's PDF renderer, plus PDF text on every supported version: the text layer where Android exposes
+ * it (Android 15, or 12–14 with the PDF module update), otherwise on-device OCR of the rendered pages.
+ * OCR results are cached per file, so a second search or summary is instant.
+ */
+@Singleton
+class AndroidPdfDocument @Inject constructor(
+    @ApplicationContext context: Context,
+    private val recognition: TextRecognitionRepository,
+) {
     private val resolver = context.contentResolver
     private val cache = context.cacheDir
     private val io = Dispatchers.IO.limitedParallelism(1)
+    private val ocrCache = LruCache<String, Array<List<PdfTextLine>?>>(4)
 
-    val canSearch: Boolean
+    /** Every PDF can be searched: through the text layer, or through OCR where there is none. */
+    val canSearch: Boolean get() = true
+
+    private val hasTextLayer: Boolean
         get() = Build.VERSION.SDK_INT >= 35 || supportsPdfExtensions()
+
+    /**
+     * Up to [limit] characters of the PDF's text, pages separated by blank lines. With [ocr], a PDF with no
+     * readable text layer (a scan, or an Android without the text API) is read from its rendered pages,
+     * at most [ocrPages] of them. Without it (library indexing, Tidy) only the cheap text layer is used.
+     */
+    suspend fun text(uri: Uri, password: String?, limit: Int, ocr: Boolean, ocrPages: Int = MAX_OCR_PAGES): String =
+        withContext(io) {
+            val layer = if (hasTextLayer) layerText(uri, password, limit) else ""
+            if (layer.isNotBlank() || !ocr) return@withContext layer.take(limit)
+            val out = StringBuilder()
+            forEachOcrPage(uri, password, ocrPages) { _, lines ->
+                if (lines.isNotEmpty()) {
+                    if (out.isNotEmpty()) out.append("\n\n")
+                    lines.joinTo(out, "\n") { it.text }
+                }
+                out.length < limit
+            }
+            out.take(limit).toString()
+        }
+
+    private suspend fun layerText(uri: Uri, password: String?, limit: Int): String {
+        val out = StringBuilder()
+        fun add(page: String) {
+            if (page.isBlank()) return
+            if (out.isNotEmpty()) out.append("\n\n")
+            out.append(page.trim())
+        }
+        if (Build.VERSION.SDK_INT >= 35) {
+            openRenderer(uri, password).use { pdf ->
+                for (index in 0 until pdf.pageCount) {
+                    currentCoroutineContext().ensureActive()
+                    pdf.openPage(index).use { page -> add(page.textContents.joinToString("\n") { it.text.orEmpty() }) }
+                    if (out.length >= limit) break
+                }
+            }
+        } else if (supportsPdfExtensions()) {
+            val descriptor = openDescriptor(uri)
+            val pdf = try {
+                openOlderRenderer(descriptor)
+            } catch (error: Exception) {
+                descriptor.close()
+                throw error
+            }
+            pdf.use {
+                for (index in 0 until it.pageCount) {
+                    currentCoroutineContext().ensureActive()
+                    add(it.text(index))
+                    if (out.length >= limit) break
+                }
+            }
+        }
+        return out.toString()
+    }
+
+    /**
+     * Calls [page] with each page's OCR lines (from the cache when read before) until it returns false.
+     * Pages are rendered at a size ML Kit reads reliably, one at a time, and recycled straight away.
+     */
+    private suspend fun forEachOcrPage(
+        uri: Uri,
+        password: String?,
+        maxPages: Int,
+        page: suspend (Int, List<PdfTextLine>) -> Boolean,
+    ) {
+        val key = uri.toString()
+        openRenderer(uri, password).use { pdf ->
+            val count = minOf(pdf.pageCount, maxPages)
+            val known = ocrCache[key]?.takeIf { it.size == pdf.pageCount } ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount)
+            ocrCache.put(key, known)
+            for (index in 0 until count) {
+                currentCoroutineContext().ensureActive()
+                val lines = known[index] ?: recognizePage(pdf, index).also { known[index] = it }
+                if (!page(index, lines)) break
+            }
+        }
+    }
+
+    private suspend fun recognizePage(pdf: PdfRenderer, index: Int): List<PdfTextLine> {
+        val bitmap = pdf.openPage(index).use { page ->
+            val scale = OCR_EDGE.toFloat() / maxOf(page.width, page.height).coerceAtLeast(1)
+            Bitmap.createBitmap(
+                (page.width * scale).toInt().coerceAtLeast(1),
+                (page.height * scale).toInt().coerceAtLeast(1),
+                Bitmap.Config.ARGB_8888,
+            ).also {
+                it.eraseColor(Color.WHITE)
+                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            }
+        }
+        return try {
+            val width = bitmap.width.toFloat()
+            val height = bitmap.height.toFloat()
+            recognition.lines(bitmap).map { line ->
+                PdfTextLine(
+                    line.text,
+                    PdfMatchBox(
+                        (line.box.left / width).coerceIn(0f, 1f),
+                        (line.box.top / height).coerceIn(0f, 1f),
+                        (line.box.right / width).coerceIn(0f, 1f),
+                        (line.box.bottom / height).coerceIn(0f, 1f),
+                    ),
+                )
+            }
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    /** Search over OCR lines; a match's box is the matched share of its line. */
+    private suspend fun ocrSearch(uri: Uri, query: String, password: String?): PdfSearchResult {
+        val needle = query.trim()
+        val results = ArrayList<PdfPageMatches>()
+        var remaining = MAX_MATCHES
+        forEachOcrPage(uri, password, MAX_OCR_SEARCH_PAGES) { index, lines ->
+            val hits = lines.flatMap { line ->
+                val length = line.text.length.coerceAtLeast(1)
+                val width = line.box.right - line.box.left
+                generateSequence(line.text.indexOf(needle, ignoreCase = true).takeIf { it >= 0 }) { from ->
+                    line.text.indexOf(needle, from + needle.length, ignoreCase = true).takeIf { it >= 0 }
+                }.map { start ->
+                    val left = line.box.left + width * start / length
+                    val right = line.box.left + width * (start + needle.length).coerceAtMost(length) / length
+                    listOf(PdfMatchBox(left, line.box.top, right, line.box.bottom))
+                }.toList()
+            }
+            if (hits.isNotEmpty()) {
+                results.add(PdfPageMatches(index, hits.take(remaining)))
+                remaining -= hits.size
+            }
+            remaining > 0
+        }
+        return PdfSearchResult(results, truncated = remaining <= 0)
+    }
 
     suspend fun render(uri: Uri, index: Int, password: String?): FilePreview.Pdf = withContext(io) {
         openRenderer(uri, password).use { pdf ->
@@ -77,8 +228,10 @@ class AndroidPdfDocument(context: Context) {
                 }
                 renderer.use { pdf -> scan(pdf.pageCount) { pdf.search(it, query) } }
             }
-            else -> PdfSearchResult(emptyList(), truncated = false)
-        }
+            else -> null
+        }?.takeIf { it.pages.isNotEmpty() }
+            // No text API, or a scanned PDF with no text layer: read the pages instead.
+            ?: ocrSearch(uri, query, password)
     }
 
     private suspend fun scan(count: Int, page: (Int) -> List<List<PdfMatchBox>>): PdfSearchResult {
@@ -164,8 +317,13 @@ class AndroidPdfDocument(context: Context) {
         const val MAX_SEARCH_PAGES = 1_500
         const val MAX_MATCHES = 1_000
         const val MAX_PROVIDER_BYTES = 128L * 1024 * 1024
+        const val OCR_EDGE = 1800
+        const val MAX_OCR_PAGES = 40
+        const val MAX_OCR_SEARCH_PAGES = 80
     }
 }
+
+data class PdfTextLine(val text: String, val box: PdfMatchBox)
 
 private const val PDF_EXTENSION_VERSION = 13
 
@@ -180,6 +338,9 @@ private class ExtensionPdfText(descriptor: ParcelFileDescriptor) : AutoCloseable
 
     fun search(index: Int, query: String): List<List<PdfMatchBox>> =
         renderer.openPage(index).use { page -> page.searchText(query).toNormalizedMatches(page.width, page.height) }
+
+    fun text(index: Int): String =
+        renderer.openPage(index).use { page -> page.textContents.joinToString("\n") { it.text.orEmpty() } }
 
     override fun close() = renderer.close()
 }

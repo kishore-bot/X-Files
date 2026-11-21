@@ -29,8 +29,11 @@ data class LibraryContentSearch(
 )
 
 @Singleton
-class LibrarySearchRepository @Inject constructor(@ApplicationContext context: Context) {
-    private val indexPath = File(context.noBackupFilesDir, "library-index").absolutePath
+class LibrarySearchRepository @Inject constructor(
+    @ApplicationContext context: Context,
+    private val pdfs: AndroidPdfDocument,
+) {
+    private val indexPath = File(context.noBackupFilesDir, "library-index-2").absolutePath
     private val analyzer = DocumentAnalyzer(context.contentResolver)
     private val indexing = Dispatchers.IO.limitedParallelism(1)
     private val lock = Mutex()
@@ -65,7 +68,9 @@ class LibrarySearchRepository @Inject constructor(@ApplicationContext context: C
                         if (!index.hasRoom()) break
                         val file = candidates[position]
                         val text = try {
-                            analyzer.extractText(file.uri, file.name, 64_000u)
+                            // PDFs: the text layer only; OCR across a whole library would be far too slow.
+                            if (file.kind == DocumentKind.Pdf) pdfs.text(file.uri, null, 64_000, ocr = false)
+                            else analyzer.extractText(file.uri, file.name, 64_000u)
                         } catch (error: CancellationException) {
                             throw error
                         } catch (_: Exception) {

@@ -1,8 +1,8 @@
 // Generates the app's Baseline Profile and measures startup and reader frames with Macrobenchmark.
 //
-//   ANDROID_SERIAL=<serial> ./gradlew :androidApp:generateReleaseBaselineProfile
+//   ANDROID_SERIAL=<serial> ./gradlew :androidApp:generateProdReleaseBaselineProfile
 //
-// writes androidApp/src/release/generated/baselineProfiles/baseline-prof.txt,
+// writes androidApp/src/prodRelease/generated/baselineProfiles/baseline-prof.txt,
 // which is committed and compiled into release builds (bundle, APKs). Always
 // set ANDROID_SERIAL: without it the tests run on every connected device.
 // On Windows use gradlew.bat. Requires a device or emulator on API 33+ (profile
@@ -10,7 +10,7 @@
 //
 // Startup and reader benchmarks (emulator numbers only compare the two modes):
 //
-//   ANDROID_SERIAL=<serial> ./gradlew :baselineprofile:connectedBenchmarkReleaseAndroidTest
+//   ANDROID_SERIAL=<serial> ./gradlew :baselineprofile:connectedBenchmarkProdReleaseAndroidTest (task names: gradlew :baselineprofile:tasks)
 //
 // Startup journeys are in Journeys.kt; a missing screen fails collection on purpose.
 plugins {
@@ -29,6 +29,8 @@ android {
     defaultConfig {
         // Profile collection without root needs Android 13 (API 33) or newer on the device.
         minSdk = libs.versions.min.sdk.get().toInt()
+        // Measure what users get: the prod app (com.xfiles).
+        missingDimensionStrategy("env", "prod")
         targetSdk = libs.versions.target.sdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
