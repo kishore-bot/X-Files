@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Xfiles logo (document with an X), adapted from docs/brand/EzFiles_Logo_Glass.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:scaleX="0.244" android:scaleY="0.244" android:translateX="15.570" android:translateY="18.254">
+        <path android:pathData="M128 47 H184 Q199 47 208 56 L239 87 Q248 96 248 110 V218 Q248 243 222 243 H128 Q103 243 103 217 V73 Q103 47 128 47Z M120 120 H148 L169 150.1 L190 120 H218 L183 170.1 L222 226 H194 L169 190.2 L144 226 H116 L155 170.1 Z" android:fillColor="#000000" android:fillType="evenOdd" />
+        <path android:pathData="M254 57 Q257 69 267 70 Q257 73 254 84 Q251 73 241 70 Q251 67 254 57Z" android:fillColor="#000000" />
+    </group>
+</vector>

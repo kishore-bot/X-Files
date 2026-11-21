@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picker preview for "Xfiles quick": a static sketch of the widget, not live data. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FFF4F1EC" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+    <item android:left="12dp" android:top="12dp" android:right="12dp" android:bottom="150dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFE6DCC9" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item android:left="12dp" android:top="64dp" android:right="12dp" android:bottom="108dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFEBE5DA" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item android:left="12dp" android:top="116dp" android:right="12dp" android:bottom="60dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFEBE5DA" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</layer-list>

@@ -1,0 +1,51 @@
+[workspace]
+resolver = "3"
+members = ["crates/document-core", "crates/document-parsers", "crates/document-search", "crates/document-tidy", "crates/document-glance", "crates/document-imaging", "crates/document-ffi", "crates/fily-inference"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+
+[workspace.dependencies]
+document-core = { path = "crates/document-core" }
+document-parsers = { path = "crates/document-parsers" }
+document-search = { path = "crates/document-search" }
+document-tidy = { path = "crates/document-tidy" }
+document-glance = { path = "crates/document-glance" }
+document-imaging = { path = "crates/document-imaging" }
+uniffi = "=0.32.0"
+quick-xml = "0.42"
+# Pure-Rust backend (miniz_oxide): no C code in the decompression path.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5"
+# No default features: the HTML renderer is not needed.
+pulldown-cmark = { version = "0.13", default-features = false }
+# RustCrypto primitives for password-protected OOXML. Pure Rust; never hand-rolled.
+aes = { version = "0.8", features = ["zeroize"] }
+cbc = { version = "0.1", default-features = false, features = ["block-padding", "zeroize"] }
+sha1 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+# Reading older password-protected PDFs: their key derivation needs MD5 and RC4.
+md-5 = { version = "0.10", default-features = false }
+rc4 = "0.1"
+# The system's secure random source, for new PDF keys, salts and IVs.
+getrandom = "0.4"
+zeroize = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+# Must stay "unwind": the FFI facade converts panics into typed errors with
+# catch_unwind. With "abort" a parser bug would terminate the host app.
+panic = "unwind"
+
+# The parsers are the hot path: built for speed, the rest for size. Measured
+# with `cargo run --release --example profile` on 2026-11-09: a 60k-row XLSX
+# read 20% faster and a 40k-paragraph DOCX 17% faster than at "s", for about
+# 0.2 MB more native code per ABI.
+[profile.release.package.document-parsers]
+opt-level = 3

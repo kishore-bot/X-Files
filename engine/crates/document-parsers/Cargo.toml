@@ -1,0 +1,22 @@
+[package]
+name = "document-parsers"
+description = "Statically registered format parsers for the EzFiles document engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+document-core.workspace = true
+quick-xml.workspace = true
+flate2.workspace = true
+crc32fast.workspace = true
+pulldown-cmark = { workspace = true, features = ["html"] }
+aes.workspace = true
+cbc.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+md-5.workspace = true
+rc4.workspace = true
+getrandom.workspace = true
+zeroize.workspace = true

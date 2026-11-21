@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark mode launcher background: smoky plum glass with a rose glow, so the glass logo reads on dark home screens. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="91.8" android:endY="108">
+                <item android:color="#ff4a1f3a" android:offset="0" />
+                <item android:color="#ff2a0f22" android:offset="0.45" />
+                <item android:color="#ff7a1240" android:offset="0.8" />
+                <item android:color="#ffb02a63" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="45.4" android:centerY="16.2" android:gradientRadius="97.2">
+                <item android:color="#66FFB3D1" android:offset="0" />
+                <item android:color="#1AFF7AAA" android:offset="0.4" />
+                <item android:color="#00FFFFFF" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

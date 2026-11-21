@@ -1,0 +1,52 @@
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Rust
+engine/target/
+**/*.rs.bk
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.fleet/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local machine config
+local.properties
+
+# Secrets: Firebase config, signing keys, env files
+google-services.json
+GoogleService-Info.plist
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+.env
+.env.*
+
+# Android outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Models / large artifacts (downloaded at runtime, never committed)
+*.gguf
+*.onnx
+*.tflite
+
+# Logs
+*.log
+hs_err_pid*
+replay_pid*
