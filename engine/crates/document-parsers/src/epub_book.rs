@@ -19,10 +19,14 @@ use std::collections::HashMap;
 use document_core::{EngineError, Result};
 
 use crate::dom::{self, Node};
-use crate::ooxml::resolve;
+use crate::ooxml::{percent_decode, resolve};
 use crate::stream::Parts;
 
 pub(crate) const MANIFEST_RESOURCE: &str = "ezfiles:book.json";
+/// The `noteref` link target prefix in block spans: `note:<archive path>#<id>`.
+pub(crate) const NOTE_PREFIX: &str = "note:";
+/// A link to another place in the book, in block spans: `book:<archive path>[#<id>]`.
+pub(crate) const BOOK_LINK_PREFIX: &str = "book:";
 pub(crate) const READER_RESOURCE: &str = "ezfiles:book.html";
 /// Chapter files and everything they use: `ezfiles:book/<path in the archive>`.
 pub(crate) const FILE_PREFIX: &str = "ezfiles:book/";
@@ -31,6 +35,10 @@ pub(crate) const FILE_PREFIX: &str = "ezfiles:book/";
 const MAX_TOC: usize = 5000;
 const MAX_TOC_DEPTH: usize = 6;
 const MAX_TITLE_CHARS: usize = 300;
+/// Footnotes kept, their text clipped, and the bytes of chapters searched for them.
+const MAX_NOTES: usize = 2000;
+const MAX_NOTE_CHARS: usize = 1200;
+const MAX_NOTE_SCAN_BYTES: u64 = 24 * 1024 * 1024;
 
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct Book {
@@ -43,6 +51,8 @@ pub(crate) struct Book {
     pub chapters: Vec<(String, u64)>,
     /// Title, archive path with an optional `#fragment`, and depth from 0.
     pub toc: Vec<(String, String, usize)>,
+    /// `archive path#id` of each footnote or endnote, and its text.
+    pub notes: Vec<(String, String)>,
 }
 
 /// Reads the package file named by `package`, and its table of contents.
@@ -136,7 +146,46 @@ pub(crate) fn read_book(parts: &mut Parts, package: &str) -> Result<Book> {
         let path = href.split('#').next().unwrap_or(href);
         book.chapters.iter().any(|(p, _)| p == path)
     });
+    book.notes = read_notes(parts, &book.chapters, &cancel);
     Ok(book)
+}
+
+/// Footnotes and endnotes anywhere in the book, keyed by `archive path#id`.
+/// Chapters are read one at a time and dropped, within a byte budget.
+fn read_notes(parts: &mut Parts, chapters: &[(String, u64)], cancel: &document_core::CancelToken) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut scanned = 0u64;
+    for (path, size) in chapters {
+        if out.len() >= MAX_NOTES || scanned.saturating_add(*size) > MAX_NOTE_SCAN_BYTES {
+            break;
+        }
+        scanned += size;
+        let Ok(bytes) = parts.file(path) else { continue };
+        let Ok(Some(root)) = dom::parse(&bytes, cancel) else { continue };
+        let mut stack = vec![&root];
+        while let Some(node) = stack.pop() {
+            if out.len() >= MAX_NOTES {
+                break;
+            }
+            if let Some(id) = node.attr("id").filter(|id| !id.is_empty()).filter(|_| is_note(node)) {
+                let text: String = text_of(Some(node)).chars().take(MAX_NOTE_CHARS).collect();
+                if !text.is_empty() {
+                    out.push((format!("{path}#{id}"), text));
+                }
+            }
+            stack.extend(node.children.iter().rev());
+        }
+    }
+    out
+}
+
+/// An element that holds a note: `aside`, or one marked as a footnote in EPUB 3 or ARIA terms.
+fn is_note(node: &Node) -> bool {
+    node.name() == "aside"
+        || node.attr("type").is_some_and(|t| {
+            t.split_whitespace().any(|t| matches!(t, "footnote" | "endnote" | "rearnote" | "note"))
+        })
+        || node.attr("role").is_some_and(|r| r.split_whitespace().any(|r| matches!(r, "doc-footnote" | "doc-endnote" | "doc-note")))
 }
 
 /// The `<nav epub:type="toc">`, or the first `<nav>` if none says so.
@@ -194,11 +243,11 @@ fn ncx_points(parent: &Node, dir: &str, depth: usize, out: &mut Vec<(String, Str
     }
 }
 
-/// An archive path with its fragment kept as written.
+/// An archive path with its fragment decoded, to match the anchors the parser records.
 fn resolve_href(dir: &str, href: &str) -> String {
     match href.split_once('#') {
-        Some(("", fragment)) => format!("#{fragment}"),
-        Some((path, fragment)) => format!("{}#{fragment}", resolve(dir, path)),
+        Some(("", fragment)) => format!("#{}", percent_decode(fragment)),
+        Some((path, fragment)) => format!("{}#{}", resolve(dir, path), percent_decode(fragment)),
         None => resolve(dir, href),
     }
 }
@@ -223,9 +272,14 @@ fn clip(text: &str) -> String {
     text.chars().take(MAX_TITLE_CHARS).collect()
 }
 
-/// The book as JSON for the app and the reader page.
-pub(crate) fn manifest_json(book: &Book) -> String {
-    let mut out = String::with_capacity(256 + book.chapters.len() * 64 + book.toc.len() * 96);
+/// The book as JSON for the app and the reader page. `starts` gives the
+/// first block of each chapter that has been streamed, by archive path;
+/// a chapter not streamed yet has `"block":-1`.
+/// `anchors` maps `archive path#id` to the block the id starts in; it is written sorted by block.
+pub(crate) fn manifest_json(book: &Book, starts: &[(String, usize)], anchors: &HashMap<String, usize>) -> String {
+    let mut out = String::with_capacity(
+        256 + book.chapters.len() * 64 + book.toc.len() * 96 + anchors.len() * 64 + book.notes.len() * 128,
+    );
     out.push_str("{\"title\":");
     json_string(&book.title, &mut out);
     out.push_str(",\"author\":");
@@ -239,7 +293,8 @@ pub(crate) fn manifest_json(book: &Book) -> String {
         }
         out.push_str("{\"href\":");
         json_string(path, &mut out);
-        out.push_str(&format!(",\"size\":{size}}}"));
+        let block = starts.iter().find(|(p, _)| p == path).map_or(-1, |(_, b)| *b as i64);
+        out.push_str(&format!(",\"size\":{size},\"block\":{block}}}"));
     }
     out.push_str("],\"toc\":[");
     for (i, (title, href, depth)) in book.toc.iter().enumerate() {
@@ -252,7 +307,26 @@ pub(crate) fn manifest_json(book: &Book) -> String {
         json_string(href, &mut out);
         out.push_str(&format!(",\"depth\":{depth}}}"));
     }
-    out.push_str("]}");
+    out.push_str("],\"anchors\":{");
+    let mut sorted: Vec<(&String, &usize)> = anchors.iter().collect();
+    sorted.sort_by(|a, b| a.1.cmp(b.1).then_with(|| a.0.cmp(b.0)));
+    for (i, (key, block)) in sorted.into_iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        json_string(key, &mut out);
+        out.push_str(&format!(":{block}"));
+    }
+    out.push_str("},\"notes\":{");
+    for (i, (key, text)) in book.notes.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        json_string(key, &mut out);
+        out.push(':');
+        json_string(text, &mut out);
+    }
+    out.push_str("}}");
     out
 }
 
@@ -279,7 +353,7 @@ fn json_string(text: &str, out: &mut String) {
 pub(crate) fn reader_page(book: &Book) -> String {
     let lang =
         if book.language.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { book.language.as_str() } else { "" };
-    READER_HTML.replace("__EZLANG__", lang).replace("__EZBOOK__", &manifest_json(book))
+    READER_HTML.replace("__EZLANG__", lang).replace("__EZBOOK__", &manifest_json(book, &[], &HashMap::new()))
 }
 
 const READER_HTML: &str = r#"<!doctype html>
@@ -1084,5 +1158,6 @@ mod tests {
         assert_eq!(resolve_href("OEBPS/text", "ch1.xhtml#s2"), "OEBPS/text/ch1.xhtml#s2");
         assert_eq!(resolve_href("OEBPS", "../ch1.xhtml"), "ch1.xhtml");
         assert_eq!(resolve_href("OEBPS", "ch%201.xhtml"), "OEBPS/ch 1.xhtml");
+        assert_eq!(resolve_href("OEBPS", "ch1.xhtml#a%20b"), "OEBPS/ch1.xhtml#a b");
     }
 }

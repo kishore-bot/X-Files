@@ -31,11 +31,17 @@ pub(crate) struct ZipEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
-    compressed_size: u64,
-    method: u16,
-    encrypted: bool,
-    crc32: u32,
-    header_offset: u64,
+    pub(crate) compressed_size: u64,
+    /// The real compression method; for WinZip AES entries, the method inside the AES extra field.
+    pub(crate) method: u16,
+    pub(crate) encrypted: bool,
+    pub(crate) crc32: u32,
+    pub(crate) flags: u16,
+    /// WinZip AES strength (1 = 128-bit, 2 = 192-bit, 3 = 256-bit); 0 for other schemes.
+    pub(crate) aes_strength: u8,
+    pub(crate) header_offset: u64,
+    /// MS-DOS last-modified time (low 16 bits) and date (high 16 bits), as stored.
+    pub(crate) modified_dos: u32,
 }
 
 pub(crate) struct ZipArchive {
@@ -156,6 +162,33 @@ impl ZipArchive {
         };
         self.decompressed = charged;
         result
+    }
+
+    /// Hands out the raw archive reader positioned at an entry's data, for the
+    /// decryption layer. It must come back through [`ZipArchive::restore_reader`].
+    pub(crate) fn take_raw(&mut self, name: &str) -> Result<(ZipEntry, Box<dyn ReadSeek>)> {
+        let entry = self.find(name).cloned().ok_or_else(|| missing(name))?;
+        let mut reader = self.reader.take().expect("an entry is already being read");
+        let start = match local_data_start(&mut reader, &entry) {
+            Ok(start) => start,
+            Err(e) => {
+                self.reader = Some(reader);
+                return Err(e);
+            }
+        };
+        if start + entry.compressed_size > self.central_offset {
+            self.reader = Some(reader);
+            return Err(malformed(format!("entry {} overlaps the central directory", entry.name)));
+        }
+        if let Err(e) = reader.seek(SeekFrom::Start(start)) {
+            self.reader = Some(reader);
+            return Err(e.into());
+        }
+        Ok((entry, reader))
+    }
+
+    pub(crate) fn restore_reader(&mut self, reader: Box<dyn ReadSeek>) {
+        self.reader = Some(reader);
     }
 
     /// Starts decompressing an entry. Until it is handed back with
@@ -310,6 +343,13 @@ fn parse_central_directory(dir: &[u8], expected: usize, cd_offset: u64) -> Resul
         if u64::from(header_offset) >= cd_offset {
             return Err(malformed(format!("entry {name} points outside the archive")));
         }
+        let extra = dir
+            .get(pos + 46 + name_len..pos + 46 + name_len + extra_len)
+            .ok_or_else(|| malformed("the ZIP central directory is truncated"))?;
+        let (method, aes_strength) = match aes_extra(extra) {
+            Some((strength, actual)) => (actual, strength),
+            None => (method, 0),
+        };
         entries.push(ZipEntry {
             is_dir: name.ends_with('/'),
             name: name.trim_start_matches('/').to_owned(),
@@ -318,11 +358,28 @@ fn parse_central_directory(dir: &[u8], expected: usize, cd_offset: u64) -> Resul
             method,
             encrypted: flags & 1 != 0,
             crc32,
+            flags,
+            aes_strength,
             header_offset: header_offset.into(),
+            modified_dos: (u32::from(le16(&header[14..])) << 16) | u32::from(le16(&header[12..])),
         });
         pos += 46 + name_len + extra_len + comment_len;
     }
     Ok(entries)
+}
+
+/// WinZip AES extra field (id 0x9901): returns the strength and the real compression method.
+fn aes_extra(mut extra: &[u8]) -> Option<(u8, u16)> {
+    while extra.len() >= 4 {
+        let id = le16(extra);
+        let size = le16(&extra[2..]) as usize;
+        let body = extra.get(4..4 + size)?;
+        if id == 0x9901 && size >= 7 && &body[2..4] == b"AE" {
+            return Some((body[4], le16(&body[5..])));
+        }
+        extra = &extra[4 + size..];
+    }
+    None
 }
 
 fn local_data_start(reader: &mut Box<dyn ReadSeek>, entry: &ZipEntry) -> Result<u64> {
@@ -353,7 +410,7 @@ fn missing(name: &str) -> EngineError {
 }
 
 /// Carries a typed engine error through `std::io::Read`.
-fn engine_io(err: EngineError) -> io::Error {
+pub(crate) fn engine_io(err: EngineError) -> io::Error {
     io::Error::other(err)
 }
 

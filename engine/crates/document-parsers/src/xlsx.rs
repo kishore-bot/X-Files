@@ -326,6 +326,7 @@ impl BlockSource for XlsxSource {
                                 header: false,
                                 cells,
                                 styles: looks,
+                                cell_spans: Vec::new(),
                             });
                         }
                         for (column, spans) in std::mem::take(&mut self.row.runs) {
@@ -867,7 +868,7 @@ mod tests {
             .into_iter()
             .filter_map(|b| match b {
                 Block::TableRow { row, header, cells, .. } => {
-                    Some(Block::TableRow { row, header, cells, styles: Vec::new() })
+                    Some(Block::TableRow { row, header, cells, styles: Vec::new(), cell_spans: Vec::new() })
                 }
                 _ => None,
             })

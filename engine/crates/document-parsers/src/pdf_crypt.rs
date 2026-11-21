@@ -73,6 +73,45 @@ impl Method {
     }
 }
 
+/// The standard security handler algorithms this module can read and write.
+/// `Rc4*` are weak and are written only when a file already uses them and the
+/// user chose "same as original".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CryptAlgorithm {
+    /// RC4, 40-bit key (V 1, R 2).
+    Rc4Bits40,
+    /// RC4, 128-bit key (V 2, R 3).
+    Rc4Bits128,
+    /// AESV2: AES-128 CBC per object (V 4, R 4).
+    AesBits128,
+    /// AESV3: AES-256 CBC with the file key (V 5, R 6). New protection uses this.
+    AesBits256,
+}
+
+impl CryptAlgorithm {
+    pub fn is_weak(self) -> bool {
+        matches!(self, Self::Rc4Bits40 | Self::Rc4Bits128)
+    }
+
+    /// The lowest header version that can carry this algorithm.
+    pub fn min_version(self) -> (u8, u8) {
+        match self {
+            Self::Rc4Bits40 | Self::Rc4Bits128 => (1, 4),
+            Self::AesBits128 => (1, 6),
+            Self::AesBits256 => (2, 0),
+        }
+    }
+
+    /// Length of the file key in bytes.
+    fn key_len(self) -> usize {
+        match self {
+            Self::Rc4Bits40 => 5,
+            Self::Rc4Bits128 | Self::AesBits128 => 16,
+            Self::AesBits256 => 32,
+        }
+    }
+}
+
 /// The document's limits for someone without the owner password.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Permissions {
@@ -81,6 +120,11 @@ pub(crate) struct Permissions {
 }
 
 impl Permissions {
+    /// The `/P` bits exactly as stored.
+    pub(crate) fn bits(self) -> u32 {
+        self.bits
+    }
+
     /// Page assembly: bit 11 on revision 3 and later, and always under bit 4.
     pub(crate) fn may_assemble(self) -> bool {
         self.bits & MODIFY != 0 || (self.revision >= 3 && self.bits & ASSEMBLE != 0)
@@ -128,6 +172,7 @@ pub(crate) struct Decryptor {
     encrypt_metadata: bool,
     /// The encryption dictionary itself is never encrypted.
     encrypt_object: Option<u32>,
+    algorithm: CryptAlgorithm,
     pub(crate) is_owner: bool,
     pub(crate) permissions: Permissions,
 }
@@ -169,9 +214,17 @@ impl Decryptor {
         let permissions = Permissions { bits, revision };
         let password = password.filter(|p| !p.is_empty());
 
+        let mut algorithm = CryptAlgorithm::AesBits256;
         let unlocked = match (version, revision) {
             (1, 2) | (2, 3) | (4, 4) => {
                 let length = legacy_key_length(dict, version)?;
+                algorithm = if version == 4 && streams == Method::AesV2 {
+                    CryptAlgorithm::AesBits128
+                } else if length == 5 {
+                    CryptAlgorithm::Rc4Bits40
+                } else {
+                    CryptAlgorithm::Rc4Bits128
+                };
                 let header = LegacyHeader {
                     o: bytes_entry(dict, "O").filter(|o| o.len() >= 32).ok_or_else(damaged)?,
                     u: bytes_entry(dict, "U")
@@ -203,25 +256,19 @@ impl Decryptor {
             named,
             encrypt_metadata,
             encrypt_object,
+            algorithm,
             is_owner,
             permissions,
         })
     }
 
-    /// The per-object key of Algorithm 1; AES-256 uses the file key directly.
-    fn object_key(&self, method: Method, number: u32, generation: u16) -> Zeroizing<Vec<u8>> {
-        if method == Method::AesV3 {
-            return self.key.clone();
-        }
-        let mut hash = Md5::new();
-        hash.update(&*self.key);
-        hash.update(&number.to_le_bytes()[..3]);
-        hash.update(generation.to_le_bytes());
-        if method == Method::AesV2 {
-            hash.update(b"sAlT");
-        }
-        let digest = hash.finalize();
-        Zeroizing::new(digest[..(self.key.len() + 5).min(16)].to_vec())
+    /// The algorithm the file was written with; a writer keeps it when asked to.
+    pub(crate) fn algorithm(&self) -> CryptAlgorithm {
+        self.algorithm
+    }
+
+    pub(crate) fn metadata_encrypted(&self) -> bool {
+        self.encrypt_metadata
     }
 
     fn decrypt(&self, method: Method, number: u32, generation: u16, data: &[u8]) -> Result<Vec<u8>> {
@@ -229,10 +276,12 @@ impl Decryptor {
             Method::Identity => Ok(data.to_vec()),
             Method::Rc4 => {
                 let mut out = data.to_vec();
-                rc4(&self.object_key(method, number, generation), &mut out)?;
+                rc4(&object_key(&self.key, method, number, generation), &mut out)?;
                 Ok(out)
             }
-            Method::AesV2 | Method::AesV3 => aes_decrypt_data(&self.object_key(method, number, generation), data),
+            Method::AesV2 | Method::AesV3 => {
+                aes_decrypt_data(&object_key(&self.key, method, number, generation), data)
+            }
         }
     }
 
@@ -410,8 +459,9 @@ fn legacy_user_matches(header: &LegacyHeader<'_>, key: &[u8]) -> Result<bool> {
 fn legacy_user_from_owner(header: &LegacyHeader<'_>, owner: &[u8]) -> Result<Zeroizing<[u8; 32]>> {
     let mut digest: [u8; 16] = Md5::digest(*pad_password(owner)).into();
     if header.revision >= 3 {
+        // Algorithm 3 hashes the first `n` bytes each time, not the whole digest.
         for _ in 0..50 {
-            digest = Md5::digest(digest).into();
+            digest = Md5::digest(&digest[..header.length]).into();
         }
     }
     let key = Zeroizing::new(digest[..header.length].to_vec());
@@ -545,31 +595,74 @@ fn unlock_r6(
     Ok(Some((key, is_owner)))
 }
 
-/// Writes revision 6 output: one random file key behind one password, which
-/// serves as both user and owner password, with nothing restricted.
+/// What a new encryption dictionary is written with.
+pub(crate) struct EncryptSpec<'a> {
+    pub(crate) algorithm: CryptAlgorithm,
+    /// Opens the file. Empty opens it for anyone (only the owner limits apply).
+    pub(crate) user: &'a [u8],
+    /// Lifts the owner limits. Empty means the user password.
+    pub(crate) owner: &'a [u8],
+    /// The `/P` bits, as stored.
+    pub(crate) permissions: u32,
+    pub(crate) encrypt_metadata: bool,
+    /// The trailer's first `/ID` string. Revisions 2 to 4 derive the key from it.
+    pub(crate) file_id: &'a [u8],
+}
+
+/// Writes a new encryption dictionary and the key it is sealed with. Every object
+/// written through it is encrypted per the algorithm: AES-256 with the file key,
+/// or AES-128 and RC4 with the per-object key (Algorithm 1).
 pub(crate) struct Encryptor {
-    key: Zeroizing<[u8; 32]>,
+    key: Zeroizing<Vec<u8>>,
+    method: Method,
+    encrypt_metadata: bool,
+    algorithm: CryptAlgorithm,
     dict: Dict,
 }
 
+/// `/P` as the signed decimal the dictionary stores.
+fn permission_text(bits: u32) -> String {
+    (bits as i32).to_string()
+}
+
 impl Encryptor {
+    /// AES-256, one password for both roles, with nothing restricted.
     pub(crate) fn new(password: &str) -> Result<Self> {
-        let password = password.as_bytes();
-        let mut key = Zeroizing::new([0u8; 32]);
-        secure_random(&mut *key)?;
+        Self::with_spec(&EncryptSpec {
+            algorithm: CryptAlgorithm::AesBits256,
+            user: password.as_bytes(),
+            owner: password.as_bytes(),
+            permissions: ALL_ALLOWED,
+            encrypt_metadata: true,
+            file_id: &[],
+        })
+    }
+
+    pub(crate) fn with_spec(spec: &EncryptSpec<'_>) -> Result<Self> {
+        let owner = if spec.owner.is_empty() { spec.user } else { spec.owner };
+        match spec.algorithm {
+            CryptAlgorithm::AesBits256 => Self::new_r6(spec, owner),
+            _ => Self::new_legacy(spec, owner),
+        }
+    }
+
+    /// Revision 6: a random file key, wrapped under the user and owner passwords (Algorithms 8 and 9).
+    fn new_r6(spec: &EncryptSpec<'_>, owner: &[u8]) -> Result<Self> {
+        let mut key = Zeroizing::new(vec![0u8; 32]);
+        secure_random(&mut key[..])?;
 
         let mut salts = [0u8; 32];
         secure_random(&mut salts)?;
-        let (u, ue) = seal_r6(password, &salts[0..8], &salts[8..16], b"", &key)?;
-        let (o, oe) = seal_r6(password, &salts[16..24], &salts[24..32], &u, &key)?;
+        let (u, ue) = seal_r6(spec.user, &salts[0..8], &salts[8..16], b"", &key)?;
+        let (o, oe) = seal_r6(owner, &salts[16..24], &salts[24..32], &u, &key)?;
 
         let mut perms = [0u8; AES_BLOCK];
-        perms[..4].copy_from_slice(&ALL_ALLOWED.to_le_bytes());
+        perms[..4].copy_from_slice(&spec.permissions.to_le_bytes());
         perms[4..8].copy_from_slice(&[0xFF; 4]);
-        perms[8] = b'T';
+        perms[8] = if spec.encrypt_metadata { b'T' } else { b'F' };
         perms[9..12].copy_from_slice(b"adb");
         secure_random(&mut perms[12..16])?;
-        aes256_cbc_no_iv_encrypt(&*key, &mut perms)?;
+        aes256_cbc_no_iv_encrypt(&key, &mut perms)?;
 
         let filter =
             Dict::of(vec![("CFM", Obj::name("AESV3")), ("AuthEvent", Obj::name("DocOpen")), ("Length", Obj::int(32))]);
@@ -578,52 +671,144 @@ impl Encryptor {
             ("V", Obj::int(5)),
             ("R", Obj::int(6)),
             ("Length", Obj::int(256)),
-            ("P", Obj::Num(i64::from(ALL_ALLOWED as i32).to_string())),
+            ("P", Obj::Num(permission_text(spec.permissions))),
             ("O", Obj::Str(o)),
             ("U", Obj::Str(u)),
             ("OE", Obj::Str(oe)),
             ("UE", Obj::Str(ue)),
             ("Perms", Obj::Str(perms.to_vec())),
-            ("EncryptMetadata", Obj::Bool(true)),
+            ("EncryptMetadata", Obj::Bool(spec.encrypt_metadata)),
             ("CF", Obj::Dict(Dict::of(vec![("StdCF", Obj::Dict(filter))]))),
             ("StmF", Obj::name("StdCF")),
             ("StrF", Obj::name("StdCF")),
         ]);
-        Ok(Self { key, dict })
+        Ok(Self {
+            key,
+            method: Method::AesV3,
+            encrypt_metadata: spec.encrypt_metadata,
+            algorithm: CryptAlgorithm::AesBits256,
+            dict,
+        })
+    }
+
+    /// Revisions 2 to 4: Algorithms 2 to 5 of ISO 32000-1, with the file key
+    /// derived from the user password, the owner entry, `/P` and the file ID.
+    fn new_legacy(spec: &EncryptSpec<'_>, owner: &[u8]) -> Result<Self> {
+        let (version, revision, method) = match spec.algorithm {
+            CryptAlgorithm::Rc4Bits40 => (1i64, 2i64, Method::Rc4),
+            CryptAlgorithm::Rc4Bits128 => (2, 3, Method::Rc4),
+            CryptAlgorithm::AesBits128 => (4, 4, Method::AesV2),
+            CryptAlgorithm::AesBits256 => return Err(internal()),
+        };
+        let length = spec.algorithm.key_len();
+        // Only revision 4 has the metadata flag; earlier files always encrypt it.
+        let encrypt_metadata = version != 4 || spec.encrypt_metadata;
+
+        // Algorithm 3: the owner entry, the padded user password under the owner's key.
+        let mut digest: [u8; 16] = Md5::digest(*pad_password(owner)).into();
+        if revision >= 3 {
+            for _ in 0..50 {
+                digest = Md5::digest(&digest[..length]).into();
+            }
+        }
+        let owner_key = digest[..length].to_vec();
+        digest.zeroize();
+        let mut o = *pad_password(spec.user);
+        rc4_rounds(&owner_key, &mut o, revision)?;
+
+        // Algorithm 2: the file key.
+        let header = LegacyHeader {
+            o: &o[..],
+            u: &[],
+            bits: spec.permissions,
+            id0: spec.file_id,
+            revision,
+            length,
+            encrypt_metadata,
+        };
+        let key = legacy_file_key(&header, &pad_password(spec.user));
+
+        // Algorithms 4 and 5: the user entry. Its last 16 bytes are arbitrary padding, left zero.
+        let mut u = [0u8; 32];
+        if revision == 2 {
+            u.copy_from_slice(&PAD);
+            rc4(&key, &mut u)?;
+        } else {
+            let mut hash = Md5::new();
+            hash.update(PAD);
+            hash.update(spec.file_id);
+            let mut check: [u8; 16] = hash.finalize().into();
+            rc4_rounds(&key, &mut check, revision)?;
+            u[..16].copy_from_slice(&check);
+        }
+
+        let mut entries: Vec<(&str, Obj)> = vec![
+            ("Filter", Obj::name("Standard")),
+            ("V", Obj::int(version as u64)),
+            ("R", Obj::int(revision as u64)),
+            ("Length", Obj::int(length as u64 * 8)),
+            ("P", Obj::Num(permission_text(spec.permissions))),
+            ("O", Obj::Str(o.to_vec())),
+            ("U", Obj::Str(u.to_vec())),
+        ];
+        if version == 4 {
+            let filter =
+                Dict::of(vec![("CFM", Obj::name("AESV2")), ("AuthEvent", Obj::name("DocOpen")), ("Length", Obj::int(16))]);
+            entries.push(("EncryptMetadata", Obj::Bool(encrypt_metadata)));
+            entries.push(("CF", Obj::Dict(Dict::of(vec![("StdCF", Obj::Dict(filter))]))));
+            entries.push(("StmF", Obj::name("StdCF")));
+            entries.push(("StrF", Obj::name("StdCF")));
+        }
+        Ok(Self {
+            key,
+            method,
+            encrypt_metadata,
+            algorithm: spec.algorithm,
+            dict: Dict::of(entries),
+        })
     }
 
     pub(crate) fn dict(&self) -> &Dict {
         &self.dict
     }
 
-    /// A random IV, then the data in AES-256-CBC with PKCS#7 padding.
-    pub(crate) fn encrypt(&self, plain: &[u8]) -> Result<Vec<u8>> {
-        let padding = AES_BLOCK - plain.len() % AES_BLOCK;
-        let mut out = vec![0u8; AES_BLOCK + plain.len() + padding];
-        let (iv, body) = out.split_at_mut(AES_BLOCK);
-        secure_random(iv)?;
-        body[..plain.len()].copy_from_slice(plain);
-        body[plain.len()..].fill(padding as u8);
-        let len = body.len();
-        cbc::Encryptor::<Aes256>::new_from_slices(&*self.key, iv)
-            .map_err(|_| internal())?
-            .encrypt_padded_mut::<NoPadding>(body, len)
-            .map_err(|_| internal())?;
-        Ok(out)
+    pub(crate) fn algorithm(&self) -> CryptAlgorithm {
+        self.algorithm
     }
 
-    /// Encrypts every string in an object about to be written.
-    pub(crate) fn encrypt_strings(&self, value: &mut Obj) -> Result<()> {
+    /// Whether a stream with this dictionary is encrypted. XMP metadata is left
+    /// in clear when the file says so (`EncryptMetadata false`).
+    pub(crate) fn encrypts_stream(&self, dict: &Dict) -> bool {
+        self.encrypt_metadata || dict.get("Type").and_then(Obj::as_name) != Some(b"Metadata")
+    }
+
+    /// The bytes of object `number` as stored: encrypted with its key, or with the file key for AES-256.
+    pub(crate) fn encrypt(&self, number: u32, generation: u16, plain: &[u8]) -> Result<Vec<u8>> {
+        match self.method {
+            Method::Identity => Ok(plain.to_vec()),
+            Method::Rc4 => {
+                let mut out = plain.to_vec();
+                rc4(&object_key(&self.key, Method::Rc4, number, generation), &mut out)?;
+                Ok(out)
+            }
+            Method::AesV2 | Method::AesV3 => {
+                aes_encrypt_data(&object_key(&self.key, self.method, number, generation), plain)
+            }
+        }
+    }
+
+    /// Encrypts every string in object `number` before it is written.
+    pub(crate) fn encrypt_strings(&self, number: u32, generation: u16, value: &mut Obj) -> Result<()> {
         match value {
-            Obj::Str(bytes) => *bytes = self.encrypt(bytes)?,
+            Obj::Str(bytes) => *bytes = self.encrypt(number, generation, bytes)?,
             Obj::Array(items) => {
                 for item in items {
-                    self.encrypt_strings(item)?;
+                    self.encrypt_strings(number, generation, item)?;
                 }
             }
             Obj::Dict(dict) => {
                 for (_, item) in &mut dict.0 {
-                    self.encrypt_strings(item)?;
+                    self.encrypt_strings(number, generation, item)?;
                 }
             }
             _ => {}
@@ -638,7 +823,7 @@ fn seal_r6(
     validation_salt: &[u8],
     key_salt: &[u8],
     extra: &[u8],
-    key: &[u8; 32],
+    key: &[u8],
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut check = hash_r6(password, validation_salt, extra)?.to_vec();
     check.extend_from_slice(validation_salt);
@@ -646,6 +831,33 @@ fn seal_r6(
     let mut wrapped = key.to_vec();
     aes256_cbc_no_iv_encrypt(&*hash_r6(password, key_salt, extra)?, &mut wrapped)?;
     Ok((check, wrapped))
+}
+
+/// A random IV, then `plain` in CBC with PKCS#7 padding. The key is 16 bytes (AES-128) or 32 (AES-256).
+fn aes_encrypt_data(key: &[u8], plain: &[u8]) -> Result<Vec<u8>> {
+    let padding = AES_BLOCK - plain.len() % AES_BLOCK;
+    let mut out = vec![0u8; AES_BLOCK + plain.len() + padding];
+    let (iv, body) = out.split_at_mut(AES_BLOCK);
+    secure_random(iv)?;
+    body[..plain.len()].copy_from_slice(plain);
+    body[plain.len()..].fill(padding as u8);
+    let len = body.len();
+    match key.len() {
+        16 => {
+            cbc::Encryptor::<Aes128>::new_from_slices(key, iv)
+                .map_err(|_| internal())?
+                .encrypt_padded_mut::<NoPadding>(body, len)
+                .map_err(|_| internal())?;
+        }
+        32 => {
+            cbc::Encryptor::<Aes256>::new_from_slices(key, iv)
+                .map_err(|_| internal())?
+                .encrypt_padded_mut::<NoPadding>(body, len)
+                .map_err(|_| internal())?;
+        }
+        _ => return Err(internal()),
+    }
+    Ok(out)
 }
 
 /// IV first; damaged padding or a stray partial block is kept rather than
@@ -682,6 +894,36 @@ fn aes_decrypt_data(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
         }
     }
     Ok(out)
+}
+
+/// The per-object key of Algorithm 1 (AES-256 uses the file key directly).
+/// Shared by the reader and the writer.
+fn object_key(key: &[u8], method: Method, number: u32, generation: u16) -> Zeroizing<Vec<u8>> {
+    if method == Method::AesV3 {
+        return Zeroizing::new(key.to_vec());
+    }
+    let mut hash = Md5::new();
+    hash.update(key);
+    hash.update(&number.to_le_bytes()[..3]);
+    hash.update(generation.to_le_bytes());
+    if method == Method::AesV2 {
+        hash.update(b"sAlT");
+    }
+    let digest = hash.finalize();
+    Zeroizing::new(digest[..(key.len() + 5).min(16)].to_vec())
+}
+
+/// RC4 with `key`, then for revision 3 and later 19 more passes with the key
+/// XORed with 1..=19 (Algorithms 3 and 5).
+fn rc4_rounds(key: &[u8], data: &mut [u8], revision: i64) -> Result<()> {
+    rc4(key, data)?;
+    if revision >= 3 {
+        for round in 1..=19u8 {
+            let round_key: Zeroizing<Vec<u8>> = Zeroizing::new(key.iter().map(|b| b ^ round).collect());
+            rc4(&round_key, data)?;
+        }
+    }
+    Ok(())
 }
 
 /// RC4, for reading old files only. The crate fixes the key size in a type.
@@ -743,13 +985,102 @@ mod tests {
     #[test]
     fn aes_output_differs_each_time_and_round_trips() {
         let encryptor = Encryptor::new("pw").unwrap();
-        let first = encryptor.encrypt(b"hello world").unwrap();
-        let second = encryptor.encrypt(b"hello world").unwrap();
+        let first = encryptor.encrypt(1, 0, b"hello world").unwrap();
+        let second = encryptor.encrypt(1, 0, b"hello world").unwrap();
         assert_ne!(first, second);
         assert_eq!(first.len(), 32);
-        assert_eq!(aes_decrypt_data(&*encryptor.key, &first).unwrap(), b"hello world");
+        assert_eq!(aes_decrypt_data(&encryptor.key, &first).unwrap(), b"hello world");
         // A whole block of plaintext still gets a padding block.
-        assert_eq!(encryptor.encrypt(&[7u8; 16]).unwrap().len(), 48);
+        assert_eq!(encryptor.encrypt(1, 0, &[7u8; 16]).unwrap().len(), 48);
+    }
+
+    /// Writes with `algorithm`, then reads back as the user and as the owner.
+    fn round_trip(algorithm: CryptAlgorithm, user: &str, owner: &str, bits: u32) {
+        let file_id = [0x5Au8; 16];
+        let writer = Encryptor::with_spec(&EncryptSpec {
+            algorithm,
+            user: user.as_bytes(),
+            owner: owner.as_bytes(),
+            permissions: bits,
+            encrypt_metadata: true,
+            file_id: &file_id,
+        })
+        .unwrap();
+        let dict = writer.dict().clone();
+        assert!(writer.algorithm() == algorithm);
+
+        let as_user = Decryptor::unlock(&dict, &file_id, Some(9), Some(user)).unwrap();
+        assert!(!as_user.is_owner, "{algorithm:?} opened as owner by user password");
+        assert_eq!(as_user.algorithm(), algorithm);
+        assert_eq!(as_user.permissions.bits(), bits);
+
+        let as_owner = Decryptor::unlock(&dict, &file_id, Some(9), Some(owner)).unwrap();
+        assert!(as_owner.is_owner, "{algorithm:?} owner password not recognised");
+
+        let mut text = Obj::Str(b"Title (x)".to_vec());
+        writer.encrypt_strings(4, 0, &mut text).unwrap();
+        as_user.decrypt_strings(4, 0, &mut text).unwrap();
+        assert_eq!(text, Obj::Str(b"Title (x)".to_vec()));
+
+        let plain = b"BT /F1 12 Tf (hello) Tj ET".repeat(20);
+        let stored = writer.encrypt(7, 0, &plain).unwrap();
+        assert_eq!(as_owner.decrypt(writer.method, 7, 0, &stored).unwrap(), plain);
+    }
+
+    #[test]
+    fn every_writable_algorithm_round_trips_for_user_and_owner() {
+        let print_only = PRINT | COPY | ANNOTATE;
+        round_trip(CryptAlgorithm::Rc4Bits40, "", "owner-x", print_only);
+        round_trip(CryptAlgorithm::Rc4Bits128, "user1", "owner2", print_only);
+        round_trip(CryptAlgorithm::AesBits128, "user1", "owner2", ALL_ALLOWED);
+        round_trip(CryptAlgorithm::AesBits256, "user1", "owner2", print_only);
+    }
+
+    #[test]
+    fn legacy_writer_without_user_password_opens_for_anyone() {
+        let file_id = [1u8; 16];
+        let writer = Encryptor::with_spec(&EncryptSpec {
+            algorithm: CryptAlgorithm::AesBits128,
+            user: b"",
+            owner: b"random-owner-key",
+            permissions: PRINT,
+            encrypt_metadata: false,
+            file_id: &file_id,
+        })
+        .unwrap();
+        let dict = writer.dict().clone();
+        let opened = Decryptor::unlock(&dict, &file_id, Some(9), None).unwrap();
+        assert!(!opened.is_owner);
+        assert!(!opened.permissions.may_modify());
+        // Metadata is left in clear when the file says so.
+        let metadata = Dict::of(vec![("Type", Obj::name("Metadata"))]);
+        assert!(!writer.encrypts_stream(&metadata));
+        assert!(writer.encrypts_stream(&Dict::default()));
+    }
+
+    #[test]
+    fn owner_entry_rc4_128_uses_the_first_n_bytes_each_round() {
+        // A 128-bit key uses the whole digest, so the owner path must agree with the writer.
+        let file_id = [3u8; 16];
+        let writer = Encryptor::with_spec(&EncryptSpec {
+            algorithm: CryptAlgorithm::Rc4Bits128,
+            user: b"u",
+            owner: b"o",
+            permissions: ALL_ALLOWED,
+            encrypt_metadata: true,
+            file_id: &file_id,
+        })
+        .unwrap();
+        let dict = writer.dict().clone();
+        assert!(Decryptor::unlock(&dict, &file_id, Some(9), Some("o")).unwrap().is_owner);
+    }
+
+    #[test]
+    fn algorithm_versions_and_weakness_are_reported() {
+        assert_eq!(CryptAlgorithm::Rc4Bits40.min_version(), (1, 4));
+        assert_eq!(CryptAlgorithm::AesBits128.min_version(), (1, 6));
+        assert_eq!(CryptAlgorithm::AesBits256.min_version(), (2, 0));
+        assert!(CryptAlgorithm::Rc4Bits40.is_weak() && !CryptAlgorithm::AesBits128.is_weak());
     }
 
     #[test]

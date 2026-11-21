@@ -20,3 +20,5 @@ md-5.workspace = true
 rc4.workspace = true
 getrandom.workspace = true
 zeroize.workspace = true
+zune-jpeg.workspace = true
+jpeg-encoder.workspace = true

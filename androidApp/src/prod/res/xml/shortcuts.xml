@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Long-press launcher shortcuts for the prod build (applicationId com.xfiles). The dev flavor has its own copy in
+  src/dev/res/xml with com.xfiles.dev, because the target package must be the installed application id.
+  Each one starts MainActivity with the "xfiles.action" extra the widget uses (see WidgetActions). Recent files are
+  added at run time (RecentShortcuts.kt). Three static entries keep the launcher from trimming any of them.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_scan"
+        android:shortcutShortLabel="@string/widget_scan"
+        android:shortcutLongLabel="@string/widget_scan">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.xfiles"
+            android:targetClass="com.xfiles.android.MainActivity">
+            <extra android:name="xfiles.action" android:value="scan" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="fily"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_fily"
+        android:shortcutShortLabel="@string/widget_fily"
+        android:shortcutLongLabel="@string/widget_fily">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.xfiles"
+            android:targetClass="com.xfiles.android.MainActivity">
+            <extra android:name="xfiles.action" android:value="fily" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="open"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_open"
+        android:shortcutShortLabel="@string/widget_open"
+        android:shortcutLongLabel="@string/widget_open">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.xfiles"
+            android:targetClass="com.xfiles.android.MainActivity">
+            <extra android:name="xfiles.action" android:value="open" />
+        </intent>
+    </shortcut>
+</shortcuts>

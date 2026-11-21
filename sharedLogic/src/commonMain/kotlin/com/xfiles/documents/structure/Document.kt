@@ -117,6 +117,8 @@ sealed interface ContentBlock {
         val cells: List<String>,
         val header: Boolean = false,
         val styles: List<Int> = emptyList(),
+        /** Inline styling and links per cell, index-aligned with [cells]; empty when the engine sent none. */
+        val cellSpans: List<List<TextSpan>> = emptyList(),
     ) : ContentBlock
 
     /** Entry [index] (from 1) of the workbook's palette of cell looks, sent before the rows that use it. */

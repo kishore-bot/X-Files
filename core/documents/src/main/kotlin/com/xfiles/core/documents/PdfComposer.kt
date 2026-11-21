@@ -63,6 +63,38 @@ internal object PdfComposer {
     }
 
     /**
+     * Where a picture of [pictureWidth] x [pictureHeight] pixels sits on its page, in points. The same
+     * arithmetic draws the picture and places its recognised text, so the two always line up.
+     */
+    internal class PictureLayout(
+        val pageWidth: Float,
+        val pageHeight: Float,
+        val left: Float,
+        val top: Float,
+        val drawnWidth: Float,
+        val drawnHeight: Float,
+    ) {
+        fun pictureRect() = RectF(left, top, left + drawnWidth, top + drawnHeight)
+    }
+
+    internal fun layout(pictureWidth: Int, pictureHeight: Int, paper: PdfPaper?): PictureLayout {
+        val pageWidth = paper?.width ?: pictureWidth.toFloat()
+        val pageHeight = paper?.height ?: pictureHeight.toFloat()
+        val margin = if (paper == null) 0f else MARGIN / 2
+        val scale = min((pageWidth - 2 * margin) / pictureWidth, (pageHeight - 2 * margin) / pictureHeight)
+        val drawnWidth = pictureWidth * scale
+        val drawnHeight = pictureHeight * scale
+        return PictureLayout(
+            pageWidth = pageWidth,
+            pageHeight = pageHeight,
+            left = (pageWidth - drawnWidth) / 2,
+            top = (pageHeight - drawnHeight) / 2,
+            drawnWidth = drawnWidth,
+            drawnHeight = drawnHeight,
+        )
+    }
+
+    /**
      * One picture per page. [pictures] is consumed lazily and each bitmap is recycled once drawn.
      * With [paper] `null` each page takes its picture's size; otherwise the picture is centred inside the margins.
      */
@@ -73,17 +105,10 @@ internal object PdfComposer {
             var count = 0
             for (bitmap in pictures) {
                 try {
-                    val pageWidth = paper?.width ?: bitmap.width.toFloat()
-                    val pageHeight = paper?.height ?: bitmap.height.toFloat()
-                    val margin = if (paper == null) 0f else MARGIN / 2
-                    val scale = min((pageWidth - 2 * margin) / bitmap.width, (pageHeight - 2 * margin) / bitmap.height)
-                    val drawnWidth = bitmap.width * scale
-                    val drawnHeight = bitmap.height * scale
-                    val left = (pageWidth - drawnWidth) / 2
-                    val top = (pageHeight - drawnHeight) / 2
-                    val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth.toInt(), pageHeight.toInt(), ++count).create())
+                    val layout = layout(bitmap.width, bitmap.height, paper)
+                    val page = document.startPage(PdfDocument.PageInfo.Builder(layout.pageWidth.toInt(), layout.pageHeight.toInt(), ++count).create())
                     page.canvas.drawColor(Color.WHITE)
-                    page.canvas.drawBitmap(bitmap, null, RectF(left, top, left + drawnWidth, top + drawnHeight), paint)
+                    page.canvas.drawBitmap(bitmap, null, layout.pictureRect(), paint)
                     document.finishPage(page)
                     onPage(count)
                 } finally {

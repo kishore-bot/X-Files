@@ -35,14 +35,25 @@ mod pdf_crypt;
 mod pdf_file;
 mod pdf_syntax;
 mod pdf_tools;
+mod pdf_tools_compress;
+mod pdf_tools_images;
+mod pdf_tools_overlay;
+mod pdf_text_layer;
+mod pdf_tools_split;
+#[cfg(test)]
+mod pdf_tools_ops_tests;
 mod pptx;
 mod readahead;
 mod rich;
 mod stream;
 mod text;
 mod xlsx;
+pub mod sheet_edit;
 pub mod slide_edit;
 pub mod text_replace;
+pub mod office_edit;
+pub mod archive_index;
+mod archive_crypto;
 mod xml;
 mod zip;
 
@@ -54,10 +65,19 @@ pub use pdf::PdfParser;
 pub use pdf_annot::{
     PdfAnnotation, PdfAppendReport, PdfEditInfo, PdfInkStyle, append_annotations, inspect_pdf, verify_appended,
 };
+pub use pdf_crypt::CryptAlgorithm;
 pub use pdf_tools::{
-    PdfDropped, PdfPagePick, PdfToolInfo, PdfToolObserver, PdfToolOp, PdfToolReport, PdfToolSource, inspect_for_tools,
+    PdfDropped, PdfPagePick, PdfProtection, PdfProtectionChoice, PdfProtectionOutcome, PdfToolInfo, PdfToolObserver,
+    PdfToolOp, PdfToolReport, PdfToolSource, ProtectionPlan, inspect_for_tools, inspect_protection, plan_protection,
     run_pdf_tool, verify_pdf_tool_output,
 };
+pub use pdf_tools_compress::{PdfCompressReport, compress_pdf, compress_pdf_with_quality};
+pub use pdf_tools_images::PdfImageQuality;
+pub use pdf_tools_overlay::{
+    PdfOverlay, PdfOverlayReport, PdfSignature, PdfWatermark, PdfWatermarkPosition, apply_overlay, verify_overlay,
+};
+pub use pdf_text_layer::{TextLine, add_text_layer, verify_text_layer};
+pub use pdf_tools_split::{MAX_SPLIT_PARTS, PdfPageRange, plan_split};
 pub use text::TextParser;
 
 /// Every available parser. Order matters only if two parsers handle the same
@@ -113,7 +133,7 @@ pub(crate) mod testing {
                 Block::Code { language: Some(l), text, .. } => format!("C[{l}] {text}"),
                 Block::Code { language: None, text, .. } => format!("C {text}"),
                 Block::Divider => "---".to_owned(),
-                Block::TableRow { row, header, cells, styles } => format!(
+                Block::TableRow { row, header, cells, styles, .. } => format!(
                     "{}{} {}{}",
                     if *header { "T" } else { "R" },
                     row.map(|r| r.to_string()).unwrap_or_default(),

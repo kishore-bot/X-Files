@@ -207,7 +207,7 @@ impl DocSource {
     fn flush_row(&mut self, out: &mut VecDeque<Block>) {
         let cells = std::mem::take(&mut self.row);
         if cells.iter().any(|c| !c.is_empty()) {
-            out.push_back(Block::TableRow { row: None, header: false, cells, styles: Vec::new() });
+            out.push_back(Block::TableRow { row: None, header: false, cells, styles: Vec::new(), cell_spans: Vec::new() });
         }
     }
 

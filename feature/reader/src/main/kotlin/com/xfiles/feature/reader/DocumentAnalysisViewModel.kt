@@ -9,8 +9,11 @@ import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfMatchBox
 import com.xfiles.core.documents.PdfToolsRepository
 import com.xfiles.core.documents.PreparedPdf
+import android.graphics.Bitmap
+import android.graphics.drawable.AnimatedImageDrawable
 import android.net.Uri
 import android.util.Log
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -51,7 +54,48 @@ class DocumentAnalysisViewModel @Inject constructor(
     private val sensitiveCheck: SensitiveCheck,
     private val sharing: DocumentSharing,
     private val saved: SavedStateHandle,
+    private val gallery: GalleryController,
+    private val structured: com.xfiles.core.documents.OfficeDocumentEditor,
 ) : ViewModel() {
+    /** The gallery of the open picture: one picture, or the sorted pictures around it to swipe through. */
+    val galleryState: StateFlow<GalleryUiState> = gallery.state
+    val gallerySort: StateFlow<GallerySort> = gallery.sort
+    /** Quarter turns per picture (keyed by URI), so each picture keeps its own rotation while paging. */
+    private val rotations = mutableStateMapOf<String, Int>()
+    private var rememberJob: Job? = null
+
+    /**
+     * Turns the gallery to [index] (the pager settled there). The open file becomes that picture; nothing reloads.
+     * Recents follow the picture on screen, written once the swipes settle rather than on every page.
+     */
+    fun selectGalleryPage(index: Int) {
+        val file = gallery.select(index) ?: return
+        saved[OPEN_URI] = file.uri.toString()
+        rememberJob?.cancel()
+        rememberJob = viewModelScope.launch {
+            delay(REMEMBER_DELAY_MS)
+            documents.remember(file)
+        }
+    }
+
+    /** The screen-sized decode of gallery page [index]. Throws when the picture cannot be decoded. */
+    suspend fun galleryPage(index: Int, maxEdge: Int): Bitmap? = gallery.bitmap(index, maxEdge)
+
+    /** The animation of gallery page [index] (GIF, WebP, AVIF), or null for a still picture. */
+    suspend fun galleryAnimation(index: Int, maxEdge: Int): AnimatedImageDrawable? = gallery.animation(index, maxEdge)
+
+    /** The animation of a single picture opened without a gallery (GIF, WebP, AVIF), or null for a still. */
+    suspend fun pictureAnimation(file: FileEntry, maxEdge: Int): AnimatedImageDrawable? = gallery.animationOf(file, maxEdge)
+
+    fun setGallerySort(sort: GallerySort) = gallery.setSort(sort)
+
+    fun rotationOf(uri: String): Int = rotations[uri] ?: 0
+
+    /** Turns the picture at [uri] a quarter clockwise; the turn is kept for that picture. */
+    fun rotate(uri: String) {
+        rotations[uri] = (rotationOf(uri) + 90) % 360
+    }
+
     /** Share original for the open file; false (shown as an error) when no app can take it. */
     fun share() {
         val ready = state.value as? ReaderState.Ready ?: return
@@ -60,6 +104,9 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     private val mutableState = MutableStateFlow<ReaderState?>(null)
     val state = mutableState.asStateFlow()
+
+    /** Cell and slide editing for the open spreadsheet or presentation; see [StructuredEditSession]. */
+    val structuredEdits = StructuredEditSession(structured, viewModelScope, ::showEditedPreview)
 
     /**
      * Kinds of sensitive number in the open document, checked in the background after it settles.
@@ -120,6 +167,14 @@ class DocumentAnalysisViewModel @Inject constructor(
     private var summaryJob: Job? = null
     private var pdfSearchJob: Job? = null
     private var pdfPassword: String? = null
+    /** Archives left by [openNested], innermost last; [popNested] returns to them. */
+    private val nestedReturn = ArrayDeque<String>()
+    /** Recently shown PDF pages (current, spread partner, neighbours to prefetch). Bounded; main-thread only. */
+    private val pdfPageCache = object : LinkedHashMap<Int, FilePreview.Pdf>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, FilePreview.Pdf>?): Boolean =
+            size > PDF_CACHED_PAGES
+    }
+    private var prefetchJob: Job? = null
     private val mutablePdfFind = MutableStateFlow(PdfFindState())
     val pdfFind = mutablePdfFind.asStateFlow()
     private val mutableMarkup = MutableStateFlow(PdfMarkupState())
@@ -130,6 +185,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         if (markup.value.saving) return
         discardMarkup()
         clearPdfSearch()
+        clearPdfPages()
         pdfPassword = null
         saved[OPEN_URI] = uri.toString()
         saved[OPEN_PAGE] = page
@@ -149,8 +205,12 @@ class DocumentAnalysisViewModel @Inject constructor(
                 }
                 return@startReader
             }
-            if (preview is FilePreview.Pdf) pdfPassword = password
+            if (preview is FilePreview.Pdf) {
+                pdfPassword = password
+                pdfPageCache[preview.page] = preview
+            }
             documents.remember(file)
+            (preview as? FilePreview.Structured)?.let { structuredEdits.bind(file.uri, file.name, it) } ?: structuredEdits.close()
             mutableState.value = ReaderState.Ready(file, preview)
         }
     }
@@ -160,17 +220,34 @@ class DocumentAnalysisViewModel @Inject constructor(
         open(pending.file.uri, pending.initialPage, password)
     }
 
+    /** Opens an entry extracted from the archive now on screen; [popNested] goes back to that archive. */
+    fun openNested(uri: Uri) {
+        val current = saved.get<String>(OPEN_URI) ?: return
+        nestedReturn.addLast(current)
+        open(uri)
+    }
+
+    /** Returns to the archive that [openNested] left. False when nothing was left behind. */
+    fun popNested(): Boolean {
+        val previous = nestedReturn.removeLastOrNull() ?: return false
+        open(Uri.parse(previous))
+        return true
+    }
+
     fun close() {
         if (markup.value.saving) return
         printJob?.cancel()
+        structuredEdits.close()
         mutablePrinting.value = PrintStatus.Idle
         discardMarkup()
         pdfPassword = null
         clearPdfSearch()
+        clearPdfPages()
         readerJob?.cancel()
         summaryJob?.cancel()
         saved.remove<String>(OPEN_URI)
         saved.remove<Int>(OPEN_PAGE)
+        nestedReturn.clear()
         mutableState.value = null
     }
 
@@ -179,11 +256,93 @@ class DocumentAnalysisViewModel @Inject constructor(
         val pdf = ready.preview as? FilePreview.Pdf ?: return
         if (ready.turningPage || index !in 0 until pdf.pageCount || index == pdf.page) return
         startReader(ready.copy(turningPage = true, pageError = false), onError = ready.copy(pageError = true)) {
-            val page = documents.page(ready.file, index, pdfPassword)
+            val page = pdfPage(ready.file, index)
+            // The spread partner is read before the turn lands, so both pages appear together.
+            val facing = if (ready.twoPage) partnerOf(index, pdf.pageCount)?.let { pdfPage(ready.file, it) } else null
             val active = mutableState.value as? ReaderState.Ready ?: return@startReader
-            mutableState.value = active.copy(preview = page, turningPage = false, pageError = false)
+            mutableState.value = active.copy(preview = page, facing = facing, turningPage = false, pageError = false)
             saved[OPEN_PAGE] = index
+            prefetchPdf(ready.file, index, pdf.pageCount, ready.twoPage)
         }
+    }
+
+    /** Two pages side by side, as pairs (0,1), (2,3)…: turns move by a pair. */
+    fun setTwoPage(enabled: Boolean) {
+        val ready = state.value as? ReaderState.Ready ?: return
+        val pdf = ready.preview as? FilePreview.Pdf ?: return
+        if (ready.turningPage || ready.twoPage == enabled) return
+        val partner = if (enabled) partnerOf(pdf.page, pdf.pageCount) else null
+        mutableState.value = ready.copy(twoPage = enabled, facing = null)
+        if (!enabled) {
+            prefetchPdf(ready.file, pdf.page, pdf.pageCount, false)
+            return
+        }
+        viewModelScope.launch {
+            val facing = partner?.let {
+                try {
+                    pdfPage(ready.file, it)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w("XfilesReader", "Spread page could not be read", error)
+                    null
+                }
+            }
+            val current = mutableState.value as? ReaderState.Ready ?: return@launch
+            if (current.file.uri == ready.file.uri && current.twoPage && (current.preview as? FilePreview.Pdf)?.page == pdf.page) {
+                mutableState.value = current.copy(facing = facing)
+            }
+        }
+        prefetchPdf(ready.file, pdf.page, pdf.pageCount, true)
+    }
+
+    /** A page for the grid: small, cached and read off the main thread. Null when none can be read. */
+    suspend fun pdfThumbnail(index: Int): Bitmap? {
+        val ready = state.value as? ReaderState.Ready ?: return null
+        if (ready.preview !is FilePreview.Pdf) return null
+        return try {
+            documents.pageThumbnail(ready.file, index, pdfPassword, GRID_THUMBNAIL_EDGE)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("XfilesReader", "PDF thumbnail failed", error)
+            null
+        }
+    }
+
+    /** Page bitmap from the small cache, or rendered once and kept while recent. */
+    private suspend fun pdfPage(file: FileEntry, index: Int): FilePreview.Pdf {
+        pdfPageCache[index]?.let { return it }
+        return documents.page(file, index, pdfPassword).also { pdfPageCache[index] = it }
+    }
+
+    /** Warms the neighbours of what is shown, so the next turn is already rendered. Failures are silent. */
+    private fun prefetchPdf(file: FileEntry, page: Int, count: Int, twoPage: Boolean) {
+        prefetchJob?.cancel()
+        val targets = if (twoPage) {
+            val start = page - page % 2
+            listOf(start + 2, start + 3, start - 2, start - 1)
+        } else {
+            listOf(page + 1, page - 1)
+        }
+        prefetchJob = viewModelScope.launch {
+            for (index in targets) {
+                if (index !in 0 until count || pdfPageCache.containsKey(index)) continue
+                try {
+                    pdfPage(file, index)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w("XfilesReader", "PDF prefetch skipped", error)
+                }
+            }
+        }
+    }
+
+    private fun clearPdfPages() {
+        prefetchJob?.cancel()
+        prefetchJob = null
+        pdfPageCache.clear()
     }
 
     fun findPdf(query: String) {
@@ -374,15 +533,33 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     // Last in the class: every property above is initialised before the file is reopened.
     init {
+        // Before the restore below, so a restored picture starts its gallery too.
+        gallery.attach(viewModelScope, mutableState)
         // The process can die while Xfiles sits in the background (common when another app opened the
         // file into its own task). The open file comes back instead of dropping to the library.
         saved.get<String>(OPEN_URI)?.let { open(Uri.parse(it), saved[OPEN_PAGE] ?: 0) }
     }
 
+    /**
+     * Shows [preview] of an office edit in place of the open file. Null restores the
+     * original by reopening its URI. The file on disk is never changed by this.
+     */
+    fun showEditedPreview(preview: FilePreview?) {
+        val ready = mutableState.value as? ReaderState.Ready ?: return
+        if (preview == null) open(ready.file.uri) else mutableState.value = ready.copy(preview = preview)
+    }
+
     private companion object {
         const val OPEN_URI = "reader.openUri"
         const val OPEN_PAGE = "reader.openPage"
+        const val PDF_CACHED_PAGES = 6
+        const val GRID_THUMBNAIL_EDGE = 240
+        const val REMEMBER_DELAY_MS = 1_000L
     }
+
+    /** Index of the page that shares a spread with [page] (pairs 0-1, 2-3…), or null when there is none. */
+    private fun partnerOf(page: Int, count: Int): Int? =
+        (if (page % 2 == 0) page + 1 else page - 1).takeIf { it in 0 until count }
 }
 
 sealed interface ReaderState {
@@ -399,6 +576,9 @@ sealed interface ReaderState {
         val pageError: Boolean = false,
         val bookmarkError: Boolean = false,
         val summary: SummaryState? = null,
+        /** Two-page view: the spread's other page (null for single view, or when there is none). */
+        val twoPage: Boolean = false,
+        val facing: FilePreview.Pdf? = null,
     ) : ReaderState
 }
 

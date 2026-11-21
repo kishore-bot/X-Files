@@ -9,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
+import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.documentKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -119,6 +120,54 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
             }
         }
         return remaining
+    }
+
+    /**
+     * The pictures in the same folder as [file] when that folder lies inside a linked tree; null when it does not
+     * (or the provider refuses). Not recursive. Stops at [limit] entries and checks cancellation per child.
+     */
+    suspend fun imagesBeside(file: Uri, limit: Int): List<FileEntry>? = withContext(io) {
+        if (file.scheme != ContentResolver.SCHEME_CONTENT) return@withContext null
+        val docId = try {
+            DocumentsContract.getDocumentId(file)
+        } catch (_: IllegalArgumentException) {
+            return@withContext null
+        }
+        val tree = linkedUris().firstOrNull { it.authority == file.authority && insideTree(docId, DocumentsContract.getTreeDocumentId(it)) }
+            ?: return@withContext null
+        val root = DocumentsContract.getTreeDocumentId(tree)
+        val slash = docId.lastIndexOf('/')
+        val parentId = if (slash >= 0) docId.substring(0, slash) else root
+        try {
+            val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+            val images = ArrayList<FileEntry>()
+            resolver.query(children, CHILD_COLUMNS, null, null, null)?.use { cursor ->
+                while (images.size < limit && cursor.moveToNext()) {
+                    currentCoroutineContext().ensureActive()
+                    val id = cursor.getString(0) ?: continue
+                    val name = cursor.getString(1) ?: continue
+                    val mime = cursor.getString(2)
+                    if (mime == Document.MIME_TYPE_DIR || cursor.getInt(3) and Document.FLAG_VIRTUAL_DOCUMENT != 0) continue
+                    val kind = documentKind(name, mime)
+                    if (kind != DocumentKind.Image) continue
+                    val size = if (cursor.isNull(4)) null else cursor.getLong(4)
+                    val modified = if (cursor.isNull(5)) null else cursor.getLong(5)
+                    images.add(FileEntry(DocumentsContract.buildDocumentUriUsingTree(tree, id), name, kind, size, modified))
+                }
+            }
+            images
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Whether document [docId] is the tree [root] or lies below it. Tree roots such as "primary:" end in a colon. */
+    private fun insideTree(docId: String, root: String): Boolean = when {
+        docId == root -> true
+        root.endsWith(':') || root.endsWith('/') -> docId.startsWith(root)
+        else -> docId.startsWith("$root/")
     }
 
     /** Whether any folder is linked; cheap, no scan. */

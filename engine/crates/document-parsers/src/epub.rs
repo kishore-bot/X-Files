@@ -12,12 +12,15 @@
 use std::collections::{HashMap, VecDeque};
 
 use document_core::style::{BOLD, CODE, ITALIC, STRIKE, UNDERLINE};
-use document_core::{Block, EngineError, Result};
+use document_core::{Block, EngineError, Result, Span};
 
-use crate::ooxml::{is_safe_link, resolve, resolve_inside};
+use crate::ooxml::{is_safe_link, percent_decode, resolve, resolve_inside};
 use crate::rich::RichBuilder;
 use crate::stream::{BlockSource, MAX_PENDING_TEXT, Parts};
 use crate::xml::{Tag, Xml};
+
+/// Element ids kept, as `archive path#id` to the block they start in. Real books have a few thousand at most.
+const MAX_ANCHORS: usize = 20_000;
 
 pub(crate) struct EpubSource {
     parts: Parts,
@@ -27,6 +30,15 @@ pub(crate) struct EpubSource {
     chapters: VecDeque<String>,
     /// Directory of the current chapter, which `<img src>` is relative to.
     chapter_dir: String,
+    /// Archive path of the current chapter, which same-file `#note` links are relative to.
+    chapter_path: String,
+    /// Blocks emitted so far, and the first block of each chapter opened, by path.
+    emitted: usize,
+    /// Blocks in the output queue before the current pump call, so the next block's index is known.
+    call_base: usize,
+    /// Where each element id starts, by `archive path#id`: the next block emitted at or after it.
+    anchors: HashMap<String, usize>,
+    chapter_starts: Vec<(String, usize)>,
     in_chapter: bool,
     in_body: bool,
     text: RichBuilder,
@@ -44,6 +56,8 @@ pub(crate) struct EpubSource {
 
 struct Row {
     cells: Vec<String>,
+    /// Styling and links of each cell's text, in the cell's own offsets; index-aligned with `cells`.
+    cell_spans: Vec<Vec<Span>>,
     header: bool,
 }
 
@@ -60,6 +74,11 @@ impl EpubSource {
             book: None,
             chapters,
             chapter_dir: String::new(),
+            chapter_path: String::new(),
+            emitted: 0,
+            call_base: 0,
+            anchors: HashMap::new(),
+            chapter_starts: Vec::new(),
             in_chapter: false,
             in_body: false,
             text: RichBuilder::default(),
@@ -114,11 +133,14 @@ impl EpubSource {
             return;
         }
         if let Some(row) = &mut self.row {
-            if let Some(cell) = row.cells.last_mut() {
+            if let (Some(cell), Some(cell_spans)) = (row.cells.last_mut(), row.cell_spans.last_mut()) {
                 if !cell.is_empty() {
                     cell.push('\n');
                 }
+                // Spans are in UTF-16 units of the block; shift them past the text already in the cell.
+                let base = cell.encode_utf16().count() as u32;
                 cell.push_str(&text.text);
+                cell_spans.extend(text.spans.into_iter().map(|s| Span { start: s.start + base, end: s.end + base, ..s }));
             }
             return;
         }
@@ -144,9 +166,58 @@ impl EpubSource {
         out.push_back(block);
     }
 
+    /// A footnote reference `href` (`#id` or `notes.xhtml#id`) as `note:<archive path>#<id>`,
+    /// which the app opens as a popup instead of following it. Other links are not notes.
+    fn note_link(&self, href: &str) -> Option<String> {
+        let (path, fragment) = href.split_once('#')?;
+        if fragment.is_empty() || href.contains(':') {
+            return None;
+        }
+        let file = if path.is_empty() { self.chapter_path.clone() } else { resolve(&self.chapter_dir, path) };
+        Some(format!("{}{file}#{fragment}", crate::epub_book::NOTE_PREFIX))
+    }
+
+    /// A link to another place in the book (`chapter.xhtml#id` or `#id`), as `book:<archive path>[#id]`.
+    /// The fragment is decoded, to match the ids recorded as anchors. External links are not these.
+    fn internal_link(&self, href: &str) -> Option<String> {
+        let href = href.trim();
+        if href.is_empty() || href.contains(':') || href.starts_with("//") {
+            return None;
+        }
+        let (path, fragment) = match href.split_once('#') {
+            Some((path, fragment)) => (path, Some(fragment)),
+            None => (href, None),
+        };
+        let file = if path.is_empty() { self.chapter_path.clone() } else { resolve(&self.chapter_dir, path) };
+        if file.is_empty() {
+            return None;
+        }
+        Some(match fragment.filter(|f| !f.is_empty()) {
+            Some(fragment) => format!("{}{file}#{}", crate::epub_book::BOOK_LINK_PREFIX, percent_decode(fragment)),
+            None => format!("{}{file}", crate::epub_book::BOOK_LINK_PREFIX),
+        })
+    }
+
+    /// The index the next block pushed to `out` will get.
+    fn next_index(&self, out: &VecDeque<Block>) -> usize {
+        self.emitted + out.len().saturating_sub(self.call_base)
+    }
+
+    /// Records the element's `id`, if it has one and is in the body, as the next block's index.
+    /// The first occurrence wins, so an element that records itself before its block is pushed keeps that index.
+    fn record_anchor(&mut self, tag: &Tag, out: &VecDeque<Block>) {
+        let Some(id) = tag.attr("id").filter(|id| !id.is_empty()) else { return };
+        if !self.in_body || self.anchors.len() >= MAX_ANCHORS {
+            return;
+        }
+        let index = self.next_index(out);
+        self.anchors.entry(format!("{}#{id}", self.chapter_path)).or_insert(index);
+    }
+
     /// Ends the text before the picture, so the two stay in reading order.
     fn on_image(&mut self, tag: &Tag, out: &mut VecDeque<Block>) {
         self.flush(out);
+        self.record_anchor(tag, out);
         if !self.in_body || self.row.is_some() {
             return;
         }
@@ -163,6 +234,7 @@ impl EpubSource {
     /// which the app plays. The element's fallback text is skipped.
     fn on_media(&mut self, tag: &Tag, out: &mut VecDeque<Block>) {
         self.flush(out);
+        self.record_anchor(tag, out);
         if !self.in_body || self.row.is_some() {
             return;
         }
@@ -176,6 +248,12 @@ impl EpubSource {
     }
 
     fn on_start(&mut self, tag: &Tag, out: &mut VecDeque<Block>) -> Result<()> {
+        let result = self.on_start_tag(tag, out);
+        self.record_anchor(tag, out);
+        result
+    }
+
+    fn on_start_tag(&mut self, tag: &Tag, out: &mut VecDeque<Block>) -> Result<()> {
         if let Some(index) = Self::style_index(&tag.name) {
             self.styles[index] += 1;
             return Ok(());
@@ -206,20 +284,36 @@ impl EpubSource {
                 self.flush(out);
                 self.pre_depth += 1;
             }
-            "a" => self.links.push(tag.attr("href").filter(|h| is_safe_link(h)).map(str::to_owned)),
+            "a" => {
+                let note = tag.attr("type").is_some_and(|t| t.split_whitespace().any(|t| t == "noteref"))
+                    || tag.attr("role").is_some_and(|r| r.split_whitespace().any(|r| r == "doc-noteref"));
+                let link = tag.attr("href").and_then(|href| {
+                    if note {
+                        self.note_link(href)
+                    } else {
+                        Some(href)
+                            .filter(|h| is_safe_link(h))
+                            .map(str::to_owned)
+                            .or_else(|| self.internal_link(href))
+                    }
+                });
+                self.links.push(link);
+            }
             "tr" => {
                 self.flush(out);
-                self.row = Some(Row { cells: Vec::new(), header: false });
+                self.row = Some(Row { cells: Vec::new(), cell_spans: Vec::new(), header: false });
             }
             "td" | "th" => {
                 self.flush(out);
                 if let Some(row) = &mut self.row {
                     row.cells.push(String::new());
+                    row.cell_spans.push(Vec::new());
                     row.header |= tag.name == "th";
                 }
             }
             "hr" => {
                 self.flush(out);
+                self.record_anchor(tag, out);
                 out.push_back(Block::Divider);
             }
             "img" => self.on_image(tag, out),
@@ -272,6 +366,7 @@ impl EpubSource {
                         header: row.header,
                         cells: row.cells,
                         styles: Vec::new(),
+                        cell_spans: row.cell_spans,
                     });
                 }
             }
@@ -312,8 +407,63 @@ fn is_block(name: &str) -> bool {
     )
 }
 
+impl EpubSource {
+    /// Pumps the chapters and counts the blocks each call adds, so a chapter's first block index is known.
+    fn pump_counted(&mut self, out: &mut VecDeque<Block>) -> Result<bool> {
+        let before = out.len();
+        self.call_base = before;
+        let done = self.pump_chapters(out)?;
+        self.emitted += out.len() - before;
+        Ok(done)
+    }
+}
+
 impl BlockSource for EpubSource {
     fn pump(&mut self, out: &mut VecDeque<Block>) -> Result<bool> {
+        self.pump_counted(out)
+    }
+
+    fn resource(&mut self, name: &str) -> Result<Vec<u8>> {
+        use crate::epub_book::{FILE_PREFIX, MANIFEST_RESOURCE, READER_RESOURCE};
+        if name == MANIFEST_RESOURCE || name == READER_RESOURCE {
+            if self.book.is_none() {
+                self.book = Some(crate::epub_book::read_book(&mut self.parts, &self.package)?);
+            }
+            let book = self.book.as_ref().expect("read just above");
+            let text = if name == MANIFEST_RESOURCE {
+                crate::epub_book::manifest_json(book, &self.chapter_starts, &self.anchors)
+            } else {
+                crate::epub_book::reader_page(book)
+            };
+            return Ok(text.into_bytes());
+        }
+        if let Some(path) = name.strip_prefix(FILE_PREFIX) {
+            return self.parts.file(path);
+        }
+        self.parts.picture(name)
+    }
+}
+
+impl EpubSource {
+    /// A self-closing element. Only the ones that make text or pictures do anything; the rest may still carry an id.
+    fn on_empty(&mut self, tag: &Tag, out: &mut VecDeque<Block>) {
+        match tag.name.as_str() {
+            "br" => {
+                self.record_anchor(tag, out);
+                self.text.push_plain("\n");
+            }
+            "hr" => {
+                self.flush(out);
+                self.record_anchor(tag, out);
+                out.push_back(Block::Divider);
+            }
+            "img" => self.on_image(tag, out),
+            "video" | "audio" => self.on_media(tag, out),
+            _ => self.record_anchor(tag, out),
+        }
+    }
+
+    fn pump_chapters(&mut self, out: &mut VecDeque<Block>) -> Result<bool> {
         if !self.in_chapter {
             loop {
                 let Some(path) = self.chapters.pop_front() else {
@@ -323,6 +473,9 @@ impl BlockSource for EpubSource {
                 if self.parts.archive().find(&path).is_some() {
                     self.parts.open(&path)?;
                     self.chapter_dir = path.rsplit_once('/').map_or("", |(dir, _)| dir).to_owned();
+                    // Nothing is pushed in this call before a chapter opens, so its first block is the count so far.
+                    self.chapter_starts.push((path.clone(), self.emitted));
+                    self.chapter_path = path;
                     self.in_chapter = true;
                     break;
                 }
@@ -332,13 +485,7 @@ impl BlockSource for EpubSource {
         while out.len() == before {
             match self.parts.xml().next()? {
                 Xml::Start(tag) => self.on_start(&tag, out)?,
-                Xml::Empty(tag) if tag.name == "br" => self.text.push_plain("\n"),
-                Xml::Empty(tag) if tag.name == "hr" => {
-                    self.flush(out);
-                    out.push_back(Block::Divider);
-                }
-                Xml::Empty(tag) if tag.name == "img" => self.on_image(&tag, out),
-                Xml::Empty(tag) if matches!(tag.name.as_str(), "video" | "audio") => self.on_media(&tag, out),
+                Xml::Empty(tag) => self.on_empty(&tag, out),
                 Xml::Text(text) if self.in_body => {
                     let style = self.style();
                     let link = self.links.iter().rev().find_map(Option::as_deref).map(str::to_owned);
@@ -362,26 +509,6 @@ impl BlockSource for EpubSource {
             }
         }
         Ok(false)
-    }
-
-    fn resource(&mut self, name: &str) -> Result<Vec<u8>> {
-        use crate::epub_book::{FILE_PREFIX, MANIFEST_RESOURCE, READER_RESOURCE};
-        if name == MANIFEST_RESOURCE || name == READER_RESOURCE {
-            if self.book.is_none() {
-                self.book = Some(crate::epub_book::read_book(&mut self.parts, &self.package)?);
-            }
-            let book = self.book.as_ref().expect("read just above");
-            let text = if name == MANIFEST_RESOURCE {
-                crate::epub_book::manifest_json(book)
-            } else {
-                crate::epub_book::reader_page(book)
-            };
-            return Ok(text.into_bytes());
-        }
-        if let Some(path) = name.strip_prefix(FILE_PREFIX) {
-            return self.parts.file(path);
-        }
-        self.parts.picture(name)
     }
 }
 
@@ -664,7 +791,7 @@ mod tests {
         let json = String::from_utf8(session.resource(crate::epub_book::MANIFEST_RESOURCE).unwrap()).unwrap();
         assert_eq!(
             json,
-            r#"{"title":"The Book","author":"A. Writer","language":"en","rtl":true,"fixed":false,"chapters":[{"href":"OEBPS/text/ch1.xhtml","size":34},{"href":"OEBPS/text/ch 2.xhtml","size":42}],"toc":[{"title":"One \u0026 only","href":"OEBPS/text/ch1.xhtml","depth":0},{"title":"Two, part 2","href":"OEBPS/text/ch 2.xhtml#s2","depth":1}]}"#
+            r#"{"title":"The Book","author":"A. Writer","language":"en","rtl":true,"fixed":false,"chapters":[{"href":"OEBPS/text/ch1.xhtml","size":34,"block":-1},{"href":"OEBPS/text/ch 2.xhtml","size":42,"block":-1}],"toc":[{"title":"One \u0026 only","href":"OEBPS/text/ch1.xhtml","depth":0},{"title":"Two, part 2","href":"OEBPS/text/ch 2.xhtml#s2","depth":1}],"anchors":{},"notes":{}}"#
         );
         let page = String::from_utf8(session.resource(crate::epub_book::READER_RESOURCE).unwrap()).unwrap();
         assert!(page.contains(r#"<html lang="en">"#));
@@ -707,6 +834,103 @@ mod tests {
         let mut session = crate::engine(Limits::default()).open(Cursor::new(bytes)).unwrap();
         let json = String::from_utf8(session.resource(crate::epub_book::MANIFEST_RESOURCE).unwrap()).unwrap();
         assert!(json.contains(r#""fixed":true"#), "{json}");
-        assert!(json.ends_with(r#""toc":[{"title":"First","href":"OEBPS/text/ch1.xhtml","depth":0},{"title":"Inner","href":"OEBPS/text/ch1.xhtml#x","depth":1}]}"#), "{json}");
+        assert!(json.ends_with(r#""toc":[{"title":"First","href":"OEBPS/text/ch1.xhtml","depth":0},{"title":"Inner","href":"OEBPS/text/ch1.xhtml#x","depth":1}],"anchors":{},"notes":{}}"#), "{json}");
+    }
+
+    #[test]
+    fn chapters_report_their_first_block_and_footnotes_link_to_their_notes() {
+        let opf = br#"<package><manifest><item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+<item id="n" href="text/notes.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="n"/></spine></package>"#;
+        let container = br#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
+        let ch1 = br#"<html><body><p>One <a epub:type="noteref" href="notes.xhtml#n1">1</a> and <a href="https://x.example/">web</a></p><p>Two</p></body></html>"#;
+        let notes = br#"<html><body><aside epub:type="footnote" id="n1"><p>The note.</p></aside></body></html>"#;
+        let bytes = zip_with(
+            &[
+                ("mimetype", b"application/epub+zip".as_slice()),
+                ("META-INF/container.xml", container),
+                ("OEBPS/content.opf", opf),
+                ("OEBPS/text/ch1.xhtml", ch1),
+                ("OEBPS/text/notes.xhtml", notes),
+            ],
+            false,
+        );
+        let mut session = crate::engine(Limits::default()).open(Cursor::new(bytes)).unwrap();
+        let mut blocks = Vec::new();
+        while let Some(batch) = session.next_batch().unwrap() {
+            blocks.extend(batch.blocks);
+        }
+        let json = String::from_utf8(session.resource(crate::epub_book::MANIFEST_RESOURCE).unwrap()).unwrap();
+        assert!(json.contains(r#"{"href":"OEBPS/text/ch1.xhtml","size":"#), "{json}");
+        assert!(json.contains(r#""block":0}"#) && json.contains(r#""block":2}"#), "{json}");
+        assert!(json.ends_with(r#""notes":{"OEBPS/text/notes.xhtml#n1":"The note."}}"#), "{json}");
+        let Block::Paragraph { text } = &blocks[0] else { panic!("{blocks:?}") };
+        let links: Vec<&str> = text.spans.iter().filter_map(|s| s.link.as_deref()).collect();
+        assert_eq!(links, ["note:OEBPS/text/notes.xhtml#n1", "https://x.example/"]);
+    }
+
+    #[test]
+    fn anchors_map_ids_to_their_blocks_and_internal_links_name_them() {
+        let container = br#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
+        let opf = br#"<package><manifest><item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+<item id="c2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>"#;
+        let ch1 = br#"<html><body><p>One</p><h2 id="sec">Two</h2><p><a href="ch2.xhtml#%78">go</a> <a href="#sec">back</a></p></body></html>"#;
+        let ch2 = br#"<html><body><p>A</p><p id="x">B</p><hr id="rule"/><p>C</p></body></html>"#;
+        let bytes = zip_with(
+            &[
+                ("mimetype", b"application/epub+zip".as_slice()),
+                ("META-INF/container.xml", container),
+                ("OEBPS/content.opf", opf),
+                ("OEBPS/text/ch1.xhtml", ch1),
+                ("OEBPS/text/ch2.xhtml", ch2),
+            ],
+            false,
+        );
+        let mut session = crate::engine(Limits::default()).open(Cursor::new(bytes)).unwrap();
+        let mut blocks = Vec::new();
+        while let Some(batch) = session.next_batch().unwrap() {
+            blocks.extend(batch.blocks);
+        }
+        let json = String::from_utf8(session.resource(crate::epub_book::MANIFEST_RESOURCE).unwrap()).unwrap();
+        assert!(
+            json.contains(r#""anchors":{"OEBPS/text/ch1.xhtml#sec":1,"OEBPS/text/ch2.xhtml#x":4,"OEBPS/text/ch2.xhtml#rule":5}"#),
+            "{json}"
+        );
+        let Block::Paragraph { text } = &blocks[2] else { panic!("{blocks:?}") };
+        let links: Vec<&str> = text.spans.iter().filter_map(|s| s.link.as_deref()).collect();
+        assert_eq!(links, ["book:OEBPS/text/ch2.xhtml#x", "book:OEBPS/text/ch1.xhtml#sec"]);
+    }
+
+    #[test]
+    fn table_cell_links_keep_their_spans_offset_into_the_cell() {
+        let container = br#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
+        let opf = br#"<package><manifest><item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+<item id="c2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>"#;
+        // The second paragraph of the cell starts after "Top\n", so its link must be shifted by 4.
+        let ch1 = br#"<html><body><table><tr><td>Left</td><td><p>Top</p><p>Read <a href="ch2.xhtml#x">here</a></p></td></tr></table></body></html>"#;
+        let ch2 = br#"<html><body><p id="x">B</p></body></html>"#;
+        let bytes = zip_with(
+            &[
+                ("mimetype", b"application/epub+zip".as_slice()),
+                ("META-INF/container.xml", container),
+                ("OEBPS/content.opf", opf),
+                ("OEBPS/text/ch1.xhtml", ch1),
+                ("OEBPS/text/ch2.xhtml", ch2),
+            ],
+            false,
+        );
+        let mut session = crate::engine(Limits::default()).open(Cursor::new(bytes)).unwrap();
+        let mut blocks = Vec::new();
+        while let Some(batch) = session.next_batch().unwrap() {
+            blocks.extend(batch.blocks);
+        }
+        let Block::TableRow { cells, cell_spans, .. } = &blocks[0] else { panic!("{blocks:?}") };
+        let texts: Vec<&str> = cells.iter().map(String::as_str).collect();
+        assert_eq!(texts, ["Left", "Top\nRead here"]);
+        let links: Vec<(u32, u32, &str)> = cell_spans[1]
+            .iter()
+            .filter_map(|s| s.link.as_deref().map(|link| (s.start, s.end, link)))
+            .collect();
+        assert_eq!(links, [(9, 13, "book:OEBPS/text/ch2.xhtml#x")]);
+        assert!(cell_spans[0].is_empty());
     }
 }

@@ -4,10 +4,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +37,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -45,7 +49,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.rememberScrollState
 import androidx.exifinterface.media.ExifInterface
+import com.xfiles.core.documents.ScanFilter
+import com.xfiles.core.documents.ScanProcessing
 import com.xfiles.design.EzColors
 import com.xfiles.scan.PageQuad
 import com.xfiles.scan.ScanPoint
@@ -72,6 +79,9 @@ private const val LOUPE_ZOOM = 2.5f
 internal fun ScanReview(
     photo: File,
     initial: PageQuad?,
+    filter: ScanFilter,
+    onFilter: (ScanFilter) -> Unit,
+    processing: ScanProcessing,
     onRetake: () -> Unit,
     onKeep: (PageQuad) -> Unit,
 ) {
@@ -89,6 +99,22 @@ internal fun ScanReview(
     val reach = with(LocalDensity.current) { 48.dp.toPx() }
     val picture = loaded?.getOrNull()
     val image = remember(picture) { picture?.asImageBitmap() }
+
+    // Filtered previews, one per filter, built off the main thread and kept until this review closes.
+    val previews = remember(photo) { HashMap<ScanFilter, Bitmap>() }
+    DisposableEffect(photo) { onDispose { previews.values.forEach(Bitmap::recycle); previews.clear() } }
+    // Keyed on the filter: choosing another cancels the build still running for the previous one.
+    val built by produceState<Pair<ScanFilter, ImageBitmap>?>(null, filter, picture) {
+        val source = picture ?: return@produceState
+        if (filter == ScanFilter.Original) return@produceState
+        val cached = previews[filter]
+        val bitmap = cached ?: withContext(Dispatchers.Default) { processing.previewCopy(source, filter) }
+        if (cached == null) {
+            // A build that finished after leaving the screen must not leak its bitmap.
+            if (isActive) previews[filter] = bitmap else return@produceState bitmap.recycle()
+        }
+        value = filter to bitmap.asImageBitmap()
+    }
 
     Column(
         Modifier
@@ -117,11 +143,15 @@ internal fun ScanReview(
                 val fitWidth = if (maxWidth / maxHeight > ratio) maxHeight * ratio else maxWidth
                 val fitHeight = fitWidth / ratio
                 Box(Modifier.size(fitWidth, fitHeight)) {
-                    Image(
-                        bitmap = image,
-                        contentDescription = "Photo to adjust",
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    // Shows the filtered preview once built; until then, and for Original, the photo itself.
+                    val shown = built?.takeIf { it.first == filter }?.second ?: image
+                    Crossfade(targetState = shown, modifier = Modifier.fillMaxSize(), label = "scan-preview") { current ->
+                        Image(
+                            bitmap = current,
+                            contentDescription = "Photo to adjust",
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                     Canvas(
                         Modifier
                             .fillMaxSize()
@@ -197,6 +227,11 @@ internal fun ScanReview(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScanFilter.entries.forEach { option ->
+                    FilterChip(selected = filter == option, onClick = { onFilter(option) }, label = { Text(option.label, color = Color.White) })
+                }
+            }
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

@@ -3,8 +3,11 @@ package com.xfiles.feature.tools
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
@@ -48,6 +51,113 @@ import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 
+/** The single-PDF tools that have their own screens, opened from the Edit PDFs tiles. */
+internal enum class PdfDedicatedTool(val title: String, val detail: String) {
+    Reorder("Reorder", "Drag, turn or remove pages"),
+    Split("Split", "Page ranges into separate files"),
+    Compress("Compress", "Smaller file, same pages"),
+    Watermark("Watermark", "Text over the pages"),
+    Sign("Sign", "Draw and place a signature"),
+}
+
+@Composable
+internal fun DedicatedToolTiles(onOpen: (PdfDedicatedTool) -> Unit, enabled: Boolean) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        PdfDedicatedTool.entries.forEach { tool ->
+            Column(
+                Modifier
+                    .width(136.dp)
+                    .glassCard()
+                    .clickable(enabled = enabled) { onOpen(tool) }
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(EzIcons.PdfFile, null, tint = MaterialTheme.colorScheme.primary)
+                Text(tool.title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    tool.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DedicatedToolHeader(title: String, onBack: () -> Unit) {
+    Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) { Icon(EzIcons.Back, "Back to PDF tools") }
+        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+    }
+}
+
+/** Shows the chosen PDF, or asks for its password when it is protected. */
+@Composable
+internal fun PdfSourceCard(
+    frame: PdfToolFrame,
+    onChoose: () -> Unit,
+    onUnlock: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().glassCard().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when {
+            frame.isOpen -> {
+                Text(frame.name.ifBlank { "PDF" }, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    buildString {
+                        append("${frame.pageCount} ${if (frame.pageCount == 1) "page" else "pages"}")
+                        if (frame.signed) append(" · signed")
+                        if (frame.archival) append(" · archival")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            frame.opening -> Text("Opening…")
+            else -> Text("Choose a PDF to start.")
+        }
+        if (frame.needsPassword) {
+            var password by rememberSaveable { mutableStateOf("") }
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !frame.busy,
+                label = { Text("PDF password") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+            )
+            Button(onClick = { onUnlock(password) }, enabled = !frame.busy && password.isNotEmpty()) { Text("Unlock") }
+        }
+        Button(onClick = onChoose, enabled = !frame.busy) { Text(if (frame.isOpen) "Choose another PDF" else "Choose a PDF") }
+    }
+}
+
+/** Progress for a running job, with cancel. Indeterminate until the engine reports a count. */
+@Composable
+internal fun PdfBusyBar(frame: PdfToolFrame, onCancel: () -> Unit) {
+    if (!frame.busy) return
+    val fraction = frame.progress
+    if (fraction == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+    else LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+    if (frame.running) TextButton(onClick = onCancel) { Text("Cancel") }
+}
+
+@Composable
+internal fun PdfMessages(frame: PdfToolFrame) {
+    frame.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    if (frame.saved) Text("Saved. The original PDF is unchanged.", color = MaterialTheme.colorScheme.primary)
+    // Every protected result says what became of its protection, whichever tool made it.
+    frame.outputs.singleOrNull()?.protectionNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+/** Bytes as the user reads them: 900 B, 412 KB, 4.2 MB. */
+internal fun formatBytes(bytes: Long): String = when {
+    bytes < 1_000L -> "$bytes B"
+    bytes < 1_000_000L -> "${(bytes + 500) / 1_000} KB"
+    else -> String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1_000_000.0)
+}
+
 @Composable
 private fun ToolsHeader(onBack: () -> Unit, onNewNote: () -> Unit, onTidy: () -> Unit, section: Int, onSection: (Int) -> Unit, enabled: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -73,6 +183,19 @@ fun PdfToolsScreen(
     onTidy: () -> Unit = {},
     convert: ConvertViewModel = hiltViewModel(),
 ) {
+    var dedicated by rememberSaveable { mutableStateOf<PdfDedicatedTool?>(null) }
+    val openTool = dedicated
+    if (openTool != null) {
+        val close = { dedicated = null }
+        when (openTool) {
+            PdfDedicatedTool.Reorder -> PdfReorderScreen(onBack = close)
+            PdfDedicatedTool.Split -> PdfSplitScreen(onBack = close)
+            PdfDedicatedTool.Compress -> PdfCompressScreen(onBack = close)
+            PdfDedicatedTool.Watermark -> PdfWatermarkScreen(onBack = close)
+            PdfDedicatedTool.Sign -> PdfSignScreen(onBack = close)
+        }
+        return
+    }
     val section = if (viewModel.state.collectAsStateWithLifecycle().value.convert) 1 else 0
     if (section == 1) {
         val back = {
@@ -120,6 +243,7 @@ fun PdfToolsScreen(
             }
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { DedicatedToolTiles(onOpen = { dedicated = it }, enabled = !state.busy) }
             item {
                 Button(
                     onClick = {

@@ -16,6 +16,12 @@ object WidgetActions {
     const val SCAN = "scan"
     const val FILY = "fily"
     const val OPEN = "open"
+    /** Opens the Tools screen (app shortcut). */
+    const val TOOLS = "tools"
+    /** Opens a new text note prefilled with [EXTRA_NOTE_TITLE] and [EXTRA_NOTE_TEXT] (Android AppFunctions). */
+    const val NOTE = "note"
+    const val EXTRA_NOTE_TITLE = "xfiles.note.title"
+    const val EXTRA_NOTE_TEXT = "xfiles.note.text"
 
     fun button(context: Context, action: String): Intent =
         Intent(context, MainActivity::class.java).putExtra(EXTRA, action)
@@ -24,4 +30,9 @@ object WidgetActions {
         Intent(Intent.ACTION_VIEW, uri)
             .setComponent(ComponentName(context, MainActivity::class.java))
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+    fun note(context: Context, title: String, text: String): Intent =
+        button(context, NOTE)
+            .putExtra(EXTRA_NOTE_TITLE, title)
+            .putExtra(EXTRA_NOTE_TEXT, text)
 }

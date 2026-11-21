@@ -96,6 +96,9 @@ dependencies {
     }
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // AppFunctions service for Android 16+ assistants; the KSP compiler generates the service and its XML schema.
+    implementation(libs.appfunctions.runtime)
+    ksp(libs.appfunctions.compiler)
     implementation(project(":core:designsystem"))
     implementation(project(":core:documents"))
     implementation(project(":feature:library"))

@@ -1,6 +1,7 @@
 package com.xfiles.android
 
 import android.app.Application
+import com.xfiles.android.shortcuts.keepRecentShortcutsCurrent
 import com.xfiles.android.widget.keepWidgetCurrent
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -15,5 +16,6 @@ class XfilesApplication : Application() {
         super.onCreate() // Hilt injects here.
         cloudCrash.start(recorder) // Optional cloud reporting; a no-op unless the firebase build and consent are both present.
         keepWidgetCurrent() // Background collector; does nothing unless a widget is placed.
+        keepRecentShortcutsCurrent() // Long-press shortcuts for the newest recent files, off the main thread.
     }
 }

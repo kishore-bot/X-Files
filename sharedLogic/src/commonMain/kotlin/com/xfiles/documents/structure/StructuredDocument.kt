@@ -1,10 +1,14 @@
 package com.xfiles.documents.structure
 
+import com.xfiles.documents.book.BookManifest
+
 data class StructuredDocument(
     val info: DocumentInfo,
     val blocks: List<ContentBlock>,
     val images: Map<String, ByteArray>,
     val truncated: Boolean,
+    /** An EPUB's contents, chapters and footnotes; null for every other format. */
+    val book: BookManifest? = null,
 ) {
     fun plainText(limit: Int = 32_000): String = buildString {
         fun addLine(value: String) {

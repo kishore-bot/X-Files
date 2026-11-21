@@ -117,6 +117,16 @@ pub fn append_annotations<R: Read + Seek, W: Write>(
     }
     let pages = file.pages()?;
     let update = build_update(&mut file, &pages, annotations)?;
+    write_update(&mut file, &update, out)
+}
+
+/// Copies the whole original, then appends `update` as an incremental section.
+/// Shared by every writer that adds objects without rewriting the original bytes.
+pub(crate) fn write_update<R: Read + Seek, W: Write>(
+    file: &mut PdfFile<R>,
+    update: &Update,
+    out: &mut W,
+) -> Result<PdfAppendReport> {
     let original_len = file.len;
     // The last original byte decides whether a separator is needed.
     let total = file.copy_all(out)?;
@@ -128,7 +138,7 @@ pub fn append_annotations<R: Read + Seek, W: Write>(
     if needs_newline {
         out.write_all(b"\n")?;
     }
-    let section = update.serialize(&file, base)?;
+    let section = update.serialize(&*file, base)?;
     out.write_all(&section)?;
     out.flush()?;
     Ok(PdfAppendReport { original_len, total_len: base + section.len() as u64 })
@@ -178,14 +188,14 @@ fn check_budget(annotations: &[PdfAnnotation]) -> Result<()> {
 }
 
 impl<R: Read + Seek> PdfFile<R> {
-    fn generation_of(&self, number: u32) -> u16 {
+    pub(crate) fn generation_of(&self, number: u32) -> u16 {
         match self.xref.get(&number) {
             Some(XrefEntry::Plain { generation, .. }) => *generation,
             _ => 0,
         }
     }
 
-    fn next_object_number(&self) -> Result<u32> {
+    pub(crate) fn next_object_number(&self) -> Result<u32> {
         let size = self.trailer.get("Size").and_then(Obj::as_i64).unwrap_or(0).max(0);
         let highest = self.xref.keys().copied().max().map_or(0, |n| i64::from(n) + 1);
         let next = size.max(highest);
@@ -197,9 +207,9 @@ impl<R: Read + Seek> PdfFile<R> {
 }
 
 /// An update's objects, before any file position is known.
-struct Update {
-    objects: Vec<(u32, u16, Vec<u8>)>,
-    next_number: u32,
+pub(crate) struct Update {
+    pub(crate) objects: Vec<(u32, u16, Vec<u8>)>,
+    pub(crate) next_number: u32,
 }
 
 fn page_annots<R: Read + Seek>(file: &mut PdfFile<R>, page_object: u32) -> Result<Vec<Obj>> {
@@ -263,7 +273,7 @@ fn build_update<R: Read + Seek>(
     Ok(Update { objects, next_number })
 }
 
-fn object_body(dict: &Dict) -> Vec<u8> {
+pub(crate) fn object_body(dict: &Dict) -> Vec<u8> {
     let mut out = Vec::new();
     write_dict(&mut out, dict);
     out
@@ -505,7 +515,7 @@ fn read_text_string(bytes: &[u8]) -> String {
 
 impl Update {
     /// The appended bytes, with offsets counted from `base`.
-    fn serialize<R: Read + Seek>(&self, file: &PdfFile<R>, base: u64) -> Result<Vec<u8>> {
+    pub(crate) fn serialize<R: Read + Seek>(&self, file: &PdfFile<R>, base: u64) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         let mut entries: Vec<(u32, u16, u64)> = Vec::with_capacity(self.objects.len() + 1);
         for (number, generation, body) in &self.objects {

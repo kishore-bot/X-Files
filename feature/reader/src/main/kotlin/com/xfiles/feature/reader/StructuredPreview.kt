@@ -56,6 +56,7 @@ import com.xfiles.design.EzIcons
 import com.xfiles.design.glassCard
 import com.xfiles.design.glassPanel
 import com.xfiles.documents.structure.ContentBlock
+import androidx.compose.runtime.collectAsState
 import com.xfiles.documents.structure.DocumentKind
 import com.xfiles.documents.structure.DocumentFormat
 import com.xfiles.documents.structure.StructuredDocument
@@ -67,10 +68,15 @@ internal val LocalDocumentImages = staticCompositionLocalOf<Map<String, ByteArra
 private val imageDispatcher = Dispatchers.IO.limitedParallelism(2)
 
 @Composable
-internal fun StructuredPreview(document: StructuredDocument) {
+internal fun StructuredPreview(document: StructuredDocument, editing: StructuredEditSession? = null) {
+    val editState = (editing?.state ?: kotlinx.coroutines.flow.emptyFlow<StructuredEditState>()).collectAsState(StructuredEditState()).value
     when (document.info.kind) {
-        DocumentKind.Presentation -> PresentationPreview(document)
-        DocumentKind.Spreadsheet -> SpreadsheetPreview(document)
+        DocumentKind.Presentation -> PresentationPreview(document, slideEditor = editing?.slideEditor)
+        DocumentKind.Spreadsheet -> SpreadsheetPreview(
+            document,
+            freezeBySheet = editState.freeze,
+            cellEditor = editing?.cellEditor,
+        )
         else -> if (document.info.format == DocumentFormat.Epub) BookPreview(document) else DocumentBlocks(document)
     }
 }
@@ -143,14 +149,19 @@ internal fun DocumentBlock(block: ContentBlock) {
                 )
             }
         }
-        is ContentBlock.TableRow -> Row(Modifier.horizontalScroll(rememberScrollState())) {
-            block.cells.forEach { cell ->
-                Box(
-                    Modifier.width(140.dp).border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
-                        .then(if (block.header) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
-                        .padding(8.dp),
-                ) {
-                    Text(cell, fontWeight = if (block.header) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.bodyMedium)
+        is ContentBlock.TableRow -> {
+            val dark = themeIsDark()
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                block.cells.forEachIndexed { column, cell ->
+                    val spans = block.cellSpans.getOrNull(column).orEmpty()
+                    val styled = remember(cell, spans, dark) { richText(cell, spans, dark) }
+                    Box(
+                        Modifier.width(140.dp).border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                            .then(if (block.header) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
+                            .padding(8.dp),
+                    ) {
+                        Text(styled, fontWeight = if (block.header) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }

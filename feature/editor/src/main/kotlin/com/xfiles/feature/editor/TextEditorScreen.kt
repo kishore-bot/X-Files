@@ -3,6 +3,9 @@ package com.xfiles.feature.editor
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,14 +105,39 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
                 status?.let { Text(it, color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall) }
             }
         }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("Encoding", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
+            TextEncoding.entries.forEach { option ->
+                FilterChip(
+                    selected = state.encoding == option,
+                    onClick = { viewModel.chooseEncoding(option) },
+                    label = { Text(option.label) },
+                    enabled = !state.saving && state.blocked == null,
+                )
+            }
+            Text("Line ending", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
+            LineEnding.entries.forEach { option ->
+                FilterChip(
+                    selected = state.lineEnding == option,
+                    onClick = { viewModel.chooseLineEnding(option) },
+                    label = { Text(option.label) },
+                    enabled = !state.saving && state.blocked == null,
+                )
+            }
+        }
+        state.blocked?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         if (state.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (state.saved) Text("Copy saved.", color = EzColors.TextSecondary)
-        if (state.error) Text("The copy could not be saved.", color = MaterialTheme.colorScheme.error)
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         BasicTextField(
             state = viewModel.text,
             modifier = Modifier.fillMaxWidth().weight(1f).glassCard().padding(16.dp),
-            enabled = !state.saving,
-            inputTransformation = InputTransformation.maxLengthReject(256_000),
+            enabled = !state.saving && state.blocked == null,
+            inputTransformation = InputTransformation.maxLengthReject(TextCodec.EDIT_CAP_BYTES),
             lineLimits = TextFieldLineLimits.MultiLine(),
             cursorBrush = SolidColor(EzColors.Primary),
             textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace, color = EzColors.Text),

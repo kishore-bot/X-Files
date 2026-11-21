@@ -27,7 +27,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.dp
@@ -37,8 +39,14 @@ import com.xfiles.design.EzIcons
 import com.xfiles.design.glassPanel
 
 @Composable
-internal fun TextPreview(preview: FilePreview.Text, showSearch: Boolean, onSearchClose: () -> Unit) {
+internal fun TextPreview(
+    preview: FilePreview.Text,
+    showSearch: Boolean,
+    onSearchClose: () -> Unit,
+    reading: ReadingTheme = ReadingTheme.Standard,
+) {
     val content = preview.content
+    val palette = reading.palette()
     val sections = remember(content) { textSections(content) }
     val search = rememberTextFieldState()
     val query = if (showSearch) search.text.toString() else ""
@@ -80,10 +88,15 @@ internal fun TextPreview(preview: FilePreview.Text, showSearch: Boolean, onSearc
                 IconButton(onClick = onSearchClose) { Icon(EzIcons.Close, "Close search") }
             }
         }
-        Box(Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)) {
+        val pageModifier = if (palette == null) {
+            Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
+        } else {
+            Modifier.fillMaxSize().background(palette.page, RoundedCornerShape(16.dp))
+        }
+        Box(pageModifier) {
             LazyColumn(state = list, contentPadding = PaddingValues(16.dp)) {
-                if (preview.truncated) item { Text("Showing the beginning of this file.", Modifier.padding(bottom = 12.dp)) }
-                if (sections.isEmpty()) item { Text("This file has no readable text.") }
+                if (preview.truncated) item { Text("Showing the beginning of this file.", Modifier.padding(bottom = 12.dp), color = palette?.secondary ?: Color.Unspecified) }
+                if (sections.isEmpty()) item { Text("This file has no readable text.", color = palette?.secondary ?: Color.Unspecified) }
                 itemsIndexed(sections, key = { _, section -> section.first }) { _, section ->
                     val selectedColor = EzColors.Selected
                     val otherColor = selectedColor.copy(alpha = 0.5f)
@@ -101,7 +114,9 @@ internal fun TextPreview(preview: FilePreview.Text, showSearch: Boolean, onSearc
                             }
                         }
                     }
-                    SelectionContainer { Text(styled, style = MaterialTheme.typography.bodyLarge) }
+                    SelectionContainer {
+                        Text(styled, style = MaterialTheme.typography.bodyLarge, color = palette?.text ?: Color.Unspecified)
+                    }
                 }
             }
         }

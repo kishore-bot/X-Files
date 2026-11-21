@@ -1,5 +1,6 @@
 package com.xfiles.feature.library
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.SideEffect
 import android.net.Uri
 import androidx.compose.foundation.clickable
@@ -7,8 +8,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.layout.Column
@@ -22,6 +21,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
@@ -29,6 +32,7 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,19 +45,32 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.xfiles.core.documents.FileBookmark
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FolderLibrary
@@ -65,12 +82,25 @@ import com.xfiles.design.EzFloatingAction
 import com.xfiles.design.EzNavigationBar
 import com.xfiles.design.EzNavItem
 import com.xfiles.design.EzShapes
+import com.xfiles.design.LocalHapticsEnabled
 import com.xfiles.design.glassCard
 import com.xfiles.documents.DocumentKind
+import com.xfiles.documents.library.LibraryCategory
+import com.xfiles.documents.library.libraryCategories
+
+/** Most files one share sends: the system share sheet takes a bounded list. */
+private const val MaxSharedFiles = 32
+
+/** Side of a row's preview. */
+private val ThumbnailSize = 56.dp
 
 @Composable
 fun LibraryScreen(
     recentFiles: List<FileEntry>,
+    listing: LibraryListing,
+    category: LibraryCategory,
+    onCategory: (LibraryCategory) -> Unit,
+    onQueryChange: (String) -> Unit,
     bookmarks: List<FileBookmark>,
     onBookmark: (FileBookmark) -> Unit,
     library: FolderLibrary,
@@ -81,7 +111,7 @@ fun LibraryScreen(
     onStopSearch: () -> Unit,
     onOpen: () -> Unit,
     onFile: (FileEntry) -> Unit,
-    onShare: (FileEntry) -> Unit = {},
+    onShareFiles: (List<FileEntry>) -> Unit,
     onClear: () -> Unit,
     onAddFolder: () -> Unit,
     onRemoveFolder: (Uri) -> Unit,
@@ -94,16 +124,18 @@ fun LibraryScreen(
     val search = rememberTextFieldState()
     val query = search.text.toString().trim()
     var tab by rememberSaveable { mutableStateOf(HomeTab.Library) }
-    var selected by rememberSaveable { mutableStateOf(LibraryFilter.All) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var removingFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    // The multi-select set. It is cleared when the tab changes, and by the back gesture.
+    val picked = remember { mutableStateListOf<FileEntry>() }
 
-    val matching = remember(query, tab, selected, recentFiles, library.files) {
-        val source = if (tab == HomeTab.Recent) recentFiles else library.files
-        source.filter { file ->
-            (tab != HomeTab.Library || selected.kind == null || file.kind == selected.kind) && file.name.contains(query, ignoreCase = true)
-        }
+    LaunchedEffect(onQueryChange) {
+        snapshotFlow { search.text.toString().trim() }.collect(onQueryChange)
     }
+    LaunchedEffect(tab) { picked.clear() }
+    BackHandler(enabled = picked.isNotEmpty()) { picked.clear() }
+
+    val matching = if (tab == HomeTab.Recent) listing.recents else listing.files
     SideEffect(tab, matching, bookmarks) {
         onListedFiles(if (tab == HomeTab.Bookmarks) bookmarks.map { it.file } else matching)
     }
@@ -120,12 +152,35 @@ fun LibraryScreen(
         EzNavItem("Bookmarks", EzIcons.BookmarkOutline, tab == HomeTab.Bookmarks) { tab = HomeTab.Bookmarks },
         EzNavItem("Tools", EzIcons.Apps, false, onTools),
     )
+    val haptics = LocalHapticFeedback.current
+    val hapticsOn = LocalHapticsEnabled.current
+    fun toggle(file: FileEntry) {
+        if (picked.contains(file)) picked.remove(file) else picked.add(file)
+    }
+    fun longPress(file: FileEntry) {
+        if (hapticsOn) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        toggle(file)
+    }
+    fun openPicked() {
+        val file = picked.single()
+        picked.clear()
+        onFile(file)
+    }
     Box(Modifier.fillMaxSize().imePadding()) {
         Column(Modifier.fillMaxSize().padding(start = if (landscape) 112.dp else 16.dp, end = 16.dp)) {
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Xfiles", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
-                IconButton(onClick = onFily) { Icon(EzIcons.Mic, "Voice assistant", tint = EzColors.Primary) }
-                if (!landscape) IconButton(onClick = onAbout) { Icon(EzIcons.Info, "About Xfiles", tint = EzColors.Primary) }
+            if (picked.isEmpty()) {
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Xfiles", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
+                    IconButton(onClick = onFily) { Icon(EzIcons.Mic, "Voice assistant", tint = EzColors.Primary) }
+                    if (!landscape) IconButton(onClick = onAbout) { Icon(EzIcons.Info, "About Xfiles", tint = EzColors.Primary) }
+                }
+            } else {
+                SelectionBar(
+                    count = picked.size,
+                    onOpen = if (picked.size == 1) ({ openPicked() }) else null,
+                    onShare = { onShareFiles(picked.toList()) },
+                    onClear = { picked.clear() },
+                )
             }
             if (tab != HomeTab.Bookmarks) LibrarySearch(search)
             LazyColumn(
@@ -157,8 +212,8 @@ fun LibraryScreen(
                 }
                 if (tab == HomeTab.Library) item("filters") {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        LibraryFilter.entries.forEach { filter ->
-                            FilterChip(selected = filter == selected, onClick = { selected = filter }, label = { Text(filter.label) })
+                        LibraryCategory.entries.forEach { chip ->
+                            FilterChip(selected = chip == category, onClick = { onCategory(chip) }, label = { Text(chip.label) })
                         }
                     }
                 }
@@ -167,8 +222,8 @@ fun LibraryScreen(
                         val title = when {
                             tab == HomeTab.Bookmarks -> "Bookmarks"
                             tab == HomeTab.Recent -> "Recent files"
-                            selected == LibraryFilter.All -> "In your folders"
-                            else -> selected.label
+                            category == LibraryCategory.All -> "In your folders"
+                            else -> category.label
                         }
 
                         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
@@ -190,7 +245,15 @@ fun LibraryScreen(
                     } else {
                         items(bookmarks, key = { it.key }, contentType = { "bookmark" }) { bookmark ->
                             val description = bookmark.page?.let { "Page ${it + 1}" }
-                            FileRow(bookmark.file, detail = description, onClick = { onBookmark(bookmark) }, onShare = { onShare(bookmark.file) })
+                            FileRow(
+                                file = bookmark.file,
+                                detail = description,
+                                isPicked = bookmark.file in picked,
+                                selecting = picked.isNotEmpty(),
+                                onOpen = { onBookmark(bookmark) },
+                                onToggle = { toggle(bookmark.file) },
+                                onLongPress = { longPress(bookmark.file) },
+                            )
                         }
                     }
                 } else if (matching.isEmpty()) {
@@ -211,7 +274,14 @@ fun LibraryScreen(
                     }
                 } else {
                     items(matching, key = { it.uri.toString() }, contentType = { "file" }) { file ->
-                        FileRow(file, onClick = { onFile(file) }, onShare = { onShare(file) })
+                        FileRow(
+                            file = file,
+                            isPicked = file in picked,
+                            selecting = picked.isNotEmpty(),
+                            onOpen = { onFile(file) },
+                            onToggle = { toggle(file) },
+                            onLongPress = { longPress(file) },
+                        )
                     }
                 }
                 if (searchesInside && contentSearch.query == query) {
@@ -224,7 +294,9 @@ fun LibraryScreen(
                             Text("No matches inside these files.", color = EzColors.TextSecondary)
                         }
                     }
-                    val visibleHits = contentSearch.hits.filter { selected.kind == null || it.file.kind == selected.kind }
+                    val visibleHits = contentSearch.hits.filter {
+                        category == LibraryCategory.All || category in libraryCategories(it.file.name)
+                    }
                     items(visibleHits, key = { "inside|${it.file.uri}" }, contentType = { "snippet" }) { hit ->
                         ContentMatchRow(hit, onClick = { onFile(hit.file) })
                     }
@@ -275,6 +347,22 @@ fun LibraryScreen(
     }
 }
 
+/** The selection bar: the count, Open for a single file, Share (up to 32) and Clear. */
+@Composable
+private fun SelectionBar(count: Int, onOpen: (() -> Unit)?, onShare: () -> Unit, onClear: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$count selected", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+        if (onOpen != null) TextButton(onClick = onOpen) { Text("Open") }
+        TextButton(onClick = onShare, enabled = count in 1..MaxSharedFiles) {
+            Text(if (count > MaxSharedFiles) "Share (max $MaxSharedFiles)" else "Share")
+        }
+        TextButton(onClick = onClear) { Text("Clear") }
+    }
+}
+
 @Composable
 private fun LibrarySearch(search: TextFieldState) {
     Row(
@@ -317,67 +405,94 @@ private fun EmptyLibrary(title: String, description: String?, icon: ImageVector 
     }
 }
 
+/**
+ * A file row. Tap opens it, or toggles it while a selection is active; long-press
+ * starts a selection (with a haptic tick). Open and Share for a single file are
+ * in the selection bar.
+ */
 @Composable
-private fun FileRow(file: FileEntry, detail: String? = null, onClick: () -> Unit, onShare: () -> Unit) {
-    var actions by remember { mutableStateOf(false) }
-    val haptics = LocalHapticFeedback.current
-    val icon = when (file.kind) {
-        DocumentKind.Pdf -> EzIcons.PdfFile
-        DocumentKind.Image -> EzIcons.Image
-        DocumentKind.Audio -> EzIcons.Music
-        DocumentKind.Video -> EzIcons.Movie
-        else -> EzIcons.Document
-    }
-    Box {
-    // Long-press opens the file's actions; a tap still opens it.
+private fun FileRow(
+    file: FileEntry,
+    detail: String? = null,
+    isPicked: Boolean,
+    selecting: Boolean,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+    onLongPress: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().glassCard()
             .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    actions = true
-                },
-                onLongClickLabel = "File actions",
+                onClick = { if (selecting) onToggle() else onOpen() },
+                onLongClick = onLongPress,
+                onLongClickLabel = "Select",
             )
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .semantics { this.selected = isPicked }
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(icon, null, tint = EzColors.Primary)
+        if (selecting) Checkbox(checked = isPicked, onCheckedChange = null)
+        FileThumbnail(file)
         Column(Modifier.weight(1f)) {
             Text(file.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
             detail?.let { Text(it, color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall) }
         }
-        Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary)
+        if (!selecting) Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary)
     }
-    DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
-        DropdownMenuItem(
-            text = { Text("Open") },
-            leadingIcon = { Icon(EzIcons.Document, null) },
-            onClick = { actions = false; onClick() },
-        )
-        DropdownMenuItem(
-            text = { Text("Share") },
-            leadingIcon = { Icon(EzIcons.Share, null) },
-            onClick = { actions = false; onShare() },
-        )
+}
+
+/**
+ * A 56 dp rounded preview for photos, videos and PDFs; the type icon otherwise,
+ * while the preview loads, or when none can be made. Loading stops when the row leaves.
+ */
+@Composable
+private fun FileThumbnail(file: FileEntry) {
+    val icon = fileIcon(file.kind)
+    val shape = RoundedCornerShape(12.dp)
+    if (!LibraryThumbnails.supports(file.kind)) {
+        Box(Modifier.size(ThumbnailSize), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = EzColors.Primary)
+        }
+        return
     }
+    val context = LocalContext.current
+    val sidePx = with(LocalDensity.current) { ThumbnailSize.roundToPx() }
+    val preview by produceState<ImageBitmap?>(LibraryThumbnails.cached(file, sidePx)?.asImageBitmap(), file.uri, file.modifiedAt, sidePx) {
+        value = (LibraryThumbnails.cached(file, sidePx)
+            ?: LibraryThumbnails.load(context.contentResolver, file, sidePx))?.asImageBitmap()
     }
+    Box(
+        Modifier.size(ThumbnailSize).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        val image = preview
+        if (image != null) {
+            Image(image, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Icon(icon, null, Modifier.size(28.dp), tint = EzColors.Primary)
+        }
+        if (file.kind == DocumentKind.Video) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(3.dp).size(18.dp).background(Color(0x99000000), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(EzIcons.Play, "Video", Modifier.size(12.dp), tint = Color.White)
+            }
+        }
+    }
+}
+
+private fun fileIcon(kind: DocumentKind): ImageVector = when (kind) {
+    DocumentKind.Pdf -> EzIcons.PdfFile
+    DocumentKind.Image -> EzIcons.Image
+    DocumentKind.Audio -> EzIcons.Music
+    DocumentKind.Video -> EzIcons.Movie
+    else -> EzIcons.Document
 }
 
 private enum class HomeTab { Library, Recent, Bookmarks }
-
-private enum class LibraryFilter(val label: String, val kind: DocumentKind? = null) {
-    All("All"),
-    Pdf("PDF", DocumentKind.Pdf),
-    Document("Documents", DocumentKind.Document),
-    Text("Text", DocumentKind.Text),
-    Image("Images", DocumentKind.Image),
-    Video("Video", DocumentKind.Video),
-    Audio("Audio", DocumentKind.Audio),
-}
 
 @Composable
 private fun ContentMatchRow(hit: LibrarySearchHit, onClick: () -> Unit) {

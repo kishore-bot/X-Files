@@ -379,7 +379,7 @@ impl XlsSource {
         }
         let row = u32::from(self.row.unwrap_or(0)) + 1;
         if !cells.is_empty() || !looks.is_empty() {
-            out.push_back(Block::TableRow { row: Some(row), header: false, cells, styles: looks });
+            out.push_back(Block::TableRow { row: Some(row), header: false, cells, styles: looks, cell_spans: Vec::new() });
         }
         for (column, spans) in std::mem::take(&mut self.runs) {
             out.push_back(Block::CellRuns { row, column, spans });

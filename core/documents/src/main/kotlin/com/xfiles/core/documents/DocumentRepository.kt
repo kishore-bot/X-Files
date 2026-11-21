@@ -90,6 +90,30 @@ class DocumentRepository @Inject constructor(
     /** The stored recents, read fresh (for the home-screen widget); leaves the in-memory state alone. */
     suspend fun recentsSnapshot(): List<FileEntry> = withContext(io) { readRecents() }
 
+    /**
+     * The stored recents with modified times filled in for pictures (the capped list, one provider query each), so a
+     * Newest gallery can order them. Off the main thread; a provider that refuses the query leaves the time null.
+     */
+    suspend fun recentsWithModifiedTimes(): List<FileEntry> = withContext(io) {
+        val files = readRecents()
+        val timed = ArrayList<FileEntry>(files.size)
+        for (file in files) {
+            currentCoroutineContext().ensureActive()
+            timed += if (file.kind != DocumentKind.Image) file else file.copy(modifiedAt = modifiedTime(file.uri))
+        }
+        timed
+    }
+
+    private fun modifiedTime(uri: Uri): Long? = try {
+        resolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+        }
+    } catch (_: SecurityException) {
+        null
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+
     suspend fun clearRecents() = withContext(io) {
         val previous = readRecents()
         saveRecents(emptyList())
@@ -157,6 +181,36 @@ class DocumentRepository @Inject constructor(
 
     suspend fun searchPdf(file: FileEntry, query: String, password: String?): PdfSearchResult =
         pdfs.search(file.uri, query, password)
+
+    /** A PDF page as a small bitmap for the page grid (cached; see [AndroidPdfDocument.thumbnail]). */
+    suspend fun pageThumbnail(file: FileEntry, index: Int, password: String?, maxEdge: Int): Bitmap =
+        pdfs.thumbnail(file.uri, index, password, maxEdge)
+
+    /** Reads at most [limit] bytes of [uri] on the IO dispatcher; the editor passes its cap plus one to detect overflow. */
+    suspend fun readBoundedBytes(uri: Uri, limit: Int): ByteArray = withContext(io) {
+        val input = resolver.openInputStream(uri) ?: throw IOException("Can't open the file")
+        input.use { stream ->
+            val buffer = ByteArray(limit)
+            var filled = 0
+            while (filled < limit) {
+                val read = stream.read(buffer, filled, limit - filled)
+                if (read < 0) break
+                filled += read
+            }
+            buffer.copyOf(filled)
+        }
+    }
+
+    /** Writes already-encoded bytes (the text editor's encoding and line endings) to a new copy. */
+    suspend fun saveBytesCopy(destination: Uri, bytes: ByteArray) = withContext(io) {
+        try {
+            val stream = resolver.openOutputStream(destination, "wt") ?: throw IOException("Can't open the selected destination")
+            stream.use { it.write(bytes) }
+        } catch (error: Exception) {
+            runCatching { DocumentsContract.deleteDocument(resolver, destination) }
+            throw error
+        }
+    }
 
     suspend fun saveTextCopy(destination: Uri, text: String) = withContext(io) {
         require(text.length <= MAX_TEXT_CHARACTERS)

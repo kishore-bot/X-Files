@@ -23,12 +23,17 @@ use zeroize::Zeroizing;
 
 mod fily;
 mod glance;
+mod sheet_edit;
+mod slide_edit;
 mod imaging;
 mod tidy;
 
 uniffi::setup_scaffolding!();
 
+mod pdf_tools_ext;
 mod search;
+mod pdf_text_layer;
+mod archive;
 
 /// Caller-supplied limits; `0` selects the engine default for that field.
 #[derive(Debug, Clone, Copy, Default, uniffi::Record)]
@@ -244,12 +249,13 @@ pub enum NativeBlock {
         text: String,
     },
     Divider,
-    /// `styles` index the `CellStyle`s sent before; 0 is plain.
+    /// `styles` index the `CellStyle`s sent before; 0 is plain. `cell_spans` are per cell, as in the core model.
     TableRow {
         row: Option<u32>,
         header: bool,
         cells: Vec<String>,
         styles: Vec<u16>,
+        cell_spans: Vec<Vec<NativeSpan>>,
     },
     CellStyle {
         index: u16,
@@ -435,7 +441,13 @@ impl From<Block> for NativeBlock {
             Block::Quote { text } => Self::Quote { spans: spans(&text.spans), text: text.text },
             Block::Code { language, first_line, text } => Self::Code { language, first_line, text },
             Block::Divider => Self::Divider,
-            Block::TableRow { row, header, cells, styles } => Self::TableRow { row, header, cells, styles },
+            Block::TableRow { row, header, cells, styles, cell_spans } => Self::TableRow {
+                row,
+                header,
+                cells,
+                styles,
+                cell_spans: cell_spans.iter().map(|spans_of_cell| spans(spans_of_cell)).collect(),
+            },
             Block::CellStyle { index, style } => Self::CellStyle {
                 index,
                 style: NativeCellStyle {
@@ -834,6 +846,8 @@ pub struct NativePdfPageEdit {
 pub enum NativePdfToolOp {
     Merge,
     Rebuild { pages: Vec<NativePdfPageEdit> },
+    /// Every page exactly once, in this order. Rejected unless it's a permutation.
+    Reorder { pages: Vec<NativePdfPageEdit> },
     InsertPages { at_page: u32 },
     Resize { width: f32, height: f32 },
     AddPassword { password: String },
@@ -962,6 +976,9 @@ pub fn pdf_tool_run(
     }
     let op = match op {
         NativePdfToolOp::Merge => PdfToolOp::Merge,
+        NativePdfToolOp::Reorder { pages } => PdfToolOp::Reorder {
+            pages: pages.iter().map(|edit| PdfPagePick { page: edit.page, rotation: edit.rotation }).collect(),
+        },
         NativePdfToolOp::Rebuild { pages } => PdfToolOp::Rebuild {
             pages: pages.iter().map(|edit| PdfPagePick { page: edit.page, rotation: edit.rotation }).collect(),
         },

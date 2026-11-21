@@ -12,7 +12,9 @@ import com.xfiles.documentengine.DocumentAnalyzer
 import com.xfiles.documentengine.InvalidPdfSelection
 import com.xfiles.documentengine.PdfOperation
 import com.xfiles.documentengine.PdfPasswordRequired
+import com.xfiles.documentengine.PdfTextLine
 import com.xfiles.documentengine.rewritePdf
+import com.xfiles.documentengine.writePdfTextLayer
 import com.xfiles.documents.DocumentKind
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -24,6 +26,7 @@ import javax.inject.Singleton
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -38,6 +41,12 @@ sealed interface Conversion<out T> {
     data class Done<T>(val result: T) : Conversion<T>
 }
 
+/** How many pages of a picture PDF got searchable text: [pagesWithText] of [pages]. */
+data class TextLayerOutcome(val pagesWithText: Int, val pages: Int)
+
+/** A picture PDF and, when searchable text was requested, what the text layer achieved (null otherwise). */
+data class ComposedPdf(val pdf: PreparedPdf, val textLayer: TextLayerOutcome?)
+
 class UnprintableDocument : IllegalArgumentException("Sound and video files can't be printed.")
 
 /**
@@ -48,6 +57,7 @@ class UnprintableDocument : IllegalArgumentException("Sound and video files can'
 class ConversionRepository @Inject constructor(
     @ApplicationContext context: Context,
     private val pdfs: AndroidPdfDocument,
+    private val recognition: TextRecognitionRepository,
 ) {
     private val app = context.applicationContext
     private val resolver = app.contentResolver
@@ -57,21 +67,81 @@ class ConversionRepository @Inject constructor(
 
     // --- Create ---------------------------------------------------------------------------------
 
-    /** Pictures (gallery or camera) as one PDF, one picture per page. */
-    fun imagesToPdf(images: List<Uri>, paper: PdfPaper?): Flow<Conversion<PreparedPdf>> = channelFlow {
+    /**
+     * Pictures (gallery or camera) as one PDF, one picture per page. With [searchable] each page is then
+     * read on-device and an invisible text layer is added in one Rust update, so the text selects and
+     * searches while the pictures stay as they were. Progress: composing, then reading, page by page.
+     */
+    fun imagesToPdf(images: List<Uri>, paper: PdfPaper?, searchable: Boolean = false): Flow<Conversion<ComposedPdf>> = channelFlow {
         require(images.size in 1..MAX_IMAGES) { "Choose 1 to $MAX_IMAGES pictures." }
-        val target = workFile(".pdf")
+        val composed = workFile(".pdf")
+        var layered: File? = null
         try {
-            val pictures = images.asSequence().map { uri -> decodeBounded(uri) }
-            val pages = target.outputStream().buffered().use { out ->
-                PdfComposer.writePictures(pictures, paper, out) { done -> trySend(Conversion.Progress(done, images.size)) }
+            val total = if (searchable) images.size * 2 else images.size
+            val pages = composed.outputStream().buffered().use { out ->
+                PdfComposer.writePictures(images.asSequence().map(::decodeBounded), paper, out) { done ->
+                    trySend(Conversion.Progress(done, total))
+                }
             }
-            send(Conversion.Done(PreparedPdf(target, pages, false, false, false)))
+            val lines = if (searchable) readPictures(images, paper) { done -> send(Conversion.Progress(images.size + done, total)) } else emptyList()
+            val result = if (lines.isEmpty()) {
+                composed
+            } else {
+                val withText = workFile(".pdf")
+                layered = withText
+                writePdfTextLayer(composed, withText, lines)
+                composed.delete()
+                withText
+            }
+            val outcome = if (searchable) TextLayerOutcome(pagesWithText = lines.map { it.page }.distinct().size, pages = pages) else null
+            send(Conversion.Done(ComposedPdf(PreparedPdf(result, pages, false, false, false), outcome)))
         } catch (error: Throwable) {
-            target.delete()
+            composed.delete()
+            layered?.delete()
             throw error
         }
     }.flowOn(lane)
+
+    /**
+     * Each picture read on-device, one at a time, into lines boxed in page fractions. A picture that
+     * can't be read contributes no text rather than failing the whole PDF; cancellation still stops it.
+     */
+    private suspend fun readPictures(images: List<Uri>, paper: PdfPaper?, onPicture: suspend (Int) -> Unit): List<PdfTextLine> {
+        val lines = ArrayList<PdfTextLine>()
+        images.forEachIndexed { index, uri ->
+            currentCoroutineContext().ensureActive()
+            val bitmap = decodeBounded(uri)
+            try {
+                val layout = PdfComposer.layout(bitmap.width, bitmap.height, paper)
+                val read = try {
+                    recognition.lines(bitmap)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    emptyList()
+                }
+                val xScale = layout.drawnWidth / bitmap.width
+                val yScale = layout.drawnHeight / bitmap.height
+                for (line in read) {
+                    val text = line.text.trim()
+                    if (text.isEmpty()) continue
+                    val box = line.box
+                    lines += PdfTextLine(
+                        page = index,
+                        left = (layout.left + box.left * xScale) / layout.pageWidth,
+                        top = (layout.top + box.top * yScale) / layout.pageHeight,
+                        right = (layout.left + box.right * xScale) / layout.pageWidth,
+                        bottom = (layout.top + box.bottom * yScale) / layout.pageHeight,
+                        text = text,
+                    )
+                }
+            } finally {
+                bitmap.recycle()
+            }
+            onPicture(index + 1)
+        }
+        return lines
+    }
 
     /**
      * Gallery pictures added to an existing PDF: appended, or inserted before page [beforePage] (1-based).

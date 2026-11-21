@@ -8,8 +8,11 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -26,8 +29,16 @@ import java.io.ByteArrayInputStream
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-internal fun HtmlPreview(html: String) {
-    Box(Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp).clip(RoundedCornerShape(16.dp))) {
+internal fun HtmlPreview(html: String, reading: ReadingTheme = ReadingTheme.Standard) {
+    val palette = reading.palette()
+    val page = if (palette == null) {
+        Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
+    } else {
+        Modifier.fillMaxSize().background(palette.page, RoundedCornerShape(16.dp))
+    }
+    // The reading colours go in as a stylesheet ahead of the page; the page itself is unchanged.
+    val pageHtml = if (palette == null) html else readingHtml(html, palette)
+    Box(page.clip(RoundedCornerShape(16.dp))) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
@@ -64,12 +75,32 @@ internal fun HtmlPreview(html: String) {
                 }
             },
             update = { view ->
-                if (view.tag != html.hashCode()) {
-                    view.tag = html.hashCode()
-                    view.loadDataWithBaseURL("about:blank", html, "text/html", "utf-8", null)
+                if (view.tag != pageHtml.hashCode()) {
+                    view.tag = pageHtml.hashCode()
+                    view.loadDataWithBaseURL("about:blank", pageHtml, "text/html", "utf-8", null)
                 }
             },
             onRelease = { it.destroy() },
         )
     }
 }
+
+/**
+ * [html] with a reading-theme stylesheet at the start of its head (or before everything when it has none).
+ * Backgrounds and text colours are forced with !important so the page's own colours yield; links keep the
+ * palette's secondary tone. The page's markup and scripts (none run) are untouched.
+ */
+internal fun readingHtml(html: String, palette: ReadingPalette): String {
+    val page = palette.page.hex()
+    val text = palette.text.hex()
+    val muted = palette.secondary.hex()
+    val css = "<style>html,body{background:$page !important;color:$text !important}" +
+        "body *{color:inherit}" +
+        "a{color:$muted !important}" +
+        "table,th,td,pre,code,blockquote{background:transparent !important}" +
+        "th,td,pre,blockquote{border-color:$muted !important}</style>"
+    val head = Regex("<head[^>]*>", RegexOption.IGNORE_CASE).find(html)
+    return if (head != null) html.replaceRange(head.range, head.value + css) else css + html
+}
+
+private fun Color.hex(): String = "#%06X".format(toArgb() and 0xFFFFFF)

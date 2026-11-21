@@ -22,7 +22,14 @@ sealed interface PdfOperation {
     data class Resize(val width: Float, val height: Float) : PdfOperation
     class Protect(val password: String) : PdfOperation
     data object Unlock : PdfOperation
+    /** Any subset of pages, in this order, each optionally turned. */
+    data class Rebuild(val pages: List<PdfPageEdit>) : PdfOperation
+    /** Every page exactly once, in this order. The engine rejects anything else. */
+    data class Reorder(val pages: List<PdfPageEdit>) : PdfOperation
 }
+
+/** A page of the source (zero-based) and its extra clockwise turn, in multiples of 90. */
+data class PdfPageEdit(val page: Int, val rotation: Int = 0)
 
 data class PdfRewriteReport(val pages: Int, val droppedMetadata: Boolean, val signedSource: Boolean, val archivalSource: Boolean)
 class InvalidPdfSelection(val pageCount: Int) : IllegalArgumentException()
@@ -99,5 +106,7 @@ private fun nativeOperation(operation: PdfOperation, pageCount: Int): NativePdfT
         is PdfOperation.Resize -> NativePdfToolOp.Resize(operation.width, operation.height)
         is PdfOperation.Protect -> NativePdfToolOp.AddPassword(operation.password)
         PdfOperation.Unlock -> NativePdfToolOp.RemovePassword
+        is PdfOperation.Rebuild -> NativePdfToolOp.Rebuild(operation.pages.map { it.toNative() })
+        is PdfOperation.Reorder -> NativePdfToolOp.Reorder(operation.pages.map { it.toNative() })
     }
 }

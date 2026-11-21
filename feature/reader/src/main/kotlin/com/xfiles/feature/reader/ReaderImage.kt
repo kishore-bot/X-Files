@@ -1,6 +1,7 @@
 package com.xfiles.feature.reader
 
 import android.graphics.Bitmap
+import android.graphics.drawable.AnimatedImageDrawable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -26,12 +27,27 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import com.xfiles.core.documents.PdfMatchBox
 
+/** Past this zoom the picture's visible tiles are decoded at full resolution (only when [regions] is given). */
+private const val SHARP_ZOOM = 1.3f
+
+/**
+ * A picture that zooms and pans, rotated in quarter turns. The base bitmap is drawn at fit; past [SHARP_ZOOM] the
+ * tile layer ([SharpTiles]) draws full-resolution tiles over it in the same transform. [regions] enables that
+ * layer; PDF pages pass null and keep the plain viewer. [animated] replaces the still image with a playing
+ * animation ([animating] says whether it plays now). [onZoomChanged] reports zoom past fit for the gallery pager.
+ */
 @Composable
 internal fun ReaderImage(
     bitmap: Bitmap,
     description: String,
     rotation: Int,
     highlights: List<PdfMatchBox> = emptyList(),
+    modifier: Modifier = Modifier.fillMaxSize(),
+    /** Reports whether the picture is zoomed in past fit; the gallery pager uses it to hold paging. */
+    onZoomChanged: (Boolean) -> Unit = {},
+    regions: PictureRegions? = null,
+    animated: AnimatedImageDrawable? = null,
+    animating: Boolean = false,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -52,7 +68,7 @@ internal fun ReaderImage(
     }
 
     Box(
-        Modifier.fillMaxSize().clipToBounds().onSizeChanged { viewport = it }
+        modifier.clipToBounds().onSizeChanged { viewport = it }
             .pointerInput(bitmap, rotation, viewport) {
                 detectTransformGestures(panZoomLock = true) { centroid, pan, change, _ ->
                     val previous = zoom
@@ -61,12 +77,14 @@ internal fun ReaderImage(
                     val focus = centroid - center
                     val nextOffset = focus + (offset - focus) * (updated / previous) + pan
                     zoom = updated
+                    onZoomChanged(updated > 1.001f)
                     offset = clamp(nextOffset, updated)
                 }
             }
             .pointerInput(bitmap, rotation, viewport) {
                 detectTapGestures(onDoubleTap = {
                     zoom = if (zoom == 1f) 2.5f else 1f
+                    onZoomChanged(zoom > 1.001f)
                     val center = Offset(viewport.width / 2f, viewport.height / 2f)
                     offset = clamp((center - it) * (zoom - 1f), zoom)
                 })
@@ -81,7 +99,19 @@ internal fun ReaderImage(
                 translationY = offset.y
             },
         ) {
-            Image(image, description, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            if (animated != null) {
+                AnimatedPicture(animated, animating, Modifier.fillMaxSize())
+            } else {
+                Image(image, description, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+            if (regions != null && animated == null && zoom > SHARP_ZOOM && viewport.width > 0) {
+                SharpTiles(
+                    regions = regions,
+                    view = TileView(viewport, zoom, offset, rotation, renderScale, originalScale),
+                    baseWidth = bitmap.width,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             if (highlights.isNotEmpty()) {
                 Canvas(Modifier.fillMaxSize()) {
                     val scale = minOf(size.width / bitmap.width, size.height / bitmap.height)

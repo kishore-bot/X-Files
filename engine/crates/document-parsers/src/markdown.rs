@@ -301,7 +301,7 @@ impl Converter {
             if header {
                 table.in_head = false;
             }
-            self.out.push_back(Block::TableRow { row: None, header, cells, styles: Vec::new() });
+            self.out.push_back(Block::TableRow { row: None, header, cells, styles: Vec::new(), cell_spans: Vec::new() });
         }
     }
 }

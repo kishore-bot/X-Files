@@ -38,6 +38,8 @@ androidx-uiautomator = "2.4.1"
 google-services = "4.5.0"
 crashlytics-plugin = "3.0.8"
 firebase-bom = "35.1.0"
+# Android AppFunctions (Android 16+ assistants). Stable 1.0.0 on Google Maven; the service and KSP compiler ship together.
+appfunctions = "1.0.0"
 
 [libraries]
 work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
@@ -73,6 +75,8 @@ androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "a
 androidx-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "androidx-uiautomator" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
 firebase-crashlytics = { module = "com.google.firebase:firebase-crashlytics" }
+appfunctions-runtime = { module = "androidx.appfunctions:appfunctions", version.ref = "appfunctions" }
+appfunctions-compiler = { module = "androidx.appfunctions:appfunctions-compiler", version.ref = "appfunctions" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }

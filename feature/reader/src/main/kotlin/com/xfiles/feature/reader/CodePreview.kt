@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -45,9 +46,10 @@ internal fun isSourceCode(name: String): Boolean {
  * multi-line strings and comments keep their colour; only visible lines are composed.
  */
 @Composable
-internal fun CodePreview(text: String, fileName: String) {
+internal fun CodePreview(text: String, fileName: String, reading: ReadingTheme = ReadingTheme.Standard) {
     val extension = fileName.substringAfterLast('.', "").lowercase()
-    val dark = isSystemInDarkTheme()
+    val palette = reading.palette()
+    val dark = palette?.syntaxDark ?: isSystemInDarkTheme()
     val lines = remember(text) { text.split('\n') }
     val starts = remember(lines) { lines.runningFold(0) { at, line -> at + line.length + 1 } }
     val highlighted = remember(text, extension, dark) { highlightCode(extension, text, dark) ?: AnnotatedString(text) }
@@ -66,7 +68,12 @@ internal fun CodePreview(text: String, fileName: String) {
     }
     val gutter = (lines.size.toString().length * 9 + 12).dp
     val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
-    Box(Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)) {
+    val pageModifier = if (palette == null) {
+        Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
+    } else {
+        Modifier.fillMaxSize().background(palette.page, RoundedCornerShape(16.dp))
+    }
+    Box(pageModifier) {
         SelectionContainer {
             LazyColumn(Modifier.horizontalScroll(rememberScrollState()), contentPadding = PaddingValues(vertical = 12.dp)) {
                 items(visible, key = { it }) { index ->
@@ -81,7 +88,7 @@ internal fun CodePreview(text: String, fileName: String) {
                             (if (fold == null) "  " else if (isCollapsed) "▸ " else "▾ ") + (index + 1),
                             Modifier.width(gutter + 14.dp).padding(start = 8.dp),
                             style = mono,
-                            color = EzColors.TextSecondary,
+                            color = palette?.secondary ?: EzColors.TextSecondary,
                         )
                         val start = starts[index].coerceAtMost(highlighted.length)
                         val end = (start + lines[index].length).coerceAtMost(highlighted.length)
@@ -90,7 +97,7 @@ internal fun CodePreview(text: String, fileName: String) {
                             if (isCollapsed && fold != null) AnnotatedString(line.text + " " + CodeFolding.placeholder(fold, lines)) else line,
                             Modifier.padding(end = 16.dp),
                             style = mono,
-                            color = if (dark) Color(0xFFD4D4D4) else EzColors.Text,
+                            color = palette?.text ?: if (dark) Color(0xFFD4D4D4) else EzColors.Text,
                             softWrap = false,
                         )
                     }

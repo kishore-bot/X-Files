@@ -4,6 +4,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import android.app.Application
 import android.os.Build
+import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,18 +14,21 @@ import com.xfiles.fily.AssistantAccess
 import com.xfiles.fily.AssistantModel
 import com.xfiles.fily.FilyDocuments
 import com.xfiles.fily.FilyNavigator
-import com.xfiles.fily.FilyTidy
+import com.xfiles.fily.FilyPrefKeys
 import com.xfiles.fily.FilyPreferences
 import com.xfiles.fily.FilyPrompt
 import com.xfiles.fily.FilySession
+import com.xfiles.fily.FilyTidy
 import com.xfiles.fily.ModelInstall
 import com.xfiles.fily.ReaderControl
+import com.xfiles.fily.SpeechLanguageSupport
 import com.xfiles.fily.ToolExecutor
 import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -33,21 +37,24 @@ class FilyViewModel @Inject internal constructor(
     application: Application,
     private val downloads: AndroidModelDownloads,
     private val inference: FilyInference,
+    /** The process-wide policy, shared with the About switches and the Android AppFunctions. */
+    val access: AssistantAccess,
+    private val preferences: FilyPreferences,
 ) : AndroidViewModel(application) {
-    private val preferences = application.getSharedPreferences("fily", Application.MODE_PRIVATE)
-    private val policy = object : FilyPreferences {
-        override fun get(key: String): String? = preferences.getString(key, null)
-        override fun put(key: String, value: String) {
-            preferences.edit().putString(key, value).apply()
-        }
-    }
-    val access = AssistantAccess(policy)
     val install = downloads.state(AssistantModel.Fily)
     private val mutableUi = MutableStateFlow(FilyUiState())
     val ui = mutableUi.asStateFlow()
     private val mutableGeneration = MutableStateFlow<FilyGeneration?>(null)
     val generation = mutableGeneration.asStateFlow()
     private var request: Job? = null
+
+    private val mutableSpeechLanguage = MutableStateFlow(preferences.get(FilyPrefKeys.SPEECH_LANGUAGE)?.takeIf(String::isNotBlank))
+    /** The picked recognition and speech language (BCP-47), or null for the phone's own English. */
+    val speechLanguage: StateFlow<String?> = mutableSpeechLanguage.asStateFlow()
+    private val mutableSpeechLanguages = MutableStateFlow(SpeechLanguageSupport())
+    val speechLanguages: StateFlow<SpeechLanguageSupport> = mutableSpeechLanguages.asStateFlow()
+    /** Kept alive while the system downloads a language pack the user asked for. */
+    private var languageDownloader: SpeechRecognizer? = null
 
     fun createSession(
         documents: FilyDocuments,
@@ -85,6 +92,40 @@ class FilyViewModel @Inject internal constructor(
     fun import(uri: String) = downloads.import(AssistantModel.Fily, listOf(uri))
     fun cancelDownload() = downloads.cancel(AssistantModel.Fily)
 
+    /** Removes the Fily model from the phone; Fily stops first, so nothing is answering from the files. */
+    fun deleteModel() {
+        stop()
+        downloads.delete(AssistantModel.Fily)
+    }
+
+    /** Lists the recognizer's languages (installed and downloadable). Off the main thread except the system call. */
+    fun refreshSpeechLanguages() {
+        viewModelScope.launch {
+            mutableSpeechLanguages.value = try {
+                querySpeechLanguages(getApplication())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: RuntimeException) {
+                Log.w("XfilesFily", "Speech languages unavailable", error)
+                SpeechLanguageSupport()
+            }
+        }
+    }
+
+    /** Remembers the pick; null goes back to the phone's English. Takes effect at the next listen. */
+    fun selectSpeechLanguage(tag: String?) {
+        preferences.put(FilyPrefKeys.SPEECH_LANGUAGE, tag.orEmpty())
+        mutableSpeechLanguage.value = tag
+    }
+
+    /** Asks the system for an offline pack; the list is refreshed when the user reopens the picker. */
+    fun downloadSpeechLanguage(tag: String) {
+        viewModelScope.launch {
+            languageDownloader?.destroy()
+            languageDownloader = triggerSpeechLanguageDownload(getApplication(), tag)
+        }
+    }
+
     fun ask(session: FilySession, alternatives: List<String>) {
         if (!access.enabled.value || install.value != ModelInstall.Installed || request?.isActive == true) return
         val words = session.bestTranscript(alternatives).takeIf { it.isNotBlank() } ?: return
@@ -119,6 +160,8 @@ class FilyViewModel @Inject internal constructor(
 
     override fun onCleared() {
         stop()
+        languageDownloader?.destroy()
+        languageDownloader = null
         super.onCleared()
     }
 }

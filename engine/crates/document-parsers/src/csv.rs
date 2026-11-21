@@ -105,6 +105,7 @@ impl BlockSource for CsvSource {
                 header: self.record == 1,
                 cells,
                 styles: Vec::new(),
+                cell_spans: Vec::new(),
             });
             produced += 1;
         }

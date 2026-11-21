@@ -11,10 +11,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xfiles.core.documents.DocumentRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
+/**
+ * Plain-text editor session. The text is LF-only in [text]; [EditorState] carries the file's encoding
+ * and line ending, which the user can change before a save. Encoding and line-ending work runs on
+ * Dispatchers.Default, and the save writes bytes through the repository on its IO dispatcher.
+ */
 @HiltViewModel
 class TextEditorViewModel @Inject constructor(private val documents: DocumentRepository) : ViewModel() {
     val text = TextFieldState()
@@ -22,12 +29,64 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
     val state = mutableState.asStateFlow()
     private var baseline = ""
 
+    /** Opens text that the caller already decoded (UTF-8, LF). */
     fun open(name: String, source: String) {
         if (mutableState.value?.saving == true) return
-        baseline = source
-        text.setTextAndPlaceCursorAtEnd(source)
-        mutableState.value = EditorState(name)
+        val overCap = source.toByteArray(Charsets.UTF_8).size > TextCodec.EDIT_CAP_BYTES
+        baseline = if (overCap) "" else source
+        text.setTextAndPlaceCursorAtEnd(baseline)
+        mutableState.value = EditorState(name, blocked = if (overCap) OVER_CAP else null)
     }
+
+    /**
+     * Opens a file from its bytes: the encoding and line endings are detected, and the editor keeps
+     * them for the save. Files over [TextCodec.EDIT_CAP_BYTES] or with mixed line endings open read-only.
+     * The caller reads at most EDIT_CAP_BYTES + 1 bytes, so a large file never loads in full.
+     */
+    fun openBytes(name: String, bytes: ByteArray) {
+        if (mutableState.value?.saving == true) return
+        if (bytes.size > TextCodec.EDIT_CAP_BYTES) {
+            baseline = ""
+            text.setTextAndPlaceCursorAtEnd("")
+            mutableState.value = EditorState(name, blocked = OVER_CAP)
+            return
+        }
+        viewModelScope.launch {
+            val decoded = withContext(Dispatchers.Default) { TextCodec.decode(bytes) }
+            baseline = decoded.text
+            text.setTextAndPlaceCursorAtEnd(decoded.text)
+            mutableState.value = EditorState(
+                name = name,
+                encoding = decoded.encoding,
+                lineEnding = decoded.lineEnding,
+                blocked = if (decoded.mixedLineEndings) MIXED_LINE_ENDINGS else null,
+            )
+        }
+    }
+
+    /**
+     * Opens the file at [uri] with its detected encoding and line endings. Reads at most the cap plus one
+     * byte on the IO dispatcher, so a large file is refused without being loaded whole.
+     */
+    fun openFile(name: String, uri: Uri) {
+        if (mutableState.value?.saving == true) return
+        viewModelScope.launch {
+            val bytes = try {
+                documents.readBoundedBytes(uri, TextCodec.EDIT_CAP_BYTES + 1)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("XfilesEditor", "Could not read file for editing", error)
+                mutableState.value = EditorState(name, blocked = READ_FAILED)
+                return@launch
+            }
+            openBytes(name, bytes)
+        }
+    }
+
+    fun chooseEncoding(encoding: TextEncoding) = updateState { it.copy(encoding = encoding, saved = false) }
+
+    fun chooseLineEnding(lineEnding: LineEnding) = updateState { it.copy(lineEnding = lineEnding, saved = false) }
 
     fun hasChanges(): Boolean = text.text.toString() != baseline
 
@@ -95,29 +154,51 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
         return if (name == "Note.txt") name else "$stem - copy.$extension"
     }
 
+    /** Writes the text in the chosen encoding and line ending to a new copy at [uri]. */
     fun save(uri: Uri) {
         val current = mutableState.value ?: return
-        if (current.saving) return
+        if (current.saving || current.blocked != null) return
         val content = text.text.toString()
-        mutableState.value = current.copy(saving = true, saved = false, error = false)
+        mutableState.value = current.copy(saving = true, saved = false, error = null)
         viewModelScope.launch {
             try {
-                documents.saveTextCopy(uri, content)
+                val bytes = withContext(Dispatchers.Default) { TextCodec.encode(content, current.encoding, current.lineEnding) }
+                documents.saveBytesCopy(uri, bytes)
                 baseline = content
-                mutableState.value = current.copy(saving = false, saved = true, error = false)
+                updateState { it.copy(saving = false, saved = true, error = null) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (error: TextEncodingException) {
+                updateState { it.copy(saving = false, saved = false, error = error.message) }
             } catch (error: Exception) {
                 Log.w("XfilesEditor", "Could not save text copy", error)
-                mutableState.value = current.copy(saving = false, saved = false, error = true)
+                updateState { it.copy(saving = false, saved = false, error = COPY_FAILED) }
             }
         }
     }
+
+    private inline fun updateState(transform: (EditorState) -> EditorState) {
+        mutableState.value?.let { mutableState.value = transform(it) }
+    }
+
+    companion object {
+        const val OVER_CAP = "This file is larger than the 256 KiB editing limit, so it stays read-only here. Use Save As in another app for large files."
+        const val MIXED_LINE_ENDINGS = "This file mixes line endings. Saving would change some of them, so it stays read-only here."
+        const val COPY_FAILED = "The copy could not be saved."
+        const val READ_FAILED = "The file could not be opened for editing."
+    }
 }
 
+/**
+ * Editor state. [blocked] explains why editing is off (the text stays visible). [error] is a message
+ * from the last save, or null.
+ */
 data class EditorState(
     val name: String,
+    val encoding: TextEncoding = TextEncoding.Utf8,
+    val lineEnding: LineEnding = LineEnding.Lf,
+    val blocked: String? = null,
     val saving: Boolean = false,
     val saved: Boolean = false,
-    val error: Boolean = false,
+    val error: String? = null,
 )

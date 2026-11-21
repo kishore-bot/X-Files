@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.hilt.viewmodel.compose)
     implementation(project(":core:designsystem"))
     implementation(project(":core:documents"))
+    implementation(project(":documentEngine"))
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.lifecycle.viewmodel)

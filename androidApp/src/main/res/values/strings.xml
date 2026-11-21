@@ -12,4 +12,5 @@
     <string name="widget_fily">Ask Fily</string>
     <string name="widget_open">Open a file</string>
     <string name="widget_empty">Recent files appear here.</string>
+    <string name="appfunctions_app_instructions">Xfiles is a document reader and file manager that works on this phone. Find files by name or kind, list recent files, open a file for reading, summarize the start of a document when the user allows reading inside files, create a text note for review, or scan pages to PDF. Nothing is saved, shared or printed without the user\'s confirmation on screen.</string>
 </resources>

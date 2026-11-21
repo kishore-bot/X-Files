@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the single-entry cache written by ArchiveRepository.openEntry is shared, and only with this app. -->
+<paths>
+    <cache-path name="archive-open" path="archive-open/" />
+</paths>

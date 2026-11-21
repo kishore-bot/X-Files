@@ -19,7 +19,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use document_core::style::{BOLD, ITALIC, STRIKE, UNDERLINE};
-use document_core::{Block, ErrorKind, FormatId, Result, Rich};
+use document_core::{Block, CancelToken, ErrorKind, FormatId, Result, Rich};
 
 use crate::dom::{self, Node};
 use crate::numfmt::general;
@@ -28,9 +28,121 @@ use crate::ooxml::{is_safe_link, resolve_inside};
 use crate::rich::RichBuilder;
 use crate::stream::{BlockSource, MAX_PENDING_TEXT, Parts};
 use crate::xlsx::MAX_COLUMNS;
-use crate::xml::{Tag, Xml};
+use crate::xml::{Tag, Xml, XmlReader};
 
 const MAX_REPEAT: u32 = 1000;
+
+/// Largest `settings.xml` read for view settings. Real files are a few kilobytes.
+const MAX_SETTINGS_BYTES: usize = 8 << 20;
+/// `HorizontalSplitMode` / `VerticalSplitMode` value of a frozen split (1 is a plain split).
+const SPLIT_FROZEN: u32 = 2;
+
+/// Split settings of one sheet, from its `config:config-item` values.
+#[derive(Default)]
+struct Split {
+    h_mode: u32,
+    v_mode: u32,
+    h_pos: u32,
+    v_pos: u32,
+}
+
+impl Split {
+    fn set(&mut self, item: &str, text: &str) {
+        let value = text.trim().parse::<u32>().unwrap_or(0);
+        match item {
+            "HorizontalSplitMode" => self.h_mode = value,
+            "VerticalSplitMode" => self.v_mode = value,
+            "HorizontalSplitPosition" => self.h_pos = value,
+            "VerticalSplitPosition" => self.v_pos = value,
+            _ => {}
+        }
+    }
+}
+
+/// Frozen panes of each sheet in an ODS `settings.xml`, as (rows, columns), taken from the
+/// first view only (the one ODS opens). A split is a freeze only when its mode is
+/// [`SPLIT_FROZEN`]; sheets without one are left out. Oversized or unparsable settings give none.
+///
+/// Path: `ooo:view-settings` > `Views` (indexed map) > view entry > `Tables` (named map) >
+/// sheet entry (`config:name` = sheet name) > `config:config-item`.
+pub(crate) fn ods_frozen_panes(settings: &[u8]) -> HashMap<String, (u32, u32)> {
+    let mut panes = HashMap::new();
+    if settings.len() > MAX_SETTINGS_BYTES {
+        return panes;
+    }
+    let mut splits: HashMap<String, Split> = HashMap::new();
+    let mut views = 0u32;
+    // Open elements as (local name, config:name), outermost first.
+    let mut open: Vec<(String, String)> = Vec::new();
+    // Sheet, item name and text of the `config:config-item` being read.
+    let mut item: Option<(String, String, String)> = None;
+    let mut xml = XmlReader::new(settings, CancelToken::default());
+    loop {
+        let (tag, empty) = match xml.next() {
+            Ok(Xml::Start(tag)) => (tag, false),
+            Ok(Xml::Empty(tag)) => (tag, true),
+            Ok(Xml::End(name)) => {
+                if name.as_str() == "config-item" {
+                    if let Some((sheet, key, text)) = item.take() {
+                        splits.entry(sheet).or_default().set(&key, &text);
+                    }
+                }
+                open.pop();
+                continue;
+            }
+            Ok(Xml::Text(text)) => {
+                if let Some((_, _, buffer)) = item.as_mut() {
+                    buffer.push_str(&text);
+                }
+                continue;
+            }
+            Ok(Xml::Eof) => break,
+            Err(_) => return HashMap::new(),
+        };
+        let name = tag.name.as_str();
+        let key = tag.attr("name").unwrap_or("").to_owned();
+        if name == "config-item-map-entry" && ods_parent_is(&open, "config-item-map-indexed", "Views") {
+            views += 1;
+        }
+        if name == "config-item" && views == 1 && !empty {
+            if let Some(sheet) = ods_table_entry(&open) {
+                item = Some((sheet, key.clone(), String::new()));
+            }
+        }
+        if !empty {
+            open.push((name.to_owned(), key));
+        }
+    }
+    for (sheet, split) in splits {
+        let rows = if split.v_mode == SPLIT_FROZEN { split.v_pos } else { 0 };
+        let columns = if split.h_mode == SPLIT_FROZEN { split.h_pos } else { 0 };
+        if rows > 0 || columns > 0 {
+            panes.insert(sheet, (rows, columns));
+        }
+    }
+    panes
+}
+
+fn ods_parent_is(open: &[(String, String)], name: &str, key: &str) -> bool {
+    open.last().is_some_and(|(n, k)| n == name && k == key)
+}
+
+/// Sheet name when the open elements end with a sheet entry of the first view's `Tables` map.
+fn ods_table_entry(open: &[(String, String)]) -> Option<String> {
+    let n = open.len();
+    if n < 5 {
+        return None;
+    }
+    let chain = &open[n - 5..];
+    let is = |frame: &(String, String), name: &str, key: &str| frame.0 == name && frame.1 == key;
+    let matches = is(&chain[0], "config-item-set", "ooo:view-settings")
+        && is(&chain[1], "config-item-map-indexed", "Views")
+        && chain[2].0 == "config-item-map-entry"
+        && is(&chain[3], "config-item-map-named", "Tables")
+        && chain[4].0 == "config-item-map-entry"
+        && !chain[4].1.is_empty();
+    matches.then(|| chain[4].1.clone())
+}
 
 pub(crate) struct OdfSource {
     parts: Parts,
@@ -400,6 +512,7 @@ impl OdfSource {
                 header,
                 cells: cells.clone(),
                 styles: Vec::new(),
+                cell_spans: Vec::new(),
             });
         }
     }

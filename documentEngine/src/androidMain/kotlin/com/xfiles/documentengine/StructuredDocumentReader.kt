@@ -2,6 +2,8 @@ package com.xfiles.documentengine
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.os.ParcelFileDescriptor
+import com.xfiles.documents.book.BookManifest
 import com.xfiles.documents.structure.CellAlign
 import com.xfiles.documents.structure.CellLook
 import com.xfiles.documents.structure.ContentBatch
@@ -29,6 +31,7 @@ import com.xfiles.engine.ffi.NativeShape
 import com.xfiles.engine.ffi.NativeSpan
 import com.xfiles.engine.ffi.ReadException
 import com.xfiles.engine.ffi.openBorrowedFd
+import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -38,9 +41,20 @@ import kotlinx.coroutines.withContext
 class StructuredDocumentReader(private val resolver: ContentResolver) {
     private val io = Dispatchers.IO.limitedParallelism(1)
 
-    suspend fun read(uri: Uri, name: String, password: String? = null): StructuredDocument = withContext(io) {
+    suspend fun read(uri: Uri, name: String, password: String? = null): StructuredDocument =
+        readWith(name, password) { resolver.openFileDescriptor(uri, "r") ?: throw IOException("Document could not be opened") }
+
+    /** Reads a private file, such as an edited copy staged by office find and replace. */
+    suspend fun readFile(file: File, name: String): StructuredDocument =
+        readWith(name, null) { ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY) }
+
+    private suspend fun readWith(
+        name: String,
+        password: String?,
+        descriptorOf: () -> ParcelFileDescriptor,
+    ): StructuredDocument = withContext(io) {
         try {
-            val descriptor = resolver.openFileDescriptor(uri, "r") ?: throw IOException("Document could not be opened")
+            val descriptor = descriptorOf()
             val limits = NativeLimits(128uL * 1024uL * 1024uL, 64uL * 1024uL, 4uL * 1024uL * 1024uL)
             val open = descriptor.use { source -> openBorrowedFd(source.fd, name, limits, password) }
             open.use { session ->
@@ -82,7 +96,20 @@ class StructuredDocumentReader(private val resolver: ContentResolver) {
                         if (imageBudget == 0) break
                     }
                 }
-                StructuredDocument(info, blocks, images, truncated)
+                // An EPUB's contents and footnotes are asked for while the session is open; it is read after the text.
+                val book = if (info.format == DocumentFormat.Epub) {
+                    val json = try {
+                        session.resource(BookManifest.RESOURCE).decodeToString()
+                    } catch (error: ReadException.Cancelled) {
+                        throw CancellationException(error.detail)
+                    } catch (_: ReadException) {
+                        null
+                    }
+                    json?.let(BookManifest::parseOrNull)
+                } else {
+                    null
+                }
+                StructuredDocument(info, blocks, images, truncated, book)
             }
         } catch (error: ReadException) {
             throw error.toDomain()
@@ -160,7 +187,13 @@ private fun NativeBatch.toDomain() = ContentBatch(
             is NativeBlock.Code -> ContentBlock.Code(block.text, block.language, block.firstLine?.toInt())
             NativeBlock.Divider -> ContentBlock.Divider
             is NativeBlock.TableRow ->
-                ContentBlock.TableRow(block.row?.toInt(), block.cells, block.header, block.styles.map { it.toInt() })
+                ContentBlock.TableRow(
+                    block.row?.toInt(),
+                    block.cells,
+                    block.header,
+                    block.styles.map { it.toInt() },
+                    block.cellSpans.map { it.toDomain() },
+                )
             is NativeBlock.CellStyle -> ContentBlock.CellStyle(block.index.toInt(), block.style.toDomain())
             is NativeBlock.Merge -> ContentBlock.Merge(
                 block.firstRow.toInt(),

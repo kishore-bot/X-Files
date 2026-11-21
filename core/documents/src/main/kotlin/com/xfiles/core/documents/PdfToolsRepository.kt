@@ -7,11 +7,25 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import com.xfiles.documentengine.InvalidPdfSelection
+import com.xfiles.documentengine.PdfCompressSummary
 import com.xfiles.documentengine.PdfOperation
+import com.xfiles.documentengine.PdfPageEdit
 import com.xfiles.documentengine.PdfPasswordRequired
+import com.xfiles.documentengine.PdfRewriteReport
+import com.xfiles.documentengine.compressPdf
+import com.xfiles.documentengine.inspectPdfTool
 import com.xfiles.documentengine.rewritePdf
+import com.xfiles.documentengine.signPdf
+import com.xfiles.documentengine.splitPdf
+import com.xfiles.documentengine.watermarkPdf
 import com.xfiles.documentengine.writePdfMarkup
+import com.xfiles.documents.PdfCompressQuality
 import com.xfiles.documents.PdfMarkup
+import com.xfiles.documents.PdfProtectionChoice
+import com.xfiles.documents.statusLine
+import com.xfiles.documents.PdfPageSpan
+import com.xfiles.documents.PdfSignSpec
+import com.xfiles.documents.PdfWatermarkSpec
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +65,21 @@ data class PreparedPdf(
     val droppedMetadata: Boolean,
     val signedSource: Boolean,
     val archivalSource: Boolean,
+    /** What happened to the protection, in words. Null when the source wasn't protected. */
+    val protectionNote: String? = null,
 )
+
+/** A PDF copied into the workspace for one of the dedicated tools. Release it when done. */
+class OpenedPdf(
+    val uri: Uri,
+    val file: File,
+    val pageCount: Int,
+    val password: String?,
+    val signed: Boolean,
+    val archival: Boolean,
+)
+
+class CompressedPdf(val prepared: PreparedPdf, val summary: PdfCompressSummary)
 
 class PdfPageRangeError(val pageCount: Int) : IllegalArgumentException()
 class PdfToolPasswordError(val wrong: Boolean) : IllegalArgumentException()
@@ -142,6 +170,143 @@ class PdfToolsRepository @Inject constructor(@ApplicationContext context: Contex
         }
     }
 
+    /** Copies [uri] into the workspace and reads what the tools need. Throws [PdfToolPasswordError]. */
+    suspend fun open(uri: Uri, password: String?): OpenedPdf = withContext(io) {
+        ensureWorkspace()
+        val file = File.createTempFile("tool-source-", ".pdf", cache)
+        try {
+            stage(uri, file, INPUT_BUDGET)
+            val info = inspectPdfTool(file, password)
+            OpenedPdf(uri, file, info.pages, password, info.signed, info.archival)
+        } catch (error: PdfPasswordRequired) {
+            file.delete()
+            throw PdfToolPasswordError(error.wrong)
+        } catch (error: Throwable) {
+            file.delete()
+            throw error
+        }
+    }
+
+    fun release(opened: OpenedPdf) {
+        opened.file.delete()
+    }
+
+    /**
+     * Pages in the given order and turns. A full permutation uses the strict
+     * reorder op, which the engine checks. A subset (after deletions) is a rebuild.
+     */
+    suspend fun reorder(opened: OpenedPdf, pages: List<PdfPageEdit>, onProgress: (Int, Int) -> Unit): PreparedPdf =
+        produce { work ->
+            val permutation = pages.size == opened.pageCount && pages.map { it.page }.toSet().size == opened.pageCount
+            val operation = if (permutation) PdfOperation.Reorder(pages) else PdfOperation.Rebuild(pages)
+            val report: PdfRewriteReport = rewritePdf(listOf(opened.file), work, operation, opened.password, onProgress)
+            PreparedPdf(work, report.pages, report.droppedMetadata, opened.signed, opened.archival)
+        }
+
+    /** Compacts at [quality]. A protected source is protected again as [protection] says. */
+    suspend fun compress(
+        opened: OpenedPdf,
+        quality: PdfCompressQuality,
+        protection: PdfProtectionChoice,
+        onProgress: (Int, Int) -> Unit,
+    ): CompressedPdf = produce { work ->
+        val summary = compressPdf(opened.file, work, opened.password, quality, protection, onProgress)
+        CompressedPdf(
+            prepared = PreparedPdf(
+                work,
+                summary.pages,
+                droppedMetadata = false,
+                signedSource = opened.signed,
+                archivalSource = opened.archival,
+                protectionNote = summary.protection.statusLine(summary.restrictionsKept),
+            ),
+            summary = summary,
+        )
+    }
+
+    suspend fun watermark(
+        opened: OpenedPdf,
+        spec: PdfWatermarkSpec,
+        protection: PdfProtectionChoice,
+        onProgress: (Int, Int) -> Unit,
+    ): PreparedPdf =
+        produce { work ->
+            val summary = watermarkPdf(opened.file, work, spec, opened.password, protection, onProgress)
+            PreparedPdf(
+                work,
+                summary.pages,
+                droppedMetadata = false,
+                signedSource = opened.signed,
+                archivalSource = opened.archival,
+                protectionNote = summary.protection.statusLine(summary.restrictionsKept),
+            )
+        }
+
+    suspend fun sign(
+        opened: OpenedPdf,
+        spec: PdfSignSpec,
+        protection: PdfProtectionChoice,
+        onProgress: (Int, Int) -> Unit,
+    ): PreparedPdf =
+        produce { work ->
+            val summary = signPdf(opened.file, work, spec, opened.password, protection, onProgress)
+            PreparedPdf(
+                work,
+                summary.pages,
+                droppedMetadata = false,
+                signedSource = opened.signed,
+                archivalSource = opened.archival,
+                protectionNote = summary.protection.statusLine(summary.restrictionsKept),
+            )
+        }
+
+    /** One output per span, in order. The caller saves or discards each. */
+    suspend fun split(opened: OpenedPdf, spans: List<PdfPageSpan>, onProgress: (Int, Int) -> Unit): List<PreparedPdf> {
+        var outputs: List<File> = emptyList()
+        var complete = false
+        try {
+            val parts = withContext(io) {
+                ensureWorkspace()
+                val files = spans.map { File.createTempFile("xfiles-part-", ".pdf", cache) }
+                outputs = files
+                mapToolErrors {
+                    val reports = splitPdf(opened.file, spans, files, opened.password, onProgress)
+                    reports.zip(files).map { (report, file) ->
+                        PreparedPdf(file, report.pages, report.droppedMetadata, opened.signed, opened.archival)
+                    }
+                }
+            }
+            complete = true
+            return parts
+        } finally {
+            if (!complete) outputs.forEach { it.delete() }
+        }
+    }
+
+    /**
+     * Creates one document per part in the picked folder, under the given names.
+     * If any write fails, the documents already created are removed.
+     */
+    suspend fun saveAll(parts: List<PreparedPdf>, names: List<String>, folder: Uri): List<Uri> = withContext(io) {
+        require(parts.size == names.size) { "Each part needs a name." }
+        val parent = DocumentsContract.buildDocumentUriUsingTree(folder, DocumentsContract.getTreeDocumentId(folder))
+        val created = mutableListOf<Uri>()
+        try {
+            for ((part, name) in parts.zip(names)) {
+                currentCoroutineContext().ensureActive()
+                val target = DocumentsContract.createDocument(resolver, parent, "application/pdf", safeName(name))
+                    ?: throw IOException("Can't create $name in that folder")
+                created += target
+                val stream = resolver.openOutputStream(target, "wt") ?: throw IOException("Can't write $name")
+                stream.use { out -> part.file.inputStream().use { it.copyTo(out) } }
+            }
+            created
+        } catch (error: Exception) {
+            created.forEach { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+            throw error
+        }
+    }
+
     suspend fun save(pdf: PreparedPdf, destination: Uri) = withContext(io) {
         try {
             val stream = resolver.openOutputStream(destination, "wt") ?: throw IOException("Can't open the selected destination")
@@ -151,6 +316,36 @@ class PdfToolsRepository @Inject constructor(@ApplicationContext context: Contex
             runCatching { DocumentsContract.deleteDocument(resolver, destination) }
             throw error
         }
+    }
+
+    /** Runs one engine call into a fresh workspace file, deleting that file if it fails. */
+    private suspend fun <T> produce(block: suspend (File) -> T): T {
+        var output: File? = null
+        var complete = false
+        try {
+            val result = withContext(io) {
+                ensureWorkspace()
+                val work = File.createTempFile("xfiles-pdf-", ".pdf", cache)
+                output = work
+                mapToolErrors { block(work) }
+            }
+            complete = true
+            return result
+        } finally {
+            if (!complete) output?.delete()
+        }
+    }
+
+    private fun ensureWorkspace() {
+        if (!cache.isDirectory && !cache.mkdirs()) throw IOException("PDF workspace is unavailable")
+    }
+
+    private inline fun <T> mapToolErrors(block: () -> T): T = try {
+        block()
+    } catch (error: InvalidPdfSelection) {
+        throw PdfPageRangeError(error.pageCount)
+    } catch (error: PdfPasswordRequired) {
+        throw PdfToolPasswordError(error.wrong)
     }
 
     private suspend fun stage(uri: Uri, target: File, budget: Long): Long {
@@ -174,5 +369,11 @@ class PdfToolsRepository @Inject constructor(@ApplicationContext context: Contex
 
     private companion object {
         const val INPUT_BUDGET = 64L * 1024L * 1024L
+
+        /** Strips characters a document provider rejects, and makes sure the name ends in .pdf. */
+        fun safeName(name: String): String {
+            val cleaned = name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim().ifEmpty { "Document" }
+            return if (cleaned.endsWith(".pdf", ignoreCase = true)) cleaned else "$cleaned.pdf"
+        }
     }
 }

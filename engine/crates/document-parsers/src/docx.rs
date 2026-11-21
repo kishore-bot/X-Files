@@ -587,7 +587,7 @@ impl DocxSource {
             return;
         }
         table.row_index += 1;
-        out.push_back(Block::TableRow { row: None, header: table.row_is_header, cells, styles: Vec::new() });
+        out.push_back(Block::TableRow { row: None, header: table.row_is_header, cells, styles: Vec::new(), cell_spans: Vec::new() });
     }
 
     fn end_paragraph(&mut self, out: &mut VecDeque<Block>) {

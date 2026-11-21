@@ -23,7 +23,12 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-enum class ScanFilter(val label: String) { Original("Original"), Enhance("Enhance"), BlackAndWhite("Black & white") }
+enum class ScanFilter(val label: String) {
+    Original("Original"),
+    Enhance("Enhance"),
+    Grayscale("Grayscale"),
+    BlackAndWhite("Black & white"),
+}
 
 /** One analysed camera frame: the page outline (fractions of the frame), and whether the frame is sharp. */
 data class ScanFrame(val outline: PageQuad?, val sharp: Boolean)
@@ -36,6 +41,17 @@ data class ScanFrame(val outline: PageQuad?, val sharp: Boolean)
 @Singleton
 class ScanProcessing @Inject constructor(@ApplicationContext context: Context) {
     private val pages = File(context.cacheDir, "scans")
+    private val preferences = context.applicationContext.getSharedPreferences("scan", Context.MODE_PRIVATE)
+
+    /** The filter chosen last time, or Enhance. Reads the preferences file once, so call it off the main thread. */
+    suspend fun lastFilter(): ScanFilter = withContext(Dispatchers.IO) {
+        runCatching { ScanFilter.valueOf(preferences.getString(KEY_FILTER, null).orEmpty()) }.getOrDefault(ScanFilter.Enhance)
+    }
+
+    /** Remembers [filter] for the next scan. Writes on IO; the caller does not wait for the disk. */
+    suspend fun rememberFilter(filter: ScanFilter) = withContext(Dispatchers.IO) {
+        preferences.edit().putString(KEY_FILTER, filter.name).apply()
+    }
 
     /** [luma] is a downsampled frame, one brightness byte per pixel. Blocking; call off the main thread. */
     fun analyze(luma: ByteArray, width: Int, height: Int): ScanFrame {
@@ -44,6 +60,21 @@ class ScanProcessing @Inject constructor(@ApplicationContext context: Context) {
             imagingSharpness(luma, width.toUInt(), height.toUInt()).let { !it.judged || !it.blurry }
         }.getOrDefault(true)
         return ScanFrame(outline, sharp)
+    }
+
+    /**
+     * A filtered copy of [source] for the review screen's preview. The caller owns the copy and recycles it.
+     * Blocking, so call it off the main thread.
+     */
+    fun previewCopy(source: Bitmap, filter: ScanFilter): Bitmap {
+        val copy = source.copy(Bitmap.Config.ARGB_8888, true) ?: error("The preview could not be copied.")
+        try {
+            applyFilter(copy, filter)
+        } catch (error: Throwable) {
+            copy.recycle()
+            throw error
+        }
+        return copy
     }
 
     /** The captured [photo] cut to [outline] (whole frame when null), filtered and saved as a JPEG page. */
@@ -105,6 +136,7 @@ class ScanProcessing @Inject constructor(@ApplicationContext context: Context) {
         page.getPixels(pixels, 0, page.width, 0, 0, page.width, page.height)
         when (filter) {
             ScanFilter.Enhance -> enhance(pixels)
+            ScanFilter.Grayscale -> grayscale(pixels)
             ScanFilter.BlackAndWhite -> {
                 val luma = ByteArray(pixels.size) { lumaOf(pixels[it]).toByte() }
                 val ink = imagingBinarize(luma, page.width.toUInt(), page.height.toUInt())
@@ -113,6 +145,22 @@ class ScanProcessing @Inject constructor(@ApplicationContext context: Context) {
             ScanFilter.Original -> Unit
         }
         page.setPixels(pixels, 0, page.width, 0, 0, page.width, page.height)
+    }
+
+    /**
+     * Luminance only, with a gentle S-curve (a 35% blend toward smoothstep) so paper lifts and ink deepens
+     * without the hard clip of a threshold. One 256-entry table, one pass over the pixels.
+     */
+    private fun grayscale(pixels: IntArray) {
+        val curve = IntArray(256) { level ->
+            val t = level / 255f
+            val smooth = t * t * (3f - 2f * t)
+            (level + (smooth * 255f - level) * GRAYSCALE_CONTRAST).roundToInt().coerceIn(0, 255)
+        }
+        for (i in pixels.indices) {
+            val g = curve[lumaOf(pixels[i])]
+            pixels[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
+        }
     }
 
     /** Stretches brightness between the 2nd and 98th percentile, so grey paper turns white and ink dark. */
@@ -140,7 +188,12 @@ class ScanProcessing @Inject constructor(@ApplicationContext context: Context) {
 
     private fun lumaOf(argb: Int): Int = (((argb shr 16) and 0xFF) * 299 + ((argb shr 8) and 0xFF) * 587 + (argb and 0xFF) * 114) / 1000
 
-    private companion object {
-        const val MAX_SIDE = 3000
+    companion object {
+        /** Pages one scan can hold. The camera stops at this and the pictures list refuses more. */
+        const val MAX_SCAN_PAGES = 50
+
+        private const val MAX_SIDE = 3000
+        private const val KEY_FILTER = "filter"
+        private const val GRAYSCALE_CONTRAST = 0.35f
     }
 }

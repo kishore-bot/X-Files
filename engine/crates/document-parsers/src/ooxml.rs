@@ -1,10 +1,107 @@
 //! Office Open XML package conventions shared by DOCX, XLSX and PPTX:
 //! relationship files and target resolution.
 
-use document_core::{CancelToken, Result};
+use std::collections::{HashMap, HashSet};
+use std::io::{Cursor, Write};
+
+use document_core::{CancelToken, EngineError, Result};
+use flate2::write::DeflateEncoder;
+use flate2::Compression;
 
 use crate::xml::{Xml, XmlReader};
 use crate::zip::ZipArchive;
+
+/// Changes applied while copying an OPC package into a new ZIP.
+#[derive(Default)]
+pub(crate) struct PackageEdit {
+    /// Replacement contents for existing parts, keyed by archive path.
+    pub replace: HashMap<String, Vec<u8>>,
+    /// Existing parts to drop from the output.
+    pub remove: HashSet<String>,
+    /// New parts appended after the existing ones, in order.
+    pub add: Vec<(String, Vec<u8>)>,
+}
+
+/// Rewrites `original` with `edit` applied. Kept parts are read, deflated and
+/// written one at a time, so only the output buffer and one part are resident.
+/// Parts keep their archive order; added parts follow them.
+pub(crate) fn rewrite_package(original: &[u8], edit: &PackageEdit) -> std::result::Result<Vec<u8>, EngineError> {
+    let mut archive = ZipArchive::open(
+        Box::new(Cursor::new(original.to_vec())),
+        original.len() as u64,
+        document_core::Limits { max_part_bytes: u64::MAX, ..document_core::Limits::default() },
+        CancelToken::default(),
+    )?;
+    let names: Vec<String> = archive.entries().iter().map(|e| e.name.clone()).collect();
+    let mut out = Cursor::new(Vec::new());
+    let mut central = Vec::new();
+    let mut count: u16 = 0;
+
+    let write_part = |name: &str, data: &[u8], out: &mut Cursor<Vec<u8>>, central: &mut Vec<u8>| -> std::result::Result<(), EngineError> {
+        let offset = out.position() as u32;
+        let crc = crc32fast::hash(data);
+        let mut enc = DeflateEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(data).map_err(EngineError::from)?;
+        let compressed = enc.finish().map_err(EngineError::from)?;
+        let method: u16 = 8;
+        let mut local = Vec::with_capacity(30 + name.len());
+        local.extend(0x0403_4b50u32.to_le_bytes());
+        local.extend([20, 0, 0, 0]);
+        local.extend(method.to_le_bytes());
+        local.extend([0; 4]);
+        local.extend(crc.to_le_bytes());
+        local.extend((compressed.len() as u32).to_le_bytes());
+        local.extend((data.len() as u32).to_le_bytes());
+        local.extend((name.len() as u16).to_le_bytes());
+        local.extend(0u16.to_le_bytes());
+        local.extend(name.as_bytes());
+        out.write_all(&local).map_err(EngineError::from)?;
+        out.write_all(&compressed).map_err(EngineError::from)?;
+        central.extend(0x0201_4b50u32.to_le_bytes());
+        central.extend([20, 0, 20, 0, 0, 0]);
+        central.extend(method.to_le_bytes());
+        central.extend([0; 4]);
+        central.extend(crc.to_le_bytes());
+        central.extend((compressed.len() as u32).to_le_bytes());
+        central.extend((data.len() as u32).to_le_bytes());
+        central.extend((name.len() as u16).to_le_bytes());
+        central.extend([0; 12]);
+        central.extend(offset.to_le_bytes());
+        central.extend(name.as_bytes());
+        Ok(())
+    };
+
+    for name in &names {
+        if edit.remove.contains(name) {
+            continue;
+        }
+        match edit.replace.get(name) {
+            Some(new) => write_part(name.as_str(), new.as_slice(), &mut out, &mut central)?,
+            None => {
+                let data = archive.read_to_vec(name.as_str())?;
+                write_part(name.as_str(), data.as_slice(), &mut out, &mut central)?;
+            }
+        }
+        count = count.wrapping_add(1);
+    }
+    for (name, data) in &edit.add {
+        write_part(name.as_str(), data.as_slice(), &mut out, &mut central)?;
+        count = count.wrapping_add(1);
+    }
+
+    let cd_offset = out.position() as u32;
+    out.write_all(&central).map_err(EngineError::from)?;
+    let mut eocd = Vec::with_capacity(22);
+    eocd.extend(0x0605_4b50u32.to_le_bytes());
+    eocd.extend([0; 4]);
+    eocd.extend(count.to_le_bytes());
+    eocd.extend(count.to_le_bytes());
+    eocd.extend((central.len() as u32).to_le_bytes());
+    eocd.extend(cd_offset.to_le_bytes());
+    eocd.extend(0u16.to_le_bytes());
+    out.write_all(&eocd).map_err(EngineError::from)?;
+    Ok(out.into_inner())
+}
 
 pub(crate) struct Relationship {
     pub id: String,

@@ -13,6 +13,7 @@ import com.xfiles.core.documents.PdfPaper
 import com.xfiles.core.documents.PdfToolPasswordError
 import com.xfiles.core.documents.PdfPageRangeError
 import com.xfiles.core.documents.PreparedPdf
+import com.xfiles.core.documents.TextLayerOutcome
 import com.xfiles.core.documents.TextRecognitionRepository
 import com.xfiles.core.documents.ScanFilter
 import com.xfiles.core.documents.ScanProcessing
@@ -44,7 +45,8 @@ enum class ConvertTool(val label: String, val input: ToolInput) {
 enum class ToolInput { Pictures, Camera, Typing, Picture, Pdf, PdfAndPictures }
 
 sealed interface ConvertOutput {
-    data class Pdf(val pdf: PreparedPdf, val suggestedName: String) : ConvertOutput
+    /** [notice] says how far the searchable text layer got, when it was requested. */
+    data class Pdf(val pdf: PreparedPdf, val suggestedName: String, val notice: String? = null) : ConvertOutput
     data class Text(val text: String, val suggestedName: String) : ConvertOutput
     data class Done(val message: String) : ConvertOutput
 }
@@ -58,6 +60,8 @@ data class ConvertState(
     val progress: Float? = null,
     val output: ConvertOutput? = null,
     val error: String? = null,
+    /** Adds an invisible, searchable text layer (OCR) to Pictures to PDF and Scan to PDF. */
+    val searchable: Boolean = false,
     /** Text Fily drafted for Text to PDF, handed to the text field once. */
     val draft: String? = null,
     /** Set by the home-screen widget: the screen opens the camera once, then clears it. */
@@ -80,7 +84,20 @@ class ConvertViewModel @Inject constructor(
         viewModelScope.launch(scanLane) {
             try {
                 val page = scanProcessing.finishPage(photo, outline, filter)
-                mutableState.update { it.copy(pictures = (it.pictures + page).take(100), output = null, error = null) }
+                var accepted = false
+                // A page shot while the list was one short of the cap still lands only if it fits.
+                mutableState.update { state ->
+                    if (state.pictures.size < ScanProcessing.MAX_SCAN_PAGES) {
+                        accepted = true
+                        state.copy(pictures = state.pictures + page, output = null, error = null)
+                    } else {
+                        state
+                    }
+                }
+                if (!accepted) {
+                    File(page.path.orEmpty()).delete()
+                    fail(SCAN_LIMIT_MESSAGE)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -90,7 +107,15 @@ class ConvertViewModel @Inject constructor(
         }
     }
 
+    /** Turns the searchable-text option on or off for Pictures to PDF and Scan to PDF. Kept across tools. */
+    fun setSearchable(on: Boolean) = mutableState.update { it.copy(searchable = on) }
+
     private val scanLane = kotlinx.coroutines.Dispatchers.Default.limitedParallelism(1)
+
+    private companion object {
+        const val MAX_PICTURES = 100
+        const val SCAN_LIMIT_MESSAGE = "This scan has ${ScanProcessing.MAX_SCAN_PAGES} pages, the most one PDF holds. Save it, then start another."
+    }
 
     private val mutableState = MutableStateFlow(ConvertState())
     val state = mutableState.asStateFlow()
@@ -100,7 +125,7 @@ class ConvertViewModel @Inject constructor(
     fun select(tool: ConvertTool) {
         if (state.value.busy || state.value.tool == tool) return
         discardOutput()
-        mutableState.value = ConvertState(tool = tool)
+        mutableState.value = ConvertState(tool = tool, searchable = state.value.searchable)
     }
 
     /** Fily's hand-off: [tool] with its PDF or drafted text filled in, waiting for the user to run it. */
@@ -130,7 +155,11 @@ class ConvertViewModel @Inject constructor(
         if (uris.isEmpty()) return
         discardOutput()
         mutableState.update {
-            val pages = if (it.tool.input == ToolInput.Picture) uris.take(1) else (it.pictures + uris).distinct().take(100)
+            val pages = when (it.tool.input) {
+                ToolInput.Picture -> uris.take(1)
+                ToolInput.Camera -> (it.pictures + uris).distinct().take(ScanProcessing.MAX_SCAN_PAGES)
+                else -> (it.pictures + uris).distinct().take(MAX_PICTURES)
+            }
             it.copy(pictures = pages, output = null, error = null)
         }
     }
@@ -149,8 +178,12 @@ class ConvertViewModel @Inject constructor(
     fun run(text: String = "", password: String? = null, target: Uri? = null) {
         val current = state.value
         when (current.tool) {
-            ConvertTool.PicturesToPdf, ConvertTool.ScanToPdf -> collect(conversions.imagesToPdf(current.pictures, current.paper)) { pdf ->
-                ConvertOutput.Pdf(pdf, if (current.tool == ConvertTool.ScanToPdf) "Scan.pdf" else "Pictures.pdf")
+            ConvertTool.PicturesToPdf, ConvertTool.ScanToPdf -> collect(conversions.imagesToPdf(current.pictures, current.paper, current.searchable)) { composed ->
+                ConvertOutput.Pdf(
+                    composed.pdf,
+                    if (current.tool == ConvertTool.ScanToPdf) "Scan.pdf" else "Pictures.pdf",
+                    composed.textLayer?.let(::searchNotice),
+                )
             }
             ConvertTool.TextToPdf -> launch("The text could not be laid out as a PDF.") {
                 setOutput(ConvertOutput.Pdf(conversions.textToPdf(text, current.paper ?: PdfPaper.A4), "Text.pdf"))
@@ -252,6 +285,13 @@ class ConvertViewModel @Inject constructor(
                 mutableState.update { it.copy(busy = false, progress = null) }
             }
         }
+    }
+
+    /** The searchable outcome in words: none, some, or all of the pages. */
+    private fun searchNotice(outcome: TextLayerOutcome): String = when {
+        outcome.pagesWithText == 0 -> "No text was found, so the PDF isn't searchable."
+        outcome.pagesWithText < outcome.pages -> "Searchable on ${outcome.pagesWithText} of ${outcome.pages} pages."
+        else -> "Searchable on all ${outcome.pages} pages."
     }
 
     private fun setOutput(output: ConvertOutput) = mutableState.update { it.copy(output = output, error = null) }

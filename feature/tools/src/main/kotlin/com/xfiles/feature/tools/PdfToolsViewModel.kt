@@ -2,6 +2,7 @@ package com.xfiles.feature.tools
 
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -15,9 +16,13 @@ import com.xfiles.core.documents.PdfToolPasswordError
 import com.xfiles.core.documents.PdfToolsRepository
 import com.xfiles.core.documents.PreparedPdf
 import com.xfiles.documents.DocumentKind
+import com.xfiles.documents.PdfProtectionChoice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import com.xfiles.core.documents.AndroidPdfDocument
+import com.xfiles.core.documents.OpenedPdf
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -171,3 +176,199 @@ data class PdfToolsState(
     val error: String? = null,
     val convert: Boolean = false,
 )
+
+/** What a dedicated single-PDF tool shows about its source and its latest run. */
+data class PdfToolFrame(
+    val name: String = "",
+    val pageCount: Int = 0,
+    val signed: Boolean = false,
+    val archival: Boolean = false,
+    val opening: Boolean = false,
+    val needsPassword: Boolean = false,
+    val busy: Boolean = false,
+    val running: Boolean = false,
+    val saving: Boolean = false,
+    val saved: Boolean = false,
+    val progress: Float? = null,
+    val error: String? = null,
+    val outputs: List<PreparedPdf> = emptyList(),
+) {
+    val isOpen: Boolean get() = pageCount > 0
+}
+
+/**
+ * Lifecycle shared by the dedicated tools (Reorder, Split, Compress, Watermark, Sign).
+ * One source is copied into the workspace on open and released on close. Each run
+ * is a single cancellable job on the repository's io lane, and its outputs wait
+ * until the user saves or closes. A new run or a new source deletes the old outputs.
+ */
+abstract class PdfSingleFileToolViewModel<T>(
+    initialTool: T,
+    protected val tools: PdfToolsRepository,
+    protected val documents: DocumentRepository,
+    protected val pdf: AndroidPdfDocument,
+) : ViewModel() {
+    private val mutableTool = MutableStateFlow(initialTool)
+    val tool: StateFlow<T> = mutableTool.asStateFlow()
+    private val mutableFrame = MutableStateFlow(PdfToolFrame())
+    val frame: StateFlow<PdfToolFrame> = mutableFrame.asStateFlow()
+    private val mutableProtection = MutableStateFlow(PdfProtectionChoice.SameAsOriginal)
+    /** How a protected source is protected again on the result. Same as original by default. */
+    val protection: StateFlow<PdfProtectionChoice> = mutableProtection.asStateFlow()
+    protected val protectionChoice: PdfProtectionChoice get() = mutableProtection.value
+
+    fun setProtection(choice: PdfProtectionChoice) = mutableProtection.update { choice }
+    protected var source: OpenedPdf? = null
+    private var work: Job? = null
+
+    protected fun setTool(value: T) = mutableTool.update { value }
+
+    protected fun mutateFrame(transform: (PdfToolFrame) -> PdfToolFrame) = mutableFrame.update(transform)
+
+    /** Called once a source is open, so subclasses can seed their own state. */
+    protected open fun onOpened(opened: OpenedPdf) {}
+
+    /** Called when the source is released, so subclasses can clear theirs. */
+    protected open fun onReleased() {}
+
+    protected val openedSource: OpenedPdf? get() = source
+
+    fun open(uri: Uri, password: String? = null) {
+        if (mutableFrame.value.busy) return
+        release()
+        work = viewModelScope.launch {
+            mutateFrame { PdfToolFrame(opening = true, busy = true) }
+            try {
+                val name = documents.describe(uri).name
+                val opened = tools.open(uri, password)
+                source = opened
+                onOpened(opened)
+                mutateFrame {
+                    PdfToolFrame(
+                        name = name,
+                        pageCount = opened.pageCount,
+                        signed = opened.signed,
+                        archival = opened.archival,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: PdfToolPasswordError) {
+                val message = if (error.wrong) "That password did not unlock this PDF." else "This PDF is password protected. Enter its password."
+                mutateFrame { it.copy(opening = false, busy = false, needsPassword = true, error = message) }
+            } catch (error: LinkageError) {
+                Log.e("XfilesTools", "Rust document library unavailable", error)
+                mutateFrame { it.copy(opening = false, busy = false, error = "The PDF engine is unavailable on this device.") }
+            } catch (error: Exception) {
+                Log.w("XfilesTools", "Could not open PDF for a tool", error)
+                mutateFrame { it.copy(opening = false, busy = false, error = "This PDF could not be opened.") }
+            }
+        }
+    }
+
+    /** Runs [block] on the source. Its outputs wait for saving. */
+    protected fun runTool(block: suspend (OpenedPdf, (Int, Int) -> Unit) -> List<PreparedPdf>) {
+        val opened = source ?: return
+        if (mutableFrame.value.busy) return
+        mutableFrame.value.outputs.forEach { it.file.delete() }
+        work = viewModelScope.launch {
+            mutateFrame { it.copy(busy = true, running = true, progress = null, error = null, saved = false, outputs = emptyList()) }
+            try {
+                val outputs = block(opened) { done, total ->
+                    val fraction = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else null
+                    mutateFrame { it.copy(progress = fraction) }
+                }
+                mutateFrame { it.copy(busy = false, running = false, progress = null, outputs = outputs) }
+            } catch (cancelled: CancellationException) {
+                mutateFrame { it.copy(busy = false, running = false, progress = null) }
+                throw cancelled
+            } catch (error: PdfPageRangeError) {
+                fail("Choose pages from 1 to ${error.pageCount}.")
+            } catch (error: PdfToolPasswordError) {
+                fail("This PDF needs its password. Enter the password and try again.")
+            } catch (error: IllegalArgumentException) {
+                fail(error.message ?: "Check the options and try again.")
+            } catch (error: LinkageError) {
+                Log.e("XfilesTools", "Rust document library unavailable", error)
+                fail("The PDF engine is unavailable on this device.")
+            } catch (error: Exception) {
+                Log.w("XfilesTools", "PDF tool failed", error)
+                fail("The PDF could not be prepared. Check that it is readable.")
+            }
+        }
+    }
+
+    private fun fail(message: String) = mutateFrame { it.copy(busy = false, running = false, progress = null, error = message) }
+
+    /** Saves the single output of the last run to [destination] and deletes the workspace copy. */
+    fun save(destination: Uri) {
+        val output = mutableFrame.value.outputs.singleOrNull() ?: return
+        if (mutableFrame.value.busy) return
+        work = viewModelScope.launch {
+            mutateFrame { it.copy(busy = true, saving = true, error = null) }
+            try {
+                tools.save(output, destination)
+                output.file.delete()
+                mutateFrame { it.copy(busy = false, saving = false, outputs = emptyList(), saved = true) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("XfilesTools", "Could not export PDF", error)
+                mutateFrame { it.copy(busy = false, saving = false, error = "The PDF could not be saved here. Choose another location.") }
+            }
+        }
+    }
+
+    /**
+     * Writes every current output through [block] (for example one document per part),
+     * then deletes the workspace copies. Failure keeps the outputs so the user can retry.
+     */
+    protected fun persist(block: suspend (List<PreparedPdf>) -> Unit) {
+        val outputs = mutableFrame.value.outputs
+        if (outputs.isEmpty() || mutableFrame.value.busy) return
+        work = viewModelScope.launch {
+            mutateFrame { it.copy(busy = true, saving = true, error = null) }
+            try {
+                block(outputs)
+                outputs.forEach { it.file.delete() }
+                mutateFrame { it.copy(busy = false, saving = false, outputs = emptyList(), saved = true) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("XfilesTools", "Could not export PDF parts", error)
+                mutateFrame { it.copy(busy = false, saving = false, error = "The files could not be saved in that folder. Choose another folder.") }
+            }
+        }
+    }
+
+    fun cancel() {
+        if (mutableFrame.value.saving) return
+        work?.cancel()
+        mutateFrame { it.copy(busy = false, running = false, progress = null) }
+    }
+
+    /** Renders one page for previews. Cached by the document. */
+    protected suspend fun thumbnail(page: Int, maxEdge: Int = PREVIEW_EDGE): Bitmap {
+        val opened = source ?: throw IllegalStateException("No PDF is open")
+        return pdf.thumbnail(opened.uri, page, opened.password, maxEdge)
+    }
+
+    fun release() {
+        work?.cancel()
+        mutableFrame.value.outputs.forEach { it.file.delete() }
+        source?.let(tools::release)
+        source = null
+        onReleased()
+        mutableFrame.value = PdfToolFrame()
+    }
+
+    override fun onCleared() {
+        mutableFrame.value.outputs.forEach { it.file.delete() }
+        source?.let(tools::release)
+        super.onCleared()
+    }
+
+    companion object {
+        const val PREVIEW_EDGE = 1024
+    }
+}

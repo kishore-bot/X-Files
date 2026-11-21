@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -162,9 +163,28 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
                     }
                 }
             }
+            if (state.tool == ConvertTool.PicturesToPdf || state.tool == ConvertTool.ScanToPdf) {
+                item {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Searchable text")
+                            Text(
+                                "Reads each page on this phone and adds invisible text, so it can be searched and copied.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Switch(checked = state.searchable, onCheckedChange = viewModel::setSearchable, enabled = !state.busy)
+                    }
+                }
+            }
             state.error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             when (val output = state.output) {
-                is ConvertOutput.Pdf -> item { Text("Ready to save · ${output.pdf.pages} ${if (output.pdf.pages == 1) "page" else "pages"}") }
+                is ConvertOutput.Pdf -> item {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Ready to save · ${output.pdf.pages} ${if (output.pdf.pages == 1) "page" else "pages"}")
+                        output.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    }
+                }
                 is ConvertOutput.Text -> item {
                     SelectionContainer {
                         Text(output.text.take(4000), Modifier.fillMaxWidth().glassCard().padding(12.dp), style = MaterialTheme.typography.bodySmall)

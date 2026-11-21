@@ -50,6 +50,11 @@ class AndroidPdfDocument @Inject constructor(
     private val io = Dispatchers.IO.limitedParallelism(1)
     private val ocrCache = LruCache<String, Array<List<PdfTextLine>?>>(4)
 
+    /** Small page bitmaps for the page grid and scrubber, by document, page and size. Bounded in bytes. */
+    private val thumbnails = object : LruCache<String, Bitmap>(THUMBNAIL_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+
     /** Every PDF can be searched: through the text layer, or through OCR where there is none. */
     val canSearch: Boolean get() = true
 
@@ -208,6 +213,35 @@ class AndroidPdfDocument @Inject constructor(
         }
     }
 
+    /**
+     * One page as a small bitmap whose longest edge is [maxEdge] px. Cached per document, page and size, so
+     * returning to a thumbnail is instant. A request whose caller has left (a grid cell scrolled away) is
+     * dropped before it reaches the renderer.
+     */
+    suspend fun thumbnail(uri: Uri, index: Int, password: String?, maxEdge: Int): Bitmap {
+        val edge = maxEdge.coerceIn(32, MAX_THUMBNAIL_EDGE)
+        val key = "$uri|$index|$edge"
+        thumbnails.get(key)?.let { return it }
+        return withContext(io) {
+            currentCoroutineContext().ensureActive()
+            thumbnails.get(key)?.let { return@withContext it }
+            openRenderer(uri, password).use { pdf ->
+                if (pdf.pageCount <= 0) throw IOException("PDF has no pages")
+                pdf.openPage(index.coerceIn(0, pdf.pageCount - 1)).use { page ->
+                    val scale = edge.toFloat() / maxOf(page.width, page.height).coerceAtLeast(1)
+                    val bitmap = Bitmap.createBitmap(
+                        (page.width * scale).toInt().coerceAtLeast(1),
+                        (page.height * scale).toInt().coerceAtLeast(1),
+                        Bitmap.Config.ARGB_8888,
+                    )
+                    bitmap.eraseColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    bitmap.also { thumbnails.put(key, it) }
+                }
+            }
+        }
+    }
+
     suspend fun search(uri: Uri, query: String, password: String?): PdfSearchResult = withContext(io) {
         if (query.isBlank()) return@withContext PdfSearchResult(emptyList(), truncated = false)
         when {
@@ -320,6 +354,8 @@ class AndroidPdfDocument @Inject constructor(
         const val OCR_EDGE = 1800
         const val MAX_OCR_PAGES = 40
         const val MAX_OCR_SEARCH_PAGES = 80
+        const val MAX_THUMBNAIL_EDGE = 512
+        const val THUMBNAIL_CACHE_BYTES = 16 * 1024 * 1024
     }
 }
 

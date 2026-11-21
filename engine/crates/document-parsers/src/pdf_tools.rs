@@ -18,7 +18,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use document_core::{EngineError, ErrorKind, Limits, Result};
 use zeroize::Zeroizing;
 
-use crate::pdf_crypt::{Encryptor, MAX_R6_PASSWORD, secure_random};
+use crate::pdf_crypt::{CryptAlgorithm, EncryptSpec, Encryptor, MAX_R6_PASSWORD, secure_random};
 use crate::pdf_file::{LoadedObject, PageNode, PdfFile};
 use crate::pdf_syntax::{Dict, Obj, write_obj};
 
@@ -61,6 +61,11 @@ pub enum PdfToolOp {
     Rebuild {
         pages: Vec<PdfPagePick>,
     },
+    /// Every page of the one source exactly once, in the given order. Unlike
+    /// `Rebuild`, nothing may be dropped or repeated; each page may still turn.
+    Reorder {
+        pages: Vec<PdfPagePick>,
+    },
     /// All pages of the second source, before zero-based `at_page` of the first.
     InsertPages {
         at_page: u32,
@@ -78,6 +83,116 @@ pub enum PdfToolOp {
     /// printing). Needs just the print permission: a watermarked PDF that opens for anyone and allows
     /// printing must print without asking for its owner password.
     PrintCopy,
+    /// A plain copy of a protected source, for a step that then runs on it. Unlike `RemovePassword`
+    /// it doesn't refuse on the source's limits: the caller checks that the step itself is allowed,
+    /// and re-protects the result with [`ProtectionPlan`] so the limits come back.
+    Unlock,
+    /// Every page as it is, protected as `plan` says (see [`plan_protection`]).
+    Protect {
+        plan: ProtectionPlan,
+    },
+}
+
+/// What the caller asks for the protection of a result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PdfProtectionChoice {
+    /// The algorithm, `/P` limits and passwords the file had. Weak RC4 files stay RC4.
+    SameAsOriginal,
+    /// AES-256, with the file's limits kept.
+    Aes256,
+}
+
+/// What happened to a result's protection. The UI reports it in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PdfProtectionOutcome {
+    /// The source had no encryption, so the result has none.
+    NotProtected,
+    /// Protected again with the file's own algorithm and passwords.
+    Kept,
+    /// Protected with AES-256 as chosen. Limits (if any) are kept.
+    Upgraded,
+    /// The owner password wasn't given, so the file's limits are re-applied under a new random
+    /// owner password. Nobody can lift them, and the user never sees that password.
+    KeptNewOwner,
+    /// The file was opened with its owner password, which doesn't say the user password. The
+    /// result opens with the password the user typed, so it is the owner password too.
+    OwnerPasswordOpens,
+    /// The only protection was an empty user password and no limits, so there was nothing to keep.
+    SavedWithoutProtection,
+}
+
+/// The protection a source carries, read without changing anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PdfProtection {
+    pub encrypted: bool,
+    pub algorithm: Option<CryptAlgorithm>,
+    /// The `/P` bits as stored.
+    pub permissions: u32,
+    pub encrypt_metadata: bool,
+    /// The password given opened the file as its owner.
+    pub is_owner: bool,
+    /// The file opens with no password at all (the user password is empty).
+    pub user_password_empty: bool,
+    /// Some limit (printing, changing content, ...) is set.
+    pub restricted: bool,
+    /// The content may be changed without the owner password.
+    pub modifiable: bool,
+}
+
+impl PdfProtection {
+    fn none() -> Self {
+        Self {
+            encrypted: false,
+            algorithm: None,
+            permissions: ALL_PERMISSION_BITS,
+            encrypt_metadata: true,
+            is_owner: true,
+            user_password_empty: true,
+            restricted: false,
+            modifiable: true,
+        }
+    }
+}
+
+/// `/P` with every permission granted (the reserved bits as the specification sets them).
+const ALL_PERMISSION_BITS: u32 = 0xFFFF_FFFC;
+
+/// How a result is protected, decided before any work runs. Built by [`plan_protection`].
+/// The passwords are wiped on drop.
+pub struct ProtectionPlan {
+    algorithm: CryptAlgorithm,
+    permissions: u32,
+    encrypt_metadata: bool,
+    user: Zeroizing<String>,
+    owner: Zeroizing<String>,
+    restricted: bool,
+}
+
+impl ProtectionPlan {
+    fn spec<'a>(&'a self, file_id: &'a [u8]) -> EncryptSpec<'a> {
+        EncryptSpec {
+            algorithm: self.algorithm,
+            user: self.user.as_bytes(),
+            owner: self.owner.as_bytes(),
+            permissions: self.permissions,
+            encrypt_metadata: self.encrypt_metadata,
+            file_id,
+        }
+    }
+
+    /// The password the result opens with, or `None` when it opens for anyone.
+    pub fn user_password(&self) -> Option<&str> {
+        if self.user.is_empty() { None } else { Some(self.user.as_str()) }
+    }
+
+    /// True when the source's limits are written into the result.
+    pub fn keeps_restrictions(&self) -> bool {
+        self.restricted
+    }
+
+    pub fn algorithm(&self) -> CryptAlgorithm {
+        self.algorithm
+    }
 }
 
 /// Told how a rewrite is going; asked if it should go on. Called on the rewriting thread.
@@ -135,6 +250,93 @@ pub fn inspect_for_tools<R: Read + Seek>(source: R, password: Option<&str>) -> R
     Ok(PdfToolInfo { page_count: pages.len() as u32, encrypted, signed, archival, printable })
 }
 
+/// Reads the protection a source carries. Nothing is written. A wrong password is
+/// an error; a file that opens for anyone reports its owner limits here.
+pub fn inspect_protection<R: Read + Seek>(source: R, password: Option<&str>) -> Result<PdfProtection> {
+    let mut file = PdfFile::open(source)?;
+    if file.trailer.get("Encrypt").is_none() {
+        return Ok(PdfProtection::none());
+    }
+    file.unlock(password_given(password))?;
+    let Some(crypt) = file.crypt.as_ref() else { return Ok(PdfProtection::none()) };
+    let mut facts = PdfProtection {
+        encrypted: true,
+        algorithm: Some(crypt.algorithm()),
+        permissions: crypt.permissions.bits(),
+        encrypt_metadata: crypt.metadata_encrypted(),
+        is_owner: crypt.is_owner,
+        user_password_empty: false,
+        restricted: !crypt.permissions.denied().is_empty(),
+        modifiable: crypt.is_owner || crypt.permissions.may_modify(),
+    };
+    // The same file answers whether the empty user password opens it.
+    facts.user_password_empty = file.unlock(None).is_ok() && file.crypt.as_ref().is_some_and(|c| !c.is_owner);
+    Ok(facts)
+}
+
+/// Decides how a result is protected, from the source's protection and the choice.
+/// `password` is what the user typed to open the source. `None` in the plan means
+/// the result is written without protection, and the outcome says why.
+///
+/// A file with limits always keeps them (the plan is never `None` for it). Without
+/// the owner password the limits come back under a random owner password.
+pub fn plan_protection(
+    facts: &PdfProtection,
+    choice: PdfProtectionChoice,
+    password: Option<&str>,
+) -> Result<(Option<ProtectionPlan>, PdfProtectionOutcome)> {
+    if !facts.encrypted {
+        return Ok((None, PdfProtectionOutcome::NotProtected));
+    }
+    let typed = password_given(password).unwrap_or("");
+    if !facts.user_password_empty && typed.is_empty() {
+        return Err(EngineError::new(ErrorKind::PasswordRequired, "this PDF needs its password to be protected again"));
+    }
+    if typed.len() > MAX_R6_PASSWORD {
+        return Err(EngineError::limit("That password is too long. PDF allows up to 127 bytes."));
+    }
+    // A file opened with its owner password doesn't reveal the user password, so the typed
+    // one is used for both roles (see `PdfProtectionOutcome::OwnerPasswordOpens`).
+    let user = Zeroizing::new(if facts.user_password_empty { String::new() } else { typed.to_owned() });
+    if user.is_empty() && !facts.restricted {
+        return Ok((None, PdfProtectionOutcome::SavedWithoutProtection));
+    }
+    let algorithm = match choice {
+        PdfProtectionChoice::SameAsOriginal => facts.algorithm.unwrap_or(CryptAlgorithm::AesBits256),
+        PdfProtectionChoice::Aes256 => CryptAlgorithm::AesBits256,
+    };
+    let owner = if facts.is_owner { Zeroizing::new(typed.to_owned()) } else { random_owner()? };
+    let outcome = if facts.is_owner && !facts.user_password_empty {
+        PdfProtectionOutcome::OwnerPasswordOpens
+    } else if choice == PdfProtectionChoice::Aes256 {
+        PdfProtectionOutcome::Upgraded
+    } else if facts.restricted && !facts.is_owner {
+        PdfProtectionOutcome::KeptNewOwner
+    } else {
+        PdfProtectionOutcome::Kept
+    };
+    let plan = ProtectionPlan {
+        algorithm,
+        permissions: facts.permissions,
+        encrypt_metadata: facts.encrypt_metadata,
+        user,
+        owner,
+        restricted: facts.restricted,
+    };
+    Ok((Some(plan), outcome))
+}
+
+/// 32 random bytes as 64 hex digits: an owner password nobody is given.
+fn random_owner() -> Result<Zeroizing<String>> {
+    let mut bytes = Zeroizing::new([0u8; 32]);
+    secure_random(&mut bytes[..])?;
+    let mut text = String::with_capacity(64);
+    for byte in bytes.iter() {
+        text.push_str(&format!("{byte:02x}"));
+    }
+    Ok(Zeroizing::new(text))
+}
+
 /// Writes the result of `op` to `out`. The sources are only read.
 pub fn run_pdf_tool<R: Read + Seek, W: Write>(
     sources: Vec<PdfToolSource<R>>,
@@ -143,8 +345,12 @@ pub fn run_pdf_tool<R: Read + Seek, W: Write>(
     observer: &mut dyn PdfToolObserver,
 ) -> Result<PdfToolReport> {
     check_source_count(sources.len(), op)?;
+    // Random per output: the trailer's ID, which the key derivation of revisions 2 to 4 uses.
+    let mut file_id = [0u8; 16];
+    secure_random(&mut file_id)?;
     let encryptor = match op {
         PdfToolOp::AddPassword { password } => Some(new_encryptor(password)?),
+        PdfToolOp::Protect { plan } => Some(Encryptor::with_spec(&plan.spec(&file_id))?),
         _ => None,
     };
     let mut opened = Vec::with_capacity(sources.len());
@@ -158,8 +364,9 @@ pub fn run_pdf_tool<R: Read + Seek, W: Write>(
     let every_page_once = keeps_every_page_once(&opened, &picks);
     let whole_document = matches!(op, PdfToolOp::InsertPages { .. }) || every_page_once;
 
-    let mut output = Output { out, pos: 0, offsets: vec![0], encryptor, observer, objects_since_check: 0 };
-    let version = output_version(&mut opened, output.encryptor.is_some())?;
+    let floor = encryptor.as_ref().map(|e| e.algorithm().min_version());
+    let mut output = Output { out, pos: 0, offsets: vec![0], encryptor, observer, objects_since_check: 0, file_id };
+    let version = output_version(&mut opened, floor)?;
     output.write(format!("%PDF-{}.{}\n", version.0, version.1).as_bytes())?;
     // High bytes in a comment mark the file as binary for tools that guess.
     output.write(b"%\xE2\xE3\xCF\xD3\n")?;
@@ -293,7 +500,7 @@ fn new_encryptor(password: &str) -> Result<Encryptor> {
 /// the owner password is the way forward; the message says so.
 fn check_permissions<R: Read + Seek>(file: &PdfFile<R>, op: &PdfToolOp) -> Result<()> {
     let Some(crypt) = &file.crypt else { return Ok(()) };
-    if crypt.is_owner {
+    if crypt.is_owner || matches!(op, PdfToolOp::Unlock) {
         return Ok(());
     }
     let permissions = crypt.permissions;
@@ -312,7 +519,9 @@ fn check_permissions<R: Read + Seek>(file: &PdfFile<R>, op: &PdfToolOp) -> Resul
         Err(EngineError::new(ErrorKind::PasswordRequired, format!("{what} Enter the owner password to continue.")))
     };
     match op {
-        PdfToolOp::Merge | PdfToolOp::Rebuild { .. } | PdfToolOp::InsertPages { .. } if !permissions.may_assemble() => {
+        PdfToolOp::Merge | PdfToolOp::Rebuild { .. } | PdfToolOp::Reorder { .. } | PdfToolOp::InsertPages { .. }
+            if !permissions.may_assemble() =>
+        {
             return refused(
                 "The owner of this PDF doesn't allow adding, removing or rearranging its pages.".to_owned(),
             );
@@ -368,6 +577,7 @@ fn choose_pages<R: Read + Seek>(sources: &[Source<R>], op: &PdfToolOp) -> Result
             }
             picks
         }
+        PdfToolOp::Reorder { pages } => reordered_picks(sources[0].pages.len(), pages)?,
         PdfToolOp::InsertPages { at_page } => {
             let at = *at_page as usize;
             if at > sources[0].pages.len() {
@@ -382,10 +592,41 @@ fn choose_pages<R: Read + Seek>(sources: &[Source<R>], op: &PdfToolOp) -> Result
             }
             all(0).collect()
         }
-        PdfToolOp::AddPassword { .. } | PdfToolOp::RemovePassword | PdfToolOp::PrintCopy => all(0).collect(),
+        PdfToolOp::AddPassword { .. }
+        | PdfToolOp::RemovePassword
+        | PdfToolOp::PrintCopy
+        | PdfToolOp::Unlock
+        | PdfToolOp::Protect { .. } => all(0).collect(),
     };
     if picks.len() > MAX_OUTPUT_PAGES {
         return Err(EngineError::limit("too many pages for one PDF"));
+    }
+    Ok(picks)
+}
+
+/// Checks that `pages` is a permutation of `0..count`: each page exactly once.
+/// Length equal to `count` plus no repeat is enough (pigeonhole), and a bitset
+/// keeps the check to O(count) time and `count / 8` bytes.
+fn reordered_picks(count: usize, pages: &[PdfPagePick]) -> Result<Vec<Pick>> {
+    if pages.len() != count {
+        return Err(EngineError::malformed("Every page has to appear exactly once in the new order."));
+    }
+    let mut seen = vec![0u64; count.div_ceil(64)];
+    let mut picks = Vec::with_capacity(count);
+    for edit in pages {
+        let page = edit.page as usize;
+        if page >= count {
+            return Err(EngineError::malformed("A chosen page isn't in this PDF."));
+        }
+        let (word, bit) = (page / 64, 1u64 << (page % 64));
+        if seen[word] & bit != 0 {
+            return Err(EngineError::malformed("A page appears more than once in the new order."));
+        }
+        seen[word] |= bit;
+        if edit.rotation % 90 != 0 {
+            return Err(EngineError::malformed("Pages can only turn in steps of 90 degrees."));
+        }
+        picks.push(Pick { source: 0, page, rotation: i64::from(edit.rotation) });
     }
     Ok(picks)
 }
@@ -398,10 +639,11 @@ fn keeps_every_page_once<R: Read + Seek>(sources: &[Source<R>], picks: &[Pick]) 
     picks.iter().all(|pick| seen.insert(pick.page))
 }
 
-/// The highest version any source declares. Revision 6 encryption is PDF 2.0.
-fn output_version<R: Read + Seek>(sources: &mut [Source<R>], encrypted: bool) -> Result<(u8, u8)> {
-    if encrypted {
-        return Ok((2, 0));
+/// The highest version any source declares, or the floor an encryption needs
+/// (AES-256 is PDF 2.0). An encrypted output takes the floor alone.
+fn output_version<R: Read + Seek>(sources: &mut [Source<R>], floor: Option<(u8, u8)>) -> Result<(u8, u8)> {
+    if let Some(floor) = floor {
+        return Ok(floor);
     }
     let mut highest = (1, 4);
     for source in sources {
@@ -425,6 +667,8 @@ struct Output<'a, W> {
     encryptor: Option<Encryptor>,
     observer: &'a mut dyn PdfToolObserver,
     objects_since_check: u32,
+    /// The trailer's `/ID`, shared by both of its strings.
+    file_id: [u8; 16],
 }
 
 impl<W: Write> Output<'_, W> {
@@ -475,7 +719,7 @@ impl<W: Write> Output<'_, W> {
 
     fn write_value(&mut self, number: u32, mut value: Obj) -> Result<()> {
         if let Some(encryptor) = &self.encryptor {
-            encryptor.encrypt_strings(&mut value)?;
+            encryptor.encrypt_strings(number, 0, &mut value)?;
         }
         self.write_plain_value(number, &value)
     }
@@ -483,7 +727,7 @@ impl<W: Write> Output<'_, W> {
     fn begin_stream(&mut self, number: u32, dict: Dict) -> Result<()> {
         let mut value = Obj::Dict(dict);
         if let Some(encryptor) = &self.encryptor {
-            encryptor.encrypt_strings(&mut value)?;
+            encryptor.encrypt_strings(number, 0, &mut value)?;
         }
         self.begin(number)?;
         let mut bytes = Vec::new();
@@ -499,8 +743,8 @@ impl<W: Write> Output<'_, W> {
     /// Writes stream data held in memory, encrypting it if the output is encrypted.
     fn write_stream(&mut self, number: u32, mut dict: Dict, data: &[u8]) -> Result<()> {
         let encrypted = match &self.encryptor {
-            Some(encryptor) => Some(encryptor.encrypt(data)?),
-            None => None,
+            Some(encryptor) if encryptor.encrypts_stream(&dict) => Some(encryptor.encrypt(number, 0, data)?),
+            _ => None,
         };
         let data = encrypted.as_deref().unwrap_or(data);
         dict.set("Length", Obj::int(data.len() as u64));
@@ -511,13 +755,12 @@ impl<W: Write> Output<'_, W> {
 
     /// The cross-reference table and trailer. Returns the file's size.
     fn finish(&mut self, catalog: u32, info: Option<u32>) -> Result<u64> {
-        let mut id = [0u8; 16];
-        secure_random(&mut id)?;
         let mut trailer = Dict::of(vec![("Root", Obj::Ref(catalog, 0))]);
         if let Some(info) = info {
             trailer.set("Info", Obj::Ref(info, 0));
         }
-        trailer.set("ID", Obj::Array(vec![Obj::Str(id.to_vec()), Obj::Str(id.to_vec())]));
+        let id = self.file_id.to_vec();
+        trailer.set("ID", Obj::Array(vec![Obj::Str(id.clone()), Obj::Str(id)]));
         if let Some(encryptor) = &self.encryptor {
             let dict = Obj::Dict(encryptor.dict().clone());
             let number = self.allocate()?;
@@ -1244,3 +1487,97 @@ impl<R: Read + Seek> Source<R> {
 #[cfg(test)]
 #[path = "pdf_tools_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod protection_plan_tests {
+    use super::*;
+
+    /// Limits that forbid changing content (bit 4, MODIFY, is off).
+    const RESTRICTED: u32 = ALL_PERMISSION_BITS & !(1 << 3);
+
+    fn facts(algorithm: CryptAlgorithm, is_owner: bool, user_empty: bool, restricted: bool) -> PdfProtection {
+        PdfProtection {
+            encrypted: true,
+            algorithm: Some(algorithm),
+            permissions: if restricted { RESTRICTED } else { ALL_PERMISSION_BITS },
+            encrypt_metadata: true,
+            is_owner,
+            user_password_empty: user_empty,
+            restricted,
+            modifiable: is_owner || !restricted,
+        }
+    }
+
+    #[test]
+    fn an_unprotected_source_is_written_without_protection() {
+        let (plan, outcome) = plan_protection(&PdfProtection::none(), PdfProtectionChoice::SameAsOriginal, None).unwrap();
+        assert!(plan.is_none());
+        assert_eq!(outcome, PdfProtectionOutcome::NotProtected);
+    }
+
+    #[test]
+    fn a_user_password_is_kept_with_the_same_algorithm() {
+        let f = facts(CryptAlgorithm::Rc4Bits128, false, false, false);
+        let (plan, outcome) = plan_protection(&f, PdfProtectionChoice::SameAsOriginal, Some("open-me")).unwrap();
+        let plan = plan.expect("a password-protected file stays protected");
+        assert_eq!(plan.algorithm(), CryptAlgorithm::Rc4Bits128);
+        assert_eq!(plan.user_password(), Some("open-me"));
+        assert!(!plan.keeps_restrictions());
+        assert_eq!(outcome, PdfProtectionOutcome::Kept);
+    }
+
+    #[test]
+    fn owner_only_limits_come_back_under_a_new_random_owner() {
+        let f = facts(CryptAlgorithm::AesBits256, false, true, true);
+        let (plan, outcome) = plan_protection(&f, PdfProtectionChoice::SameAsOriginal, None).unwrap();
+        let plan = plan.expect("the limits are kept, so there is a plan");
+        assert_eq!(plan.user_password(), None, "the result still opens for anyone");
+        assert!(plan.keeps_restrictions());
+        assert_eq!(plan.owner.len(), 64, "32 random bytes as hex");
+        assert_eq!(outcome, PdfProtectionOutcome::KeptNewOwner);
+    }
+
+    #[test]
+    fn the_owner_password_keeps_the_limits_under_the_same_owner_password() {
+        let f = facts(CryptAlgorithm::AesBits256, true, true, true);
+        let (plan, outcome) = plan_protection(&f, PdfProtectionChoice::SameAsOriginal, Some("owner-pw")).unwrap();
+        let plan = plan.unwrap();
+        assert_eq!(plan.owner.as_str(), "owner-pw");
+        assert!(plan.keeps_restrictions());
+        assert_eq!(outcome, PdfProtectionOutcome::Kept);
+    }
+
+    #[test]
+    fn a_file_with_no_password_and_no_limits_is_saved_without_protection() {
+        let f = facts(CryptAlgorithm::AesBits128, false, true, false);
+        let (plan, outcome) = plan_protection(&f, PdfProtectionChoice::SameAsOriginal, None).unwrap();
+        assert!(plan.is_none());
+        assert_eq!(outcome, PdfProtectionOutcome::SavedWithoutProtection);
+    }
+
+    #[test]
+    fn aes256_upgrades_a_weak_file_and_keeps_its_limits() {
+        let f = facts(CryptAlgorithm::Rc4Bits40, false, false, true);
+        let (plan, outcome) = plan_protection(&f, PdfProtectionChoice::Aes256, Some("pw")).unwrap();
+        let plan = plan.unwrap();
+        assert_eq!(plan.algorithm(), CryptAlgorithm::AesBits256);
+        assert!(plan.keeps_restrictions());
+        assert_eq!(outcome, PdfProtectionOutcome::Upgraded);
+    }
+
+    #[test]
+    fn opening_with_the_owner_password_is_reported_when_a_user_password_exists() {
+        let f = facts(CryptAlgorithm::AesBits256, true, false, true);
+        let (_, outcome) = plan_protection(&f, PdfProtectionChoice::SameAsOriginal, Some("owner")).unwrap();
+        assert_eq!(outcome, PdfProtectionOutcome::OwnerPasswordOpens);
+    }
+
+    #[test]
+    fn a_protected_file_needs_its_password_and_a_short_enough_one() {
+        let f = facts(CryptAlgorithm::AesBits256, false, false, false);
+        let err = plan_protection(&f, PdfProtectionChoice::SameAsOriginal, None).err().unwrap();
+        assert_eq!(err.kind, ErrorKind::PasswordRequired);
+        let long = "x".repeat(MAX_R6_PASSWORD + 1);
+        assert!(plan_protection(&f, PdfProtectionChoice::SameAsOriginal, Some(long.as_str())).is_err());
+    }
+}

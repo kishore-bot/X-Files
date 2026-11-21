@@ -7,16 +7,40 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xfiles.core.documents.DocumentRepository
+import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FolderLibrary
 import com.xfiles.core.documents.FolderRepository
 import com.xfiles.core.documents.LibraryContentSearch
 import com.xfiles.core.documents.LibrarySearchRepository
+import com.xfiles.documents.library.LibraryCategory
+import com.xfiles.documents.library.libraryCategories
+import com.xfiles.documents.search.FileNameIndex
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/**
+ * What the library lists for the current query: [recents] matches (the opening
+ * history, ranked by name), and [files] matches from the chosen folders, also
+ * narrowed to the selected category. Both are best match first, or in their
+ * original order for a blank query.
+ */
+data class LibraryListing(
+    val recents: List<FileEntry> = emptyList(),
+    val files: List<FileEntry> = emptyList(),
+)
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
@@ -38,6 +62,23 @@ class LibraryViewModel @Inject constructor(
     private var scan: Job? = null
     private var queryJob: Job? = null
 
+    private val query = MutableStateFlow("")
+    private val mutableCategory = MutableStateFlow(LibraryCategory.All)
+    /** The selected filter chip. */
+    val category = mutableCategory.asStateFlow()
+
+    /** Names indexed once per list change (on a background dispatcher), not once per keystroke. */
+    private val fileCorpus: Flow<Corpus> = corpus(library.map { it.files })
+    private val recentCorpus: Flow<Corpus> = corpus(documents.recents)
+
+    /** The lists for the query and filter; ranked off the main thread so big libraries stay smooth. */
+    val listing: StateFlow<LibraryListing> = combine(query, mutableCategory, fileCorpus, recentCorpus) { q, c, files, recent ->
+        LibraryListing(
+            recents = recent.matching(q, LibraryCategory.All),
+            files = files.matching(q, c),
+        )
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, LibraryListing())
+
     init {
         viewModelScope.launch {
             documents.loadRecents()
@@ -52,6 +93,30 @@ class LibraryViewModel @Inject constructor(
 
     fun clearRecents() {
         viewModelScope.launch { documents.clearRecents() }
+    }
+
+    fun setQuery(value: String) {
+        query.value = value.trim()
+    }
+
+    fun setCategory(value: LibraryCategory) {
+        mutableCategory.value = value
+    }
+
+    /** Files shared into Xfiles beyond the first one: they go to Recent, so they can be opened from the library. */
+    fun receiveShared(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            for (uri in uris) {
+                try {
+                    documents.remember(documents.describe(uri))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // Not readable any more: skip it.
+                }
+            }
+        }
     }
 
     fun setSearchEnabled(enabled: Boolean) {
@@ -115,4 +180,22 @@ class LibraryViewModel @Inject constructor(
             documents.loadRecents()
         }
     }
+
+    private class Corpus(val entries: List<FileEntry>, val index: FileNameIndex, val categories: List<Set<LibraryCategory>>) {
+        fun matching(query: String, category: LibraryCategory): List<FileEntry> {
+            val order = index.search(query)
+            if (category == LibraryCategory.All) return order.map { entries[it] }
+            return order.filter { category in categories[it] }.map { entries[it] }
+        }
+    }
+
+    private fun corpus(source: Flow<List<FileEntry>>): Flow<Corpus> = source
+        .distinctUntilChanged()
+        .map { entries ->
+            Corpus(
+                entries = entries,
+                index = FileNameIndex(entries.map { it.name }),
+                categories = entries.map { libraryCategories(it.name) },
+            )
+        }
 }

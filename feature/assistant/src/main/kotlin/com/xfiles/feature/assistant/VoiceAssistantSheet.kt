@@ -37,11 +37,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzOptionMenu
 import com.xfiles.design.EzShapes
 import com.xfiles.design.glassPanel
 import com.xfiles.design.glossyPrimary
 import com.xfiles.fily.FilySession
 import com.xfiles.fily.ModelInstall
+import com.xfiles.fily.SpeechLanguageSupport
 
 @Composable
 fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismiss: () -> Unit) {
@@ -50,13 +52,19 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
     val contents by viewModel.access.contentAccess.collectAsStateWithLifecycle()
     val install by viewModel.install.collectAsStateWithLifecycle()
     val ui by viewModel.ui.collectAsStateWithLifecycle()
-    val recognizer = rememberSpeechRecognition(hints = session::speechHints) { result ->
+    val pickedLanguage by viewModel.speechLanguage.collectAsStateWithLifecycle()
+    val languages by viewModel.speechLanguages.collectAsStateWithLifecycle()
+    val recognizer = rememberSpeechRecognition(
+        hints = session::speechHints,
+        preferredLanguage = { viewModel.speechLanguage.value },
+    ) { result ->
         if (result.isFinal) viewModel.ask(session, result.alternatives)
     }
     val recognition by recognizer.state.collectAsStateWithLifecycle()
     val speaker = rememberTextToSpeech()
     val speaking by speaker.state.collectAsStateWithLifecycle()
-    SideEffect(ui.reply) { ui.reply?.let(speaker::speak) }
+    // The reply is spoken in the picked language when the phone has a voice for it.
+    SideEffect(ui.reply) { ui.reply?.let { speaker.speak(it, viewModel.speechLanguage.value) } }
 
     val microphone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) recognizer.start()
@@ -111,6 +119,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                     }
                     is ModelInstall.Downloading -> {
                         LinearProgressIndicator(progress = { (state.done.toFloat() / state.total.coerceAtLeast(1L)).coerceIn(0f, 1f) })
+                        Text("Downloading ${megabytes(state.done)} of ${megabytes(state.total)}", color = EzColors.TextSecondary)
                         TextButton(onClick = viewModel::cancelDownload) { Text("Cancel download") }
                     }
                     ModelInstall.Verifying -> {
@@ -118,6 +127,15 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                         Text("Verifying model")
                     }
                     ModelInstall.Installed -> {
+                        LaunchedEffect(Unit) { viewModel.refreshSpeechLanguages() }
+                        SpeechLanguageRow(
+                            support = languages,
+                            selected = pickedLanguage,
+                            onSelect = { tag ->
+                                viewModel.selectSpeechLanguage(tag)
+                                if (languages.downloadable.any { it.tag == tag }) viewModel.downloadSpeechLanguage(tag)
+                            },
+                        )
                         val listening = recognition == SpeechState.Listening
                         Box(
                             Modifier.size(86.dp).glossyPrimary(CircleShape)
@@ -151,3 +169,26 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
         }
     }
 }
+
+/**
+ * The speech language picker: installed languages first, then the ones the system can download (picking one
+ * asks the system for the pack). The phone's own English stays the default until a language is picked.
+ */
+@Composable
+internal fun SpeechLanguageRow(support: SpeechLanguageSupport, selected: String?, onSelect: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Speech language", Modifier.weight(1f))
+        EzOptionMenu(
+            options = support.all,
+            selected = support.all.firstOrNull { it.tag == selected },
+            optionLabel = { language ->
+                speechLanguageLabel(language.tag) + if (language.installed) "" else " (download)"
+            },
+            onSelect = { onSelect(it.tag) },
+            placeholder = "Phone language",
+        )
+    }
+}
+
+/** Megabytes as the model's download is shown: 379 MB. */
+private fun megabytes(bytes: Long) = "${(bytes + 500_000) / 1_000_000} MB"

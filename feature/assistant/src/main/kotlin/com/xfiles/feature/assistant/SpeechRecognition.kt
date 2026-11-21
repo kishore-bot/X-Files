@@ -24,6 +24,8 @@ import java.util.Locale
 class SpeechRecognition(
     private val context: Context,
     private val hints: () -> List<String>,
+    /** The language the user picked (BCP-47), or null to use the phone's English. Read at each start. */
+    private val preferredLanguage: () -> String?,
     private val onResult: (SpeechResult) -> Unit,
 ) {
     private val _state = MutableStateFlow(SpeechState.Idle)
@@ -60,7 +62,12 @@ class SpeechRecognition(
         recognizer = sr
         // Listening from now on, so the overlay doesn't start us again while the language is checked.
         _state.value = SpeechState.Listening
-        if (local && language == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val chosen = preferredLanguage()
+        if (chosen != null) {
+            // The user's pick wins over the phone's English; a missing pack comes back as NeedsLanguage.
+            language = chosen
+            listen(sr, local)
+        } else if (local && language == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             checkLanguage(sr)
         } else {
             listen(sr, local)
@@ -226,10 +233,15 @@ internal fun pickEnglish(phone: String, installed: List<String>): String? {
 }
 
 @Composable
-fun rememberSpeechRecognition(hints: () -> List<String>, onResult: (SpeechResult) -> Unit): SpeechRecognition {
+fun rememberSpeechRecognition(
+    hints: () -> List<String>,
+    preferredLanguage: () -> String? = { null },
+    onResult: (SpeechResult) -> Unit,
+): SpeechRecognition {
     val context = LocalContext.current
     val latestHints by rememberUpdatedState(hints)
-    val sr = remember(context) { SpeechRecognition(context, { latestHints() }, onResult) }
+    val latestLanguage by rememberUpdatedState(preferredLanguage)
+    val sr = remember(context) { SpeechRecognition(context, { latestHints() }, { latestLanguage() }, onResult) }
     DisposableEffect(sr) { onDispose { sr.destroy() } }
     return sr
 }

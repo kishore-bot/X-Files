@@ -30,6 +30,13 @@ internal class AppNavigator(
         stack.add(Route.Editor)
     }
 
+    /** Opens a file's bytes in the editor, so its encoding and line endings are detected on read. */
+    fun openEditorFile(uri: Uri, name: String) {
+        editor.openFile(name, uri)
+        stack.remove(Route.Editor)
+        stack.add(Route.Editor)
+    }
+
     fun show(route: Route) {
         stack.remove(route)
         stack.add(route)

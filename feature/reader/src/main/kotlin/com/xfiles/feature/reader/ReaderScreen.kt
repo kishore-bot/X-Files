@@ -3,6 +3,9 @@ package com.xfiles.feature.reader
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.drawable.AnimatedImageDrawable
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,12 +30,14 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -81,6 +86,26 @@ fun ReaderScreen(
     onDismissPrintError: () -> Unit = {},
     sensitive: SensitiveFindings? = null,
     onShare: () -> Unit = {},
+    onTwoPage: (Boolean) -> Unit = {},
+    pdfThumbnail: suspend (Int) -> Bitmap? = { null },
+    /** Opens a file extracted from the archive on screen; wired to DocumentAnalysisViewModel.openNested. */
+    onOpenArchiveEntry: (Uri) -> Unit = {},
+    /** Returns from a nested archive entry; false when there is none, so the reader closes. */
+    onNestedBack: () -> Boolean = { false },
+    gallery: GalleryUiState = GalleryUiState.Off,
+    onGalleryPage: (Int) -> Unit = {},
+    galleryPage: suspend (Int, Int) -> Bitmap? = { _, _ -> null },
+    galleryAnimation: suspend (Int, Int) -> AnimatedImageDrawable? = { _, _ -> null },
+    pictureAnimation: suspend (FileEntry, Int) -> AnimatedImageDrawable? = { _, _ -> null },
+    gallerySort: GallerySort = GallerySort.Name,
+    onGallerySort: (GallerySort) -> Unit = {},
+    rotationOf: (String) -> Int = { 0 },
+    onRotate: (String) -> Unit = {},
+    onEditedPreview: (FilePreview?) -> Unit = {},
+    /** Opens the text file at the URI in the editor, which reads its bytes for encoding detection. */
+    onEditFile: ((Uri, String) -> Unit)? = null,
+    /** Cell and slide editing for the open spreadsheet or presentation. */
+    structuredEdits: StructuredEditSession? = null,
 ) {
     PrintRequests(printRequests)
     (printing as? PrintStatus.Failed)?.let { failed ->
@@ -92,25 +117,40 @@ fun ReaderScreen(
         )
     }
     val ready = state as? ReaderState.Ready
+    // A gallery of two or more pictures; a single picture keeps the plain viewer.
+    val paged = (gallery as? GalleryUiState.Paged)?.session?.takeIf { it.size > 1 }
     val documentKey = ready?.file?.uri?.toString()
-    var rotation by rememberSaveable(documentKey) { mutableIntStateOf(0) }
+    // Quarter turns belong to each picture (the view model keeps them), so a gallery page keeps its own turn.
+    val rotation = documentKey?.let(rotationOf) ?: 0
+    var sortMenu by remember { mutableStateOf(false) }
     var showSearch by rememberSaveable(documentKey) { mutableStateOf(false) }
     var showSource by rememberSaveable(documentKey) { mutableStateOf(false) }
+    var reading by rememberSaveable(documentKey) { mutableStateOf(ReadingTheme.Standard) }
     var showPdfFind by rememberSaveable(documentKey) { mutableStateOf(false) }
     var editingMarkup by rememberSaveable(documentKey) { mutableStateOf(false) }
     var mode by rememberSaveable(documentKey) { mutableStateOf(PdfMarkupKind.Pen) }
     var confirmDiscard by rememberSaveable(documentKey) { mutableStateOf(false) }
+    var showJump by rememberSaveable(documentKey) { mutableStateOf(false) }
+    var showOffice by rememberSaveable(documentKey) { mutableStateOf(false) }
+    var showGrid by rememberSaveable(documentKey) { mutableStateOf(false) }
+    val structuredUi by (structuredEdits?.state ?: kotlinx.coroutines.flow.emptyFlow<StructuredEditState>()).collectAsState(StructuredEditState())
+    val saveEdited = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(structuredMimeType(ready?.file?.name.orEmpty()))) { uri ->
+        if (uri != null) structuredEdits?.saveCopy(uri)
+    }
     val saveAnnotated = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         if (uri != null) onSaveMarkup(uri)
     }
     val closeReader: () -> Unit = {
         if (!markup.saving) {
-            if (markup.marks.isNotEmpty()) confirmDiscard = true else onBack()
+            if (markup.marks.isNotEmpty()) confirmDiscard = true else if (!onNestedBack()) onBack()
         }
     }
     BackHandler(enabled = markup.marks.isNotEmpty() || markup.saving, onBack = closeReader)
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
+    BackHandler(enabled = showGrid, onBack = { showGrid = false })
+    // Picture-in-Picture shows only the picture: no bars, hints or panels, and no margins.
+    val inPip by LocalMediaPip.current.isInPictureInPicture.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxSize().padding(horizontal = if (inPip) 0.dp else 12.dp, vertical = if (inPip) 0.dp else 8.dp)) {
+        if (!inPip) Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = closeReader, enabled = !markup.saving) { Icon(EzIcons.Back, "Back to library") }
             Text(
                 ready?.file?.name ?: "Reader",
@@ -119,6 +159,29 @@ fun ReaderScreen(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            paged?.let { session ->
+                Text(
+                    "${session.index + 1} / ${session.size}",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+                Box {
+                    IconButton(onClick = { sortMenu = true }) {
+                        Icon(EzIcons.ListLines, "Sort: ${gallerySort.label}")
+                    }
+                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                        GallerySort.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(if (option == gallerySort) "${option.label} (current)" else option.label) },
+                                onClick = {
+                                    sortMenu = false
+                                    onGallerySort(option)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
             if (ready != null && ready.preview != FilePreview.Unsupported) {
                 IconButton(onClick = onBookmark) {
                     Icon(
@@ -128,7 +191,7 @@ fun ReaderScreen(
                 }
             }
             if (!editingMarkup && (ready?.preview is FilePreview.Picture || ready?.preview is FilePreview.Pdf)) {
-                IconButton(onClick = { rotation = (rotation + 90) % 360 }) {
+                IconButton(onClick = { documentKey?.let(onRotate) }) {
                     Icon(EzIcons.Rotate, "Rotate clockwise")
                 }
             }
@@ -138,6 +201,7 @@ fun ReaderScreen(
                         editingMarkup = !editingMarkup
                         if (editingMarkup) {
                             showPdfFind = false
+                            showGrid = false
                             onClosePdfFind()
                         }
                     },
@@ -171,7 +235,10 @@ fun ReaderScreen(
                 }
             }
             if (ready != null && text != null && ready.file.kind == DocumentKind.Text && !text.truncated) {
-                IconButton(onClick = { onEdit(ready.file.name, text.content) }) {
+                IconButton(onClick = {
+                    val openFile = onEditFile
+                    if (openFile != null) openFile(ready.file.uri, ready.file.name) else onEdit(ready.file.name, text.content)
+                }) {
                     Icon(EzIcons.Edit, "Edit text")
                 }
             }
@@ -182,6 +249,9 @@ fun ReaderScreen(
                 }) {
                     Icon(if (showSource) EzIcons.Eye else EzIcons.Code, if (showSource) "Show preview" else "Show source")
                 }
+            }
+            if (!editingMarkup && ready != null && ready.preview is FilePreview.Structured && isOfficeEditable(ready.file.name)) {
+                IconButton(onClick = { showOffice = !showOffice }) { Icon(EzIcons.Edit, "Find and replace") }
             }
             if (ready?.preview is FilePreview.Structured || (text != null && text.content.isNotBlank())) {
                 IconButton(onClick = { showSearch = !showSearch }) { Icon(EzIcons.Search, "Find in file") }
@@ -204,6 +274,16 @@ fun ReaderScreen(
                             leadingIcon = { Icon(EzIcons.Share, null) },
                             onClick = { menu = false; onShare() },
                         )
+                        DropdownMenuItem(
+                            text = { Text("Page: ${reading.name} reading") },
+                            leadingIcon = { Icon(EzIcons.Eye, null) },
+                            onClick = { menu = false; reading = reading.next() },
+                        )
+                        if (structuredUi.edited) DropdownMenuItem(
+                            text = { Text("Save edited copy") },
+                            leadingIcon = { Icon(EzIcons.Share, null) },
+                            onClick = { menu = false; saveEdited.launch(ready?.file?.name.orEmpty()) },
+                        )
                         if (printable) DropdownMenuItem(
                             text = { Text("Print") },
                             leadingIcon = { Icon(EzIcons.Print, null) },
@@ -214,8 +294,16 @@ fun ReaderScreen(
                 }
             }
         }
-        SensitiveFileHint(documentKey, sensitive, Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally))
-        if (editingMarkup && ready?.preview is FilePreview.Pdf) {
+        if (!inPip) SensitiveFileHint(documentKey, sensitive, Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally))
+        if (!inPip && showOffice && ready != null && isOfficeEditable(ready.file.name)) {
+            OfficeFindReplacePanel(
+                uri = ready.file.uri,
+                name = ready.file.name,
+                onPreview = onEditedPreview,
+                onClose = { showOffice = false },
+            )
+        }
+        if (!inPip && editingMarkup && ready?.preview is FilePreview.Pdf) {
             PdfMarkupControls(
                 mode = mode,
                 state = markup,
@@ -225,14 +313,26 @@ fun ReaderScreen(
                 onSave = { saveAnnotated.launch("${ready.file.name.substringBeforeLast('.')}-annotated.pdf") },
             )
         }
-        if (showPdfFind && ready?.preview is FilePreview.Pdf) {
+        if (!inPip && showPdfFind && ready?.preview is FilePreview.Pdf) {
             PdfFindBar(pdfFind, onPdfQuery, onPdfMatch, onClose = {
                 showPdfFind = false
                 onClosePdfFind()
             })
         }
         Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-            when (state) {
+            val gridPdf = ready?.preview as? FilePreview.Pdf
+            if (showGrid && gridPdf != null) {
+                PdfPageGrid(
+                    pageCount = gridPdf.pageCount,
+                    current = gridPdf.page,
+                    load = pdfThumbnail,
+                    onOpen = { index ->
+                        showGrid = false
+                        onPage(index)
+                    },
+                    onClose = { showGrid = false },
+                )
+            } else when (state) {
                 ReaderState.Loading -> CircularProgressIndicator()
                 ReaderState.ReadError -> Text("This file could not be opened. Try selecting it again.")
                 ReaderState.EngineUnavailable -> Text("The document engine is unavailable on this device.")
@@ -241,7 +341,8 @@ fun ReaderScreen(
                     DocumentPasswordDialog(state, onPassword, onBack)
                 }
                 is ReaderState.Failure -> Text(state.message)
-                is ReaderState.Ready -> key(state.file.uri) {
+                // A gallery keeps one key across page turns, so the pager is not recreated when the file changes.
+                is ReaderState.Ready -> key(paged?.id ?: state.file.uri) {
                     when (val preview = state.preview) {
                         is FilePreview.Text -> {
                             val plain = showSearch || showSource
@@ -250,27 +351,59 @@ fun ReaderScreen(
                             }
                             when {
                                 !plain && json != null -> JsonTreePreview(json)
-                                !plain && isSourceCode(state.file.name) -> CodePreview(preview.content, state.file.name)
-                                else -> TextPreview(preview, showSearch, onSearchClose = { showSearch = false })
+                                !plain && isSourceCode(state.file.name) -> CodePreview(preview.content, state.file.name, reading)
+                                else -> TextPreview(preview, showSearch, onSearchClose = { showSearch = false }, reading = reading)
                             }
                         }
                         is FilePreview.Html ->
-                            if (showSearch || showSource) TextPreview(preview.text, showSearch, onSearchClose = { showSearch = false })
-                            else HtmlPreview(preview.html)
-                        is FilePreview.Structured -> {
+                            if (showSearch || showSource) TextPreview(preview.text, showSearch, onSearchClose = { showSearch = false }, reading = reading)
+                            else HtmlPreview(preview.html, reading)
+                        is FilePreview.Structured -> if (isZipName(state.file.name)) {
+                            ArchiveBrowser(archive = state.file.uri, onOpenFile = onOpenArchiveEntry)
+                        } else {
                             if (showSearch || (showSource && preview.source != null)) {
                                 val text = preview.source ?: remember(preview.document) {
                                     val content = preview.document.plainText(256_000)
                                     FilePreview.Text(content, preview.document.truncated || content.length >= 256_000)
                                 }
-                                TextPreview(text, showSearch, onSearchClose = { showSearch = false })
+                                TextPreview(text, showSearch, onSearchClose = { showSearch = false }, reading = reading)
                             } else {
                                 CompositionLocalProvider(LocalDocumentImages provides preview.document.images) {
-                                    StructuredPreview(preview.document)
+                                    StructuredPreview(preview.document, structuredEdits)
                                 }
                             }
                         }
-                        is FilePreview.Picture -> ReaderImage(preview.bitmap, state.file.name, rotation)
+                        is FilePreview.Picture -> if (paged != null) {
+                            val seeded = gallery as GalleryUiState.Paged
+                            GalleryPager(
+                                session = paged,
+                                seed = seeded.seed,
+                                seedUri = seeded.seedUri,
+                                rotationOf = rotationOf,
+                                onSettle = onGalleryPage,
+                                load = galleryPage,
+                                animate = galleryAnimation,
+                            )
+                        } else {
+                            // GIF, WebP and AVIF play here too; stills get null and stay on the bitmap.
+                            val animation by produceState<AnimatedImageDrawable?>(null, state.file.uri, preview.bitmap) {
+                                value = try {
+                                    pictureAnimation(state.file, maxOf(preview.bitmap.width, preview.bitmap.height))
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    null
+                                }
+                            }
+                            ReaderImage(
+                                bitmap = preview.bitmap,
+                                description = state.file.name,
+                                rotation = rotation,
+                                regions = rememberPictureRegions(state.file.uri),
+                                animated = animation,
+                                animating = true,
+                            )
+                        }
                         is FilePreview.Pdf -> {
                             if (editingMarkup) {
                                 PdfMarkupCanvas(
@@ -283,8 +416,13 @@ fun ReaderScreen(
                                 )
                             } else {
                                 val active = pdfFind.matches.getOrNull(pdfFind.selected)
-                                val highlights = active?.takeIf { showPdfFind && it.page == preview.page }?.boxes.orEmpty()
-                                ReaderImage(preview.bitmap, "Page ${preview.page + 1}", rotation, highlights)
+                                fun highlights(page: Int) = active?.takeIf { showPdfFind && it.page == page }?.boxes.orEmpty()
+                                val facing = state.facing
+                                if (state.twoPage && facing != null) {
+                                    PdfSpread(preview, facing, rotation, ::highlights)
+                                } else {
+                                    ReaderImage(preview.bitmap, "Page ${preview.page + 1}", rotation, highlights(preview.page))
+                                }
                             }
                         }
                         is FilePreview.Media -> MediaScreen(state.file, preview.video)
@@ -300,14 +438,19 @@ fun ReaderScreen(
         if (ready != null && pdf != null) {
             if (ready.turningPage) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (ready.pageError) Text("This page could not be opened.", color = MaterialTheme.colorScheme.error)
-            Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                IconButton(onClick = { onPage(pdf.page - 1) }, enabled = !ready.turningPage && pdf.page > 0) {
-                    Icon(EzIcons.ChevronLeft, "Previous page")
-                }
-                Text("${pdf.page + 1} / ${pdf.pageCount}")
-                IconButton(onClick = { onPage(pdf.page + 1) }, enabled = !ready.turningPage && pdf.page + 1 < pdf.pageCount) {
-                    Icon(EzIcons.ChevronRight, "Next page")
-                }
+            PdfPageBar(
+                page = pdf.page,
+                pageCount = pdf.pageCount,
+                twoPage = ready.twoPage,
+                busy = ready.turningPage,
+                canSpread = !editingMarkup,
+                onPage = onPage,
+                onJump = { showJump = true },
+                onTwoPage = onTwoPage,
+                onGrid = { showGrid = true },
+            )
+            if (showJump) {
+                PdfJumpDialog(pdf.page, pdf.pageCount, onJump = onPage, onDismiss = { showJump = false })
             }
         }
     }

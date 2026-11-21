@@ -36,9 +36,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -63,6 +65,7 @@ import com.xfiles.scan.SteadyPage
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.launch
 
 /**
  * The document scanner: live page outline, auto-capture when the page holds still and sharp, a manual
@@ -100,11 +103,20 @@ internal fun ScanCamera(processing: ScanProcessing, pages: Int, onPage: (File, P
 
     var auto by rememberSaveable { mutableStateOf(true) }
     var filter by rememberSaveable { mutableStateOf(ScanFilter.Enhance) }
+    val scope = rememberCoroutineScope()
+    // The last filter chosen, read once off the main thread; later choices are written as they are made.
+    LaunchedEffect(Unit) { filter = processing.lastFilter() }
+    fun choose(option: ScanFilter) {
+        filter = option
+        scope.launch { processing.rememberFilter(option) }
+    }
     var outline by remember { mutableStateOf<PageQuad?>(null) }
     var status by remember { mutableStateOf(AutoCaptureState.Searching) }
     val capturing = remember { AtomicBoolean(false) }
     val autoNow by rememberUpdatedState(auto)
     val filterNow by rememberUpdatedState(filter)
+    // Read by the analysis thread too, so it always sees the current page count.
+    val full by rememberUpdatedState(pages >= ScanProcessing.MAX_SCAN_PAGES)
     val onPageNow by rememberUpdatedState(onPage)
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build() }
     val analyzer = remember { Executors.newSingleThreadExecutor { Thread(it, "xfiles-scan-analysis") } }
@@ -112,7 +124,7 @@ internal fun ScanCamera(processing: ScanProcessing, pages: Int, onPage: (File, P
 
     /** [manual] shots open the review so the corners can be fixed; auto-capture goes straight to the page. */
     fun shoot(seen: PageQuad?, manual: Boolean) {
-        if (!capturing.compareAndSet(false, true)) return
+        if (full || !capturing.compareAndSet(false, true)) return
         val file = File.createTempFile("capture-", ".jpg", context.cacheDir)
         capture.takePicture(
             ImageCapture.OutputFileOptions.Builder(file).build(),
@@ -146,7 +158,7 @@ internal fun ScanCamera(processing: ScanProcessing, pages: Int, onPage: (File, P
                     ContextCompat.getMainExecutor(context).execute {
                         outline = quad
                         status = state
-                        if (state == AutoCaptureState.Take && autoNow && !reviewOpen) shoot(quad, manual = false)
+                        if (state == AutoCaptureState.Take && autoNow && !reviewOpen && !full) shoot(quad, manual = false)
                     }
                 }
             }
@@ -187,21 +199,24 @@ internal fun ScanCamera(processing: ScanProcessing, pages: Int, onPage: (File, P
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDone) { Icon(EzIcons.Back, "Done scanning", tint = Color.White) }
                 Text(
-                    when (status) {
-                        AutoCaptureState.Searching -> "Point at a page"
-                        AutoCaptureState.Moving -> "Hold steady"
-                        AutoCaptureState.Holding, AutoCaptureState.Take -> "Hold still…"
-                        AutoCaptureState.Taken -> "Got it — next page"
+                    when {
+                        full -> "Page limit reached. Tap Done to save."
+                        else -> when (status) {
+                            AutoCaptureState.Searching -> "Point at a page"
+                            AutoCaptureState.Moving -> "Hold steady"
+                            AutoCaptureState.Holding, AutoCaptureState.Take -> "Hold still…"
+                            AutoCaptureState.Taken -> "Got it — next page"
+                        }
                     },
                     Modifier.weight(1f),
                     color = Color.White,
                 )
                 Text("Auto", color = Color.White)
-                Switch(checked = auto, onCheckedChange = { auto = it }, modifier = Modifier.padding(start = 8.dp))
+                Switch(checked = auto && !full, onCheckedChange = { auto = it }, enabled = !full, modifier = Modifier.padding(start = 8.dp))
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ScanFilter.entries.forEach { option ->
-                    FilterChip(selected = filter == option, onClick = { filter = option }, label = { Text(option.label, color = Color.White) })
+                    FilterChip(selected = filter == option, onClick = { choose(option) }, label = { Text(option.label, color = Color.White) })
                 }
             }
         }
@@ -210,12 +225,14 @@ internal fun ScanCamera(processing: ScanProcessing, pages: Int, onPage: (File, P
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(if (pages == 1) "1 page" else "$pages pages", color = Color.White)
+            Text("$pages / ${ScanProcessing.MAX_SCAN_PAGES}", color = Color.White)
             Box(
-                Modifier.size(68.dp).clip(CircleShape).background(Color.White),
+                Modifier.size(68.dp).clip(CircleShape).background(Color.White.copy(alpha = if (full) 0.3f else 1f)),
                 contentAlignment = Alignment.Center,
             ) {
-                IconButton(onClick = { shoot(outline, manual = true) }, modifier = Modifier.size(68.dp)) { Icon(EzIcons.Camera, "Take picture", tint = Color.Black) }
+                IconButton(onClick = { shoot(outline, manual = true) }, enabled = !full, modifier = Modifier.size(68.dp)) {
+                    Icon(EzIcons.Camera, "Take picture", tint = Color.Black)
+                }
             }
             TextButton(onClick = onDone) { Text("Done", color = Color.White) }
         }
@@ -223,6 +240,9 @@ internal fun ScanCamera(processing: ScanProcessing, pages: Int, onPage: (File, P
             ScanReview(
                 photo = shot.photo,
                 initial = shot.seen,
+                filter = filter,
+                onFilter = ::choose,
+                processing = processing,
                 onRetake = {
                     shot.photo.delete()
                     review = null

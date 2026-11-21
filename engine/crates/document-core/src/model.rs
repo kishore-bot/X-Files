@@ -197,8 +197,10 @@ pub enum Block {
     /// `header` marks column-heading rows. `styles` gives each cell's index
     /// into the [`Block::CellStyle`]s sent before, 0 being plain; it may be
     /// shorter than `cells` (the rest are plain) or longer, for empty cells
-    /// that are only coloured. Empty for unstyled rows.
-    TableRow { row: Option<u32>, header: bool, cells: Vec<String>, styles: Vec<u16> },
+    /// that are only coloured. Empty for unstyled rows. `cell_spans` gives each
+    /// cell's styling and links, offsets in that cell's text; empty when the
+    /// source has none, or it may be shorter than `cells`.
+    TableRow { row: Option<u32>, header: bool, cells: Vec<String>, styles: Vec<u16>, cell_spans: Vec<Vec<Span>> },
     /// Entry `index` (from 1) of the workbook's cell-style palette, sent
     /// before the rows that use it.
     CellStyle { index: u16, style: CellStyle },
@@ -349,8 +351,15 @@ impl Block {
             Block::ListItem { marker, text, .. } => text.cost() + marker.as_ref().map_or(0, String::len) + 1,
             Block::Code { language, text, .. } => text.len() + language.as_ref().map_or(0, String::len) + 5,
             Block::Divider => 1,
-            Block::TableRow { cells, styles, .. } => {
-                cells.iter().map(|c| c.len() + 1).sum::<usize>() + 1 + styles.len() * 2
+            Block::TableRow { cells, styles, cell_spans, .. } => {
+                cells.iter().map(|c| c.len() + 1).sum::<usize>()
+                    + 1
+                    + styles.len() * 2
+                    + cell_spans
+                        .iter()
+                        .flatten()
+                        .map(|s| SPAN_COST + s.link.as_ref().map_or(0, String::len))
+                        .sum::<usize>()
             }
             // Fixed, and at most `Limits::MIN_BATCH_BYTES`, so neither is ever split.
             Block::CellStyle { .. } | Block::Merge { .. } | Block::CellRuns { .. } | Block::Count { .. } => 5,
@@ -407,7 +416,7 @@ impl Block {
                     Some(Block::Code { language, first_line: next_line, text: rest }),
                 )
             }
-            Block::TableRow { row, header, mut cells, mut styles } => {
+            Block::TableRow { row, header, mut cells, mut styles, mut cell_spans } => {
                 // Only a row larger than a whole batch is split: its look goes first.
                 styles.clear();
                 cells.truncate((room - 1) / 2);
@@ -416,7 +425,16 @@ impl Block {
                     let keep = floor_char_boundary(longest, longest.len() / 2);
                     longest.truncate(keep);
                 }
-                (Block::TableRow { row, header, cells, styles }, None)
+                // Spans keep their links, clipped to the text that is left in each cell.
+                cell_spans.truncate(cells.len());
+                for (spans, cell) in cell_spans.iter_mut().zip(&cells) {
+                    let len16 = cell.encode_utf16().count() as u32;
+                    spans.retain(|s| s.start < len16.min(s.end));
+                    for span in spans.iter_mut() {
+                        span.end = span.end.min(len16);
+                    }
+                }
+                (Block::TableRow { row, header, cells, styles, cell_spans }, None)
             }
             Block::Section { mut title } => {
                 title.truncate(floor_char_boundary(&title, room - 1));
@@ -517,6 +535,7 @@ mod tests {
             header: false,
             cells: vec!["x".repeat(100), "y".repeat(50), "z".into()],
             styles: Vec::new(),
+            cell_spans: Vec::new(),
         };
         let (head, rest) = row.split_to_fit(40);
         assert!(head.cost() <= 40, "{}", head.cost());
