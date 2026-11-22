@@ -44,10 +44,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
+      # The hosted Ubuntu image ships the Android SDK and command-line tools; only add what this build needs.
       - name: Android SDK packages
-        run: sdkmanager --install "$ANDROID_PLATFORM" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdk" ] || sdk=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdk" --licenses > /dev/null || true
+          "$sdk" --install "$ANDROID_PLATFORM" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/ndk"
 
       # rust-toolchain.toml pins the toolchain and the Android targets; rustup installs them here.
       - name: Rust toolchain
