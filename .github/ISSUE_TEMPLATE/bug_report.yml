@@ -1,0 +1,48 @@
+name: Bug report
+description: Something is broken, slow or crashes.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. For security problems, use the Security tab instead (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Tap …
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Library, PDF, Office documents, EPUB, Pictures, Video and audio, Archives, PDF tools, Converters, Editor, Fily assistant, Tidy up, Other]
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: e.g. Pixel 8, Android 16
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Xfiles version or commit
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: For crashes, attach `adb logcat -b crash` output. Remove personal file names and contents first.
+      render: text

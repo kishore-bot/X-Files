@@ -73,3 +73,15 @@ replay_pid*
 # Local-only build additions (optional modules kept outside the repository)
 private.settings.gradle.kts
 private.app.gradle.kts
+
+# Fily training: scripts, catalog and docs are tracked; the venv, generated data,
+# checkpoints, exported models and tool binaries are not (rebuild them; see training/README.md).
+/training/.venv/
+/training/__pycache__/
+/training/cache/
+/training/runs/
+/training/exports/
+/training/tools/
+/training/data/**/*.jsonl
+/training/data/**/*.txt
+/training/*.log

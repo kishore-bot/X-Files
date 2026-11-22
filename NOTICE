@@ -1,0 +1,15 @@
+Xfiles
+Copyright 2026 The Xfiles authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes or downloads the following third-party components, each under its own licence:
+
+- FFmpeg audio decoders (built by scripts/build-ffmpeg.sh), licensed under the GNU Lesser General
+  Public License v2.1 or later. Only the LGPL configuration is used; see https://ffmpeg.org/legal.html.
+- Caladea font (feature/reader/src/main/res/font), licensed under the SIL Open Font License 1.1;
+  see feature/reader/src/main/assets/doc-fonts/Caladea-OFL.txt.
+- The Fily assistant model is a fine-tune of LiquidAI LFM2.5-350M. It is not in this repository:
+  the app downloads it on request from a release asset. The model is governed by Liquid AI's model
+  licence (https://huggingface.co/LiquidAI/LFM2.5-350M), not by the Apache License.
+- Other libraries are fetched by Gradle and Cargo under their own licences (mostly Apache-2.0 and MIT).

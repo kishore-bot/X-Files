@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 data class ModelFile(val name: String, val bytes: Long, val sha256: String)
 
 /**
- * The AI models EzFiles downloads on request (they are too large for the app itself). They are
+ * The AI models Xfiles downloads on request (they are too large for the app itself). They are
  * published as assets of a GitHub release, [RELEASE_URL] + file name, and stored in the app's
  * private data folder.
  */
@@ -21,7 +21,7 @@ enum class AssistantModel(val label: String, val folder: String, val files: List
 
     companion object {
         /** Release assets: each file is downloaded from this URL plus its name. */
-        const val RELEASE_URL = "https://github.com/kishore-bot/EzFiles/releases/download/models-v1/"
+        const val RELEASE_URL = "https://github.com/kishore-bot/X-Files/releases/download/models-v1/"
     }
 }
 

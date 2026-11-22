@@ -169,4 +169,10 @@ cargo test --manifest-path engine/Cargo.toml --workspace   # Rust engine and MCP
 
 Built by SAHAPRAXIS. *Free doesn't mean cheap.*
 
-Third-party licences are listed in the app under About → Open-source licences. FFmpeg is used under the LGPL 2.1+, as separate replaceable shared libraries.
+## Contributing
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it covers the architecture (MVVM with unidirectional data flow, use cases, and the Rust engine), the performance rules and how to test. Please follow the [code of conduct](CODE_OF_CONDUCT.md). Report security issues privately, as described in [SECURITY.md](SECURITY.md).
+
+## Licence
+
+Xfiles is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for third-party components. FFmpeg is used under the LGPL 2.1+, as separate replaceable shared libraries. The Fily model is downloaded separately and is governed by its base model's licence. Third-party licences are also listed in the app under About → Open-source licences.

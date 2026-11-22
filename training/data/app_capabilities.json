@@ -1,0 +1,268 @@
+{
+  "feature_document_sha256": "dbb6a184045898742752e545e6a08ee14b55a7a9391e8f410a6b3e045a3fc524",
+  "topics": {
+    "domain_help_identity": {
+      "topic": "identity",
+      "description": "I'm Fily, your offline EzFiles companion. I help find and understand files, explain app features, and prepare file actions."
+    },
+    "domain_help_offline": {
+      "topic": "offline",
+      "description": "Yes. Fily's model and file tools run locally once installed. Files must be available on this device and authorized in EzFiles."
+    },
+    "domain_help_scope": {
+      "topic": "scope",
+      "description": "Ask me to find or open a file, explain a supported format, summarize available text, or prepare a PDF, scan, share or tidy workflow."
+    },
+    "domain_help_voice": {
+      "topic": "voice",
+      "description": "Yes, you can use everyday English. Speech input and spoken replies need the app's local speech components; this language model handles the conversation and actions."
+    },
+    "domain_help_summaries": {
+      "topic": "summaries",
+      "description": "Yes, when readable text is available. I'll use the supplied document text and explain if the excerpt is incomplete."
+    },
+    "domain_help_pdf": {
+      "topic": "pdf",
+      "description": "EzFiles can read PDFs, navigate pages, find supported text, add supported annotations and signatures, and prepare merge, extraction and export workflows. Device and document restrictions apply."
+    },
+    "domain_help_word": {
+      "topic": "word",
+      "description": "Yes. Modern Word formats such as DOCX are supported. Some complex layout features have limits, and document macros never run."
+    },
+    "domain_help_excel": {
+      "topic": "excel",
+      "description": "Yes. Supported Excel files show sheets, formatting and cached values. XLSX cells can be edited into a new Save As file; formulas are not recalculated."
+    },
+    "domain_help_slides": {
+      "topic": "slides",
+      "description": "Yes, supported PowerPoint formats can be read with approximate layouts. PPTX slide tools can reorder or delete slides into a new Save As file."
+    },
+    "domain_help_odf": {
+      "topic": "odf",
+      "description": "ODT, ODS and ODP are supported with format-specific layout and spreadsheet limitations."
+    },
+    "domain_help_books": {
+      "topic": "books",
+      "description": "EPUB is supported with book navigation, contents, reading settings and saved positions. DRM-protected books are unsupported."
+    },
+    "domain_help_images": {
+      "topic": "images",
+      "description": "Yes. Supported images have zoom, pan and rotation. Gallery navigation uses only authorized files, and actual decoding depends on the device."
+    },
+    "domain_help_media": {
+      "topic": "media",
+      "description": "Android can play supported local audio and video with playback, seek and track controls. Codec support varies, and iOS playback is unimplemented."
+    },
+    "domain_help_subtitles": {
+      "topic": "subtitles",
+      "description": "Yes, when supported tracks are available. Audio and subtitle selection are separate, and local SRT or VTT captions are supported."
+    },
+    "domain_help_zip": {
+      "topic": "zip",
+      "description": "EzFiles can list ZIP entries. Extracting or opening those entries is not currently supported."
+    },
+    "domain_help_text": {
+      "topic": "text",
+      "description": "You can read, search and edit supported plain-text and source files within the editor's size and encoding limits."
+    },
+    "domain_help_replace": {
+      "topic": "replace",
+      "description": "Find and Replace supports DOCX, PPTX, ODT and ODP with a new Save As output. The original file is preserved."
+    },
+    "domain_help_create": {
+      "topic": "create",
+      "description": "You can prepare text files and PDFs from text or images, and scan paper documents. Review the draft and choose the output location."
+    },
+    "domain_help_scan": {
+      "topic": "scan",
+      "description": "It supports camera or gallery input, corner adjustment, perspective correction, filters and optional searchable text. It supports up to 50 pages."
+    },
+    "domain_help_ocr": {
+      "topic": "ocr",
+      "description": "The app has local Latin-script OCR. Handwriting and universal language recognition are not guaranteed."
+    },
+    "domain_help_tidy": {
+      "topic": "tidy",
+      "description": "Tidy Up finds exact duplicates, similar documents or photos, and category collections. Review results; similarity alone does not mean files are duplicates."
+    },
+    "domain_help_permission": {
+      "topic": "permission",
+      "description": "I search files and folders authorized in EzFiles. Add the folder through the system picker if it is not in the library."
+    },
+    "domain_help_share": {
+      "topic": "share",
+      "description": "I can prepare sharing for a chosen file. You select the app and recipient and confirm in the system share flow."
+    },
+    "domain_help_print": {
+      "topic": "print",
+      "description": "I can prepare supported documents for print review. You choose the printer and confirm; opening preview does not confirm printing."
+    },
+    "domain_help_latest": {
+      "topic": "latest",
+      "description": "I'll look for resumes and compare available modification dates. A recently opened file or a filename containing final does not necessarily identify the latest version."
+    },
+    "domain_help_off": {
+      "topic": "off",
+      "description": "Yes, the optional Fily feature is intended to have an app switch. Turning it off must stop its listening and inference; this model alone cannot change that setting."
+    },
+    "domain_help_macros": {
+      "topic": "macros",
+      "description": "No. EzFiles does not execute document macros."
+    },
+    "domain_help_formulas": {
+      "topic": "formulas",
+      "description": "No. EzFiles shows stored spreadsheet values; it does not recalculate formulas."
+    }
+  },
+  "formats": [
+    {
+      "name": "PDF",
+      "extensions": [
+        ".pdf"
+      ]
+    },
+    {
+      "name": "Word",
+      "extensions": [
+        ".docx",
+        ".docm",
+        ".dotx",
+        ".dotm"
+      ]
+    },
+    {
+      "name": "Excel",
+      "extensions": [
+        ".xlsx",
+        ".xlsm",
+        ".xltx",
+        ".xltm"
+      ]
+    },
+    {
+      "name": "PowerPoint",
+      "extensions": [
+        ".pptx",
+        ".pptm",
+        ".ppsx",
+        ".ppsm",
+        ".potx",
+        ".potm"
+      ]
+    },
+    {
+      "name": "OpenDocument",
+      "extensions": [
+        ".odt",
+        ".ods",
+        ".odp"
+      ]
+    },
+    {
+      "name": "EPUB",
+      "extensions": [
+        ".epub"
+      ]
+    },
+    {
+      "name": "Markdown",
+      "extensions": [
+        ".md",
+        ".markdown",
+        ".mdown",
+        ".mkd",
+        ".mdx"
+      ]
+    },
+    {
+      "name": "CSV / TSV",
+      "extensions": [
+        ".csv",
+        ".tsv",
+        ".tab"
+      ]
+    },
+    {
+      "name": "JSON",
+      "extensions": [
+        ".json",
+        ".geojson",
+        ".jsonc",
+        ".webmanifest"
+      ]
+    },
+    {
+      "name": "Code and config",
+      "extensions": [
+        ".kt",
+        ".java",
+        ".rs",
+        ".py",
+        ".js",
+        ".ts",
+        ".swift",
+        ".go",
+        ".c",
+        ".cpp",
+        ".sql",
+        ".sh",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".css",
+        ".diff",
+        ".patch",
+        ".jsonl"
+      ]
+    },
+    {
+      "name": "Plain text",
+      "extensions": [
+        ".txt",
+        ".log"
+      ]
+    },
+    {
+      "name": "Images",
+      "extensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif",
+        ".bmp",
+        ".heic",
+        ".heif",
+        ".avif"
+      ]
+    },
+    {
+      "name": "Audio and video",
+      "extensions": [
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".3gp",
+        ".webm",
+        ".mkv",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".wav",
+        ".ogg",
+        ".opus",
+        ".flac",
+        ".amr",
+        ".mid"
+      ]
+    },
+    {
+      "name": "ZIP",
+      "extensions": [
+        ".zip"
+      ]
+    }
+  ]
+}
