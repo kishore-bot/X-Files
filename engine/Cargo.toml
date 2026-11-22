@@ -30,7 +30,7 @@ cbc = { version = "0.1", default-features = false, features = ["block-padding", 
 sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 # Reading older password-protected PDFs: their key derivation needs MD5 and RC4.
-md-5 = { version = "0.10", default-features = false }
+md-5 = { version = "0.11", default-features = false }
 rc4 = "0.1"
 # PDF image recompression (Compress quality levels). Pure Rust: decode JPEG, encode JPEG.
 zune-jpeg = { version = "0.5", default-features = false, features = ["std"] }
