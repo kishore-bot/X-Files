@@ -5,13 +5,14 @@
 !gradle/wrapper/gradle-wrapper.jar
 captures/
 .cxx/
+.externalNativeBuild/
 
-# Rust
-engine/target/
-ffmpeg/rust/target/
+# Rust (every crate's target, including engine/ and ffmpeg/rust/)
+**/target/
 **/*.rs.bk
+*.profraw
 
-# IDEs
+# IDEs and assistants
 .idea/
 *.iml
 .vscode/
@@ -19,20 +20,30 @@ ffmpeg/rust/target/
 *.swp
 .DS_Store
 Thumbs.db
+.claude/settings.local.json
 
 # Local machine config
 local.properties
 
-# Secrets: Firebase config, signing keys, env files
+# Secrets: Firebase config, signing keys, service accounts, env files
 google-services.json
 GoogleService-Info.plist
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
 *.jks
 *.keystore
 *.p12
 *.pem
 keystore.properties
+secrets.properties
+kaggle.json
 .env
 .env.*
+
+# Firebase CLI (firebase.json and firestore.rules are committed)
+.firebase/
+.firebaserc
+node_modules/
 
 # Android outputs
 *.apk
@@ -40,16 +51,21 @@ keystore.properties
 *.ap_
 *.dex
 output-metadata.json
+mapping.txt
 
 # Models / large artifacts (downloaded at runtime, never committed)
 *.gguf
 *.onnx
 *.tflite
+*.safetensors
 
-# Logs
+# Logs, heap dumps, traces
 *.log
 hs_err_pid*
 replay_pid*
+*.hprof
+*.trace
+*.perfetto-trace
 
 # FFmpeg built by scripts/build-ffmpeg.sh
 .cache/
