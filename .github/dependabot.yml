@@ -35,7 +35,12 @@ updates:
     groups:
       rust-crates:
         patterns: ["*"]
-        update-types: ["minor", "patch"]
+        update-types: ["patch"]
+    ignore:
+      # Most crates are 0.x, where a "minor" bump (0.8 -> 0.9) is breaking. Upgrade those by hand,
+      # especially the crypto crates (aes, cbc, sha1, ...) behind PDF and ZIP encryption.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   # GitHub Actions used by the workflows.
   - package-ecosystem: github-actions
