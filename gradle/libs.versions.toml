@@ -35,9 +35,9 @@ androidx-profileinstaller = "1.4.1"
 androidx-test-ext-junit = "1.3.0"
 androidx-uiautomator = "2.4.1"
 # Opt-in Firebase Crashlytics (xfiles.firebaseCrashReports=true). Plugin 3.0.8 and google-services 4.5.0 match EzFiles on AGP 9.
-google-services = "4.5.0"
+google-services = "4.6.0"
 crashlytics-plugin = "3.0.8"
-firebase-bom = "35.1.0"
+firebase-bom = "35.2.0"
 # Android AppFunctions (Android 16+ assistants). Stable 1.0.0 on Google Maven; the service and KSP compiler ship together.
 appfunctions = "1.0.0"
 
