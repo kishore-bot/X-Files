@@ -146,7 +146,7 @@ class MainActivity : ComponentActivity() {
                 when (requested) {
                     WidgetActions.SCAN -> {
                         convert.openScanner()
-                        pdfTools.showConvert(true)
+                        pdfTools.open(com.xfiles.feature.tools.OpenTool.Convert(com.xfiles.feature.tools.ConvertTool.ScanToPdf))
                         navigator.show(Route.Tools)
                     }
                     WidgetActions.FILY -> { showFily = true }

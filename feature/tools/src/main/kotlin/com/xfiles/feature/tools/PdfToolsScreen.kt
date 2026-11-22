@@ -3,10 +3,29 @@ package com.xfiles.feature.tools
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
+import com.xfiles.design.EzSectionPill
+import com.xfiles.design.EzShapes
+import com.xfiles.design.pressScale
+import com.xfiles.design.rememberEzHaptics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
@@ -55,43 +74,96 @@ import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 
-/** The single-PDF tools that have their own screens, opened from the Edit PDFs tiles. */
-internal enum class PdfDedicatedTool(val title: String, val detail: String) {
-    Reorder("Reorder", "Drag, turn or remove pages"),
-    Split("Split", "Page ranges into separate files"),
-    Compress("Compress", "Smaller file, same pages"),
-    Watermark("Watermark", "Text over the pages"),
-    Sign("Sign", "Draw and place a signature"),
-}
+/** The single-PDF tools that have their own screens. */
+enum class PdfDedicatedTool { Reorder, Split, Compress, Watermark, Sign }
+
+/** A tile of the hub: what it says, how it looks, and the tool it opens. */
+private class HubTile(val title: String, val icon: ImageVector, val color: Color, val tool: OpenTool)
+
+/** The hub, in the order people reach for the tools. Rotating or deleting pages lives in Reorder, as in EzFiles. */
+private val HubSections: List<Pair<String, List<HubTile>>> = listOf(
+    "Edit" to listOf(
+        HubTile("Merge PDFs", EzIcons.Plus, Color(0xFFE60023), OpenTool.Pdf(PdfAction.Merge)),
+        HubTile("Add pictures to PDF", EzIcons.Image, Color(0xFF8E5BD9), OpenTool.Convert(ConvertTool.AddPictures)),
+        HubTile("Split", EzIcons.Lines, Color(0xFF0B7F86), OpenTool.Dedicated(PdfDedicatedTool.Split)),
+        HubTile("Reorder, rotate, delete", EzIcons.Rotate, Color(0xFF0862D9), OpenTool.Dedicated(PdfDedicatedTool.Reorder)),
+        HubTile("Extract pages", EzIcons.Document, Color(0xFF5E6AD2), OpenTool.Pdf(PdfAction.Extract)),
+        HubTile("Insert PDF pages", EzIcons.TwoPages, Color(0xFF1F7A5C), OpenTool.Pdf(PdfAction.Insert)),
+        HubTile("Page size", EzIcons.SinglePage, Color(0xFF087F42), OpenTool.Pdf(PdfAction.Resize)),
+        HubTile("Compress", EzIcons.Archive, Color(0xFFB8740B), OpenTool.Dedicated(PdfDedicatedTool.Compress)),
+        HubTile("Watermark", EzIcons.TextT, Color(0xFF7A5AF8), OpenTool.Dedicated(PdfDedicatedTool.Watermark)),
+        HubTile("Signature", EzIcons.Edit, Color(0xFFE0570B), OpenTool.Dedicated(PdfDedicatedTool.Sign)),
+        HubTile("Add password", EzIcons.Lock, Color(0xFFD9408A), OpenTool.Pdf(PdfAction.Protect)),
+        HubTile("Remove password", EzIcons.Lock, Color(0xFF6B3A63), OpenTool.Pdf(PdfAction.Unlock)),
+    ),
+    "Convert a PDF" to listOf(
+        HubTile("PDF to pictures", EzIcons.Image, Color(0xFF2E9E6B), OpenTool.Convert(ConvertTool.PdfToPictures)),
+        HubTile("PDF to text", EzIcons.TextT, Color(0xFF2F3BB5), OpenTool.Convert(ConvertTool.PdfToText)),
+        HubTile("PDF to ZIP", EzIcons.Archive, Color(0xFFB0124F), OpenTool.Convert(ConvertTool.PdfToZip)),
+        HubTile("Picture to text", EzIcons.Search, Color(0xFF00796B), OpenTool.Convert(ConvertTool.PictureToText)),
+    ),
+    "Make a PDF" to listOf(
+        HubTile("Pictures to PDF", EzIcons.Image, Color(0xFF7A4A2E), OpenTool.Convert(ConvertTool.PicturesToPdf)),
+        HubTile("Text to PDF", EzIcons.Lines, Color(0xFF6832C1), OpenTool.Convert(ConvertTool.TextToPdf)),
+        HubTile("Scan to PDF", EzIcons.Camera, Color(0xFF373C47), OpenTool.Convert(ConvertTool.ScanToPdf)),
+    ),
+)
 
 @Composable
-internal fun DedicatedToolTiles(onOpen: (PdfDedicatedTool) -> Unit, enabled: Boolean) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        PdfDedicatedTool.entries.forEach { tool ->
-            Column(
-                Modifier
-                    .width(136.dp)
-                    .glassCard()
-                    .clickable(enabled = enabled) { onOpen(tool) }
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(EzIcons.PdfFile, null, tint = MaterialTheme.colorScheme.primary)
-                Text(tool.title, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    tool.detail,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+private fun ToolsHub(onBack: () -> Unit, onNewNote: () -> Unit, onTidy: () -> Unit, onOpen: (OpenTool) -> Unit) {
+    BackHandler(onBack = onBack)
+    val haptics = rememberEzHaptics()
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        EzTopBar("Tools", onBack, backLabel = "Back to library", gutter = 0.dp, actions = {
+            EzTextButton("Tidy up", onTidy, color = EzColors.Text)
+            EzTextButton("New note", onNewNote, color = EzColors.Text)
+        })
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 96.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            HubSections.forEach { (title, tiles) ->
+                item(key = title, span = { GridItemSpan(maxLineSpan) }, contentType = "title") {
+                    EzSectionPill(title, Modifier.padding(start = 4.dp, top = 12.dp), compact = true)
+                }
+                items(tiles, key = { it.title }, contentType = { "tile" }) { tile ->
+                    ToolCell(tile) {
+                        haptics.activate()
+                        onOpen(tile.tool)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
+private fun ToolCell(tile: HubTile, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    Column(
+        // Same width and at least three lines of label, so a row of tools lines up on a phone.
+        Modifier
+            .fillMaxWidth()
+            .pressScale(interaction, 0.97f)
+            .glassCard(EzShapes.Card, 0.5f)
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(tile.color), contentAlignment = Alignment.Center) {
+            Icon(tile.icon, null, tint = Color.White, modifier = Modifier.size(24.dp))
+        }
+        Text(tile.title, style = MaterialTheme.typography.labelMedium, color = EzColors.Text, textAlign = TextAlign.Center, minLines = 3)
+    }
+}
+
+@Composable
 internal fun DedicatedToolHeader(title: String, onBack: () -> Unit) {
-    EzTopBar(title, onBack, backLabel = "Back to PDF tools", gutter = 0.dp)
+    EzTopBar(title, onBack, backLabel = "Back to tools", gutter = 0.dp)
 }
 
 /** Shows the chosen PDF, or asks for its password when it is protected. */
@@ -159,21 +231,10 @@ internal fun formatBytes(bytes: Long): String = when {
     else -> String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1_000_000.0)
 }
 
-@Composable
-private fun ToolsHeader(onBack: () -> Unit, onNewNote: () -> Unit, onTidy: () -> Unit, section: Int, onSection: (Int) -> Unit, enabled: Boolean) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        EzTopBar("Tools", onBack, backLabel = "Back to library", gutter = 0.dp, actions = {
-            EzTextButton("Tidy up", onTidy, enabled = enabled, color = EzColors.Text)
-            EzTextButton("New note", onNewNote, enabled = enabled, color = EzColors.Text)
-        })
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Edit PDFs", "Create & convert").forEachIndexed { index, label ->
-                FilterChip(selected = section == index, onClick = { onSection(index) }, enabled = enabled, label = { Text(label) })
-            }
-        }
-    }
-}
-
+/**
+ * Tools: a hub of tiles, each opening one focused tool, as in EzFiles. Back from a tool returns to the hub; back
+ * from the hub leaves Tools. Fily and the widget open a tool directly through [PdfToolsViewModel.open].
+ */
 @Composable
 fun PdfToolsScreen(
     viewModel: PdfToolsViewModel,
@@ -182,32 +243,42 @@ fun PdfToolsScreen(
     onTidy: () -> Unit = {},
     convert: ConvertViewModel = hiltViewModel(),
 ) {
-    var dedicated by rememberSaveable { mutableStateOf<PdfDedicatedTool?>(null) }
-    val openTool = dedicated
-    if (openTool != null) {
-        val close = { dedicated = null }
-        when (openTool) {
-            PdfDedicatedTool.Reorder -> PdfReorderScreen(onBack = close)
-            PdfDedicatedTool.Split -> PdfSplitScreen(onBack = close)
-            PdfDedicatedTool.Compress -> PdfCompressScreen(onBack = close)
-            PdfDedicatedTool.Watermark -> PdfWatermarkScreen(onBack = close)
-            PdfDedicatedTool.Sign -> PdfSignScreen(onBack = close)
+    val open by viewModel.open.collectAsStateWithLifecycle()
+    val toHub = { viewModel.open(null) }
+    when (val tool = open) {
+        null -> ToolsHub(onBack, onNewNote, onTidy) {
+            if (it is OpenTool.Convert) convert.select(it.tool)
+            viewModel.open(it)
         }
-        return
+        is OpenTool.Dedicated -> {
+            BackHandler(onBack = toHub)
+            when (tool.tool) {
+                PdfDedicatedTool.Reorder -> PdfReorderScreen(onBack = toHub)
+                PdfDedicatedTool.Split -> PdfSplitScreen(onBack = toHub)
+                PdfDedicatedTool.Compress -> PdfCompressScreen(onBack = toHub)
+                PdfDedicatedTool.Watermark -> PdfWatermarkScreen(onBack = toHub)
+                PdfDedicatedTool.Sign -> PdfSignScreen(onBack = toHub)
+            }
+        }
+        is OpenTool.Convert -> {
+            val back = {
+                convert.close()
+                toHub()
+            }
+            LaunchedEffect(tool.tool) { convert.select(tool.tool) }
+            BackHandler(onBack = back)
+            Column(Modifier.fillMaxSize().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                DedicatedToolHeader(tool.tool.label, back)
+                ConvertTools(convert, Modifier.weight(1f), picker = false)
+            }
+        }
+        is OpenTool.Pdf -> PdfActionScreen(viewModel, onBack = toHub)
     }
-    val section = if (viewModel.state.collectAsStateWithLifecycle().value.convert) 1 else 0
-    if (section == 1) {
-        val back = {
-            convert.close()
-            onBack()
-        }
-        BackHandler(onBack = back)
-        Column(Modifier.fillMaxSize().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ToolsHeader(onBack = back, onNewNote = onNewNote, onTidy = onTidy, section = section, onSection = { viewModel.showConvert(it == 1) }, enabled = !convert.state.collectAsStateWithLifecycle().value.busy)
-            ConvertTools(convert, Modifier.weight(1f))
-        }
-        return
-    }
+}
+
+/** One page-range PDF action (merge, extract, insert, page size, passwords) on its own screen. */
+@Composable
+private fun PdfActionScreen(viewModel: PdfToolsViewModel, onBack: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     HapticOnChange(state.output) { if (it != null) confirm() }
     HapticOnChange(state.error) { if (it != null) reject() }
@@ -232,19 +303,8 @@ fun PdfToolsScreen(
     BackHandler(onBack = back)
 
     Column(Modifier.fillMaxSize().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ToolsHeader(onBack = back, onNewNote = onNewNote, onTidy = onTidy, section = section, onSection = { viewModel.showConvert(it == 1) }, enabled = !state.busy)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PdfAction.entries.forEach { action ->
-                FilterChip(
-                    selected = state.action == action,
-                    onClick = { viewModel.selectAction(action) },
-                    enabled = !state.busy,
-                    label = { Text(action.label) },
-                )
-            }
-        }
+        DedicatedToolHeader(state.action.label, back)
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { DedicatedToolTiles(onOpen = { dedicated = it }, enabled = !state.busy) }
             item {
                 Button(
                     onClick = {

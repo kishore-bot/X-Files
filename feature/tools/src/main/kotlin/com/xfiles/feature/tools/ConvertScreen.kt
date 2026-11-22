@@ -65,7 +65,7 @@ import com.xfiles.design.raised
 
 /** Create and convert tools. Stateless apart from text fields; every action goes to [ConvertViewModel]. */
 @Composable
-internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modifier) {
+internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modifier, picker: Boolean = true) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val text = rememberTextFieldState()
     val position = rememberTextFieldState()
@@ -105,9 +105,11 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
     val saveText = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> uri?.let(viewModel::saveText) }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ChipRow {
-            ConvertTool.entries.forEach { tool ->
-                EzChip(tool.label, state.tool == tool, { viewModel.select(tool) })
+        if (picker) {
+            ChipRow {
+                ConvertTool.entries.forEach { tool ->
+                    EzChip(tool.label, state.tool == tool, { viewModel.select(tool) })
+                }
             }
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {

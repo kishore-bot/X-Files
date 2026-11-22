@@ -32,6 +32,12 @@ class SpeechRecognition(
     val state: StateFlow<SpeechState> = _state
     private val _level = MutableStateFlow(0f)
     val level: StateFlow<Float> = _level
+    private val _pack = MutableStateFlow<SpeechPack>(SpeechPack.None)
+    val pack: StateFlow<SpeechPack> = _pack
+
+    /** No recognizer at all: Google's speech services are missing or disabled on this phone. */
+    val engineMissing: Boolean
+        get() = !onDevice && !SpeechRecognizer.isRecognitionAvailable(context)
 
     private var recognizer: SpeechRecognizer? = null
     /** Kept alive while the system downloads a language pack for us. */
@@ -155,18 +161,30 @@ class SpeechRecognition(
         _state.value = SpeechState.NeedsLanguage
     }
 
-    fun downloadLanguage() {
+    /**
+     * Asks Google's recognizer for the offline pack of [tag] (else the picked language, else the phone's English).
+     * On Android 14+ the download reports progress through [pack]; earlier, the system shows its own prompt.
+     */
+    fun downloadLanguage(tag: String? = null) {
         language = null
-        val tag = Locale.getDefault().toLanguageTag().takeIf { it.startsWith("en", ignoreCase = true) } ?: "en-US"
+        val wanted = tag ?: preferredLanguage()
+            ?: Locale.getDefault().toLanguageTag().takeIf { it.startsWith("en", ignoreCase = true) } ?: "en-US"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
             try {
                 downloader?.destroy()
-                // The system shows its own download prompt or notification for the pack.
-                downloader = SpeechRecognizer.createOnDeviceSpeechRecognizer(context).also { it.triggerModelDownload(baseIntent(tag)) }
+                val sr = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                downloader = sr
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    _pack.value = SpeechPack.Downloading(null)
+                    sr.triggerModelDownload(baseIntent(wanted), context.mainExecutor, packListener(wanted))
+                } else {
+                    sr.triggerModelDownload(baseIntent(wanted))
+                }
                 _state.value = SpeechState.Idle
                 return
             } catch (e: RuntimeException) {
                 Log.w(TAG, "Language download unavailable: ${e.message}")
+                _pack.value = SpeechPack.None
             }
         }
         // Otherwise the phone's voice input settings, where an offline language can be added.
@@ -178,6 +196,35 @@ class SpeechRecognition(
             }
         }
         _state.value = SpeechState.Idle
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun packListener(tag: String) = object : android.speech.ModelDownloadListener {
+        override fun onProgress(completedPercent: Int) { _pack.value = SpeechPack.Downloading(completedPercent.coerceIn(0, 100)) }
+        override fun onSuccess() {
+            Log.i(TAG, "Speech pack $tag ready")
+            _pack.value = SpeechPack.Ready
+        }
+        override fun onScheduled() { _pack.value = SpeechPack.Scheduled }
+        override fun onError(error: Int) {
+            Log.w(TAG, "Speech pack $tag failed ($error)")
+            _pack.value = SpeechPack.Failed
+        }
+    }
+
+    /** The pack result has been shown; back to no download. */
+    fun packSeen() { _pack.value = SpeechPack.None }
+
+    /** Opens Google's speech services in the Play Store (the store app, else the web page). */
+    fun getSpeechEngine() {
+        val store = listOf("market://details?id=$GOOGLE_SPEECH", "https://play.google.com/store/apps/details?id=$GOOGLE_SPEECH")
+        for (uri in store) {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return
+            } catch (_: android.content.ActivityNotFoundException) {
+            }
+        }
     }
 
     fun stop() {
@@ -205,6 +252,8 @@ class SpeechRecognition(
     private companion object {
         const val TAG = "EzSpeech"
         const val MAX_HINTS = 100
+        /** "Speech Recognition & Synthesis from Google": the on-device recognizer and its language packs. */
+        const val GOOGLE_SPEECH = "com.google.android.tts"
         // SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED / ERROR_LANGUAGE_UNAVAILABLE (API 31).
         const val ERROR_LANGUAGE_NOT_SUPPORTED = 12
         const val ERROR_LANGUAGE_UNAVAILABLE = 13

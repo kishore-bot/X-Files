@@ -36,14 +36,21 @@ class PdfToolsViewModel @Inject constructor(
     val state = mutableState.asStateFlow()
     private var work: Job? = null
 
-    /** Edit PDFs (false) or Create & convert (true). */
-    fun showConvert(convert: Boolean) = mutableState.update { it.copy(convert = convert) }
+    /** The tool on screen, or null for the hub. Kept apart from [state] so resetting a tool's form never navigates. */
+    private val mutableOpen = MutableStateFlow<OpenTool?>(null)
+    val open: StateFlow<OpenTool?> = mutableOpen.asStateFlow()
+
+    fun open(tool: OpenTool?) {
+        if (tool is OpenTool.Pdf) selectAction(tool.action)
+        mutableOpen.value = tool
+    }
 
     /** Fily's hand-off: [action] with [uris] already chosen, shown for the user to review and run. */
     fun prefill(action: PdfAction, uris: List<Uri>) {
         if (mutableState.value.busy) return
         mutableState.value.output?.file?.delete()
         mutableState.value = PdfToolsState(action = action)
+        mutableOpen.value = OpenTool.Pdf(action)
         pick(uris)
     }
 
@@ -51,7 +58,7 @@ class PdfToolsViewModel @Inject constructor(
         val current = mutableState.value
         if (current.action == action || current.busy) return
         current.output?.file?.delete()
-        mutableState.value = PdfToolsState(action = action, convert = current.convert)
+        mutableState.value = PdfToolsState(action = action)
     }
 
     fun pick(uris: List<Uri>) {
@@ -155,7 +162,7 @@ class PdfToolsViewModel @Inject constructor(
         if (mutableState.value.saving) return
         cancel()
         mutableState.value.output?.file?.delete()
-        mutableState.value = PdfToolsState(convert = mutableState.value.convert)
+        mutableState.value = PdfToolsState()
     }
 
     override fun onCleared() {
@@ -174,8 +181,14 @@ data class PdfToolsState(
     val saved: Boolean = false,
     val progress: Float? = null,
     val error: String? = null,
-    val convert: Boolean = false,
 )
+
+/** One tool of the Tools hub: a page-range PDF action, a PDF tool with its own screen, or a create/convert tool. */
+sealed interface OpenTool {
+    data class Pdf(val action: PdfAction) : OpenTool
+    data class Dedicated(val tool: PdfDedicatedTool) : OpenTool
+    data class Convert(val tool: ConvertTool) : OpenTool
+}
 
 /** What a dedicated single-PDF tool shows about its source and its latest run. */
 data class PdfToolFrame(

@@ -67,6 +67,7 @@ import com.xfiles.design.glassPanel
 import com.xfiles.fily.FilySession
 import com.xfiles.fily.SpeechLanguageSupport
 import kotlinx.coroutines.delay
+import androidx.compose.material3.LinearProgressIndicator
 import kotlinx.coroutines.launch
 
 /**
@@ -108,6 +109,23 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
     }
     val recognition by recognizer.state.collectAsStateWithLifecycle()
     val level = recognizer.level.collectAsStateWithLifecycle()
+    val pack by recognizer.pack.collectAsStateWithLifecycle()
+    val packBusy = pack is SpeechPack.Downloading || pack is SpeechPack.Scheduled
+    fun downloadPack(tag: String? = null) {
+        // Paused while the pack downloads, so the loop doesn't reopen the mic into a missing language.
+        wantsToListen = false
+        recognizer.downloadLanguage(tag)
+    }
+    // A finished pack: refresh the language list and start listening in it.
+    LaunchedEffect(pack) {
+        if (pack == SpeechPack.Ready) {
+            viewModel.refreshSpeechLanguages()
+            quietRestarts = 0
+            wantsToListen = true
+            delay(PACK_RESULT_MS)
+            recognizer.packSeen()
+        }
+    }
     val speaker = rememberTextToSpeech()
     val speaking by speaker.state.collectAsStateWithLifecycle()
 
@@ -137,8 +155,8 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
 
     // Continuous listening: the recognizer ends on silence or a timeout; Fily opens the mic again by
     // itself after each turn, and pauses after MAX_QUIET_RESTARTS silent sessions.
-    LaunchedEffect(recognition, ui.working, speaking, replyPending, wantsToListen, enabled) {
-        if (!enabled || !wantsToListen || ui.working || replyPending || speaking == TtsState.Speaking) return@LaunchedEffect
+    LaunchedEffect(recognition, ui.working, speaking, replyPending, wantsToListen, enabled, packBusy) {
+        if (!enabled || !wantsToListen || ui.working || replyPending || speaking == TtsState.Speaking || packBusy) return@LaunchedEffect
         if (recognition == SpeechState.Listening || recognition == SpeechState.NeedsLanguage) return@LaunchedEffect
         delay(RESTART_DELAY_MS)
         if (quietRestarts >= MAX_QUIET_RESTARTS) {
@@ -209,10 +227,16 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
         else -> FilyMascotState.Idle
     }
     val needsLanguage = recognition == SpeechState.NeedsLanguage
+    val engineMissing = recognition == SpeechState.Error && recognizer.engineMissing
     val (status, dot) = when {
         !enabled -> "Fily is off" to EzColors.TextSecondary
         micDenied -> "Microphone not allowed · tap Fily to retry" to Color(0xFFE5484D)
+        pack is SpeechPack.Downloading -> ((pack as SpeechPack.Downloading).percent?.let { "Downloading speech pack · $it%" } ?: "Downloading speech pack…") to Color(0xFF3E63DD)
+        pack == SpeechPack.Scheduled -> "Speech pack queued · waiting for Wi-Fi" to Color(0xFFF5A524)
+        pack == SpeechPack.Ready -> "Speech pack ready" to Color(0xFF30A46C)
+        pack == SpeechPack.Failed -> "Speech pack download failed" to Color(0xFFE5484D)
         needsLanguage -> "Speech pack needed" to Color(0xFFF5A524)
+        engineMissing -> "Google speech services needed" to Color(0xFFF5A524)
         recognition == SpeechState.Error -> "Speech recognition unavailable" to Color(0xFFE5484D)
         ui.working -> "Thinking…" to Color(0xFF3E63DD)
         speaking == TtsState.Speaking -> "Speaking · tap to interrupt" to Color(0xFF8E4EC6)
@@ -226,7 +250,10 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
         val question = if (needsLanguage) "" else partial.ifBlank { ui.request.orEmpty() }
         val answer = when {
             !enabled -> "Fily is switched off. Turn it on in Fily's settings."
+            packBusy -> "Fetching the offline speech pack from Google. Fily starts listening as soon as it's ready."
+            pack == SpeechPack.Failed -> "The speech pack didn't download. Check your connection and try again."
             needsLanguage -> "To hear you offline, your phone needs a speech pack for this language. Download it, then tap Fily."
+            engineMissing -> "Fily listens with Google's on-device speech recognition, which isn't on this phone. Install it, then tap Fily."
             ui.working -> "Thinking…"
             ui.error != null -> ui.error.orEmpty()
             else -> ui.reply.orEmpty()
@@ -264,7 +291,10 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                         },
                         onLanguage = { tag ->
                             viewModel.selectSpeechLanguage(tag)
-                            if (languages.downloadable.any { it.tag == tag }) viewModel.downloadSpeechLanguage(tag)
+                            if (languages.downloadable.any { it.tag == tag }) {
+                                settingsOpen = false
+                                downloadPack(tag)
+                            }
                         },
                     )
                 } else {
@@ -278,7 +308,17 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                             style = MaterialTheme.typography.titleMedium.copy(lineHeight = 24.sp),
                         )
                     }
-                    if (needsLanguage) EzTextButton("Download speech pack", recognizer::downloadLanguage)
+                    val downloading = pack as? SpeechPack.Downloading
+                    when {
+                        downloading != null -> {
+                            val percent = downloading.percent
+                            if (percent == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                            else LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
+                        }
+                        pack == SpeechPack.Failed -> EzTextButton("Try again", { downloadPack() })
+                        needsLanguage -> EzTextButton("Download speech pack", { downloadPack() })
+                        engineMissing -> EzTextButton("Get Google speech", recognizer::getSpeechEngine)
+                    }
                 }
                 Text("Fily · On-device", color = EzColors.TextSecondary.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall)
             }
@@ -389,6 +429,8 @@ internal fun SpeechLanguageRow(support: SpeechLanguageSupport, selected: String?
 }
 
 private const val RESTART_DELAY_MS = 250L
+/** How long "Speech pack ready" stays in the status pill. */
+private const val PACK_RESULT_MS = 2_000L
 private const val SPEECH_START_TIMEOUT_MS = 2_500L
 /** About a minute of silence (each silent session lasts ~5-8 s) before Fily pauses. */
 private const val MAX_QUIET_RESTARTS = 8

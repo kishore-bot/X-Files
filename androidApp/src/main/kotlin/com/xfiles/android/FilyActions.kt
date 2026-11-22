@@ -70,8 +70,7 @@ internal class FilyActions(
                         "AddPassword" -> PdfAction.Protect
                         else -> null
                     }
-                    pdfTools.showConvert(false)
-                    if (action != null) pdfTools.prefill(action, uris)
+                    if (action != null) pdfTools.prefill(action, uris) else pdfTools.open(null)
                     navigator.show(Route.Tools)
                 }
             }
@@ -80,7 +79,7 @@ internal class FilyActions(
 
     private fun convertTool(tool: ConvertTool, pdf: Uri? = null, draft: String? = null) {
         convert.prefill(tool, pdf, draft)
-        pdfTools.showConvert(true)
+        pdfTools.open(com.xfiles.feature.tools.OpenTool.Convert(tool))
         navigator.show(Route.Tools)
     }
 
