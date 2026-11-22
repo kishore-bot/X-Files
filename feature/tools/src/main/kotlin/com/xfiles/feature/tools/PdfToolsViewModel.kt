@@ -372,6 +372,9 @@ abstract class PdfSingleFileToolViewModel<T>(
         return pdf.thumbnail(opened.uri, page, opened.password, maxEdge)
     }
 
+    /** The first page as a small card thumbnail, for the source step of every dedicated tool. */
+    suspend fun firstPreview(): Bitmap = thumbnail(0, SOURCE_PREVIEW_EDGE)
+
     fun release() {
         work?.cancel()
         mutableFrame.value.outputs.forEach { it.file.delete() }
@@ -389,5 +392,6 @@ abstract class PdfSingleFileToolViewModel<T>(
 
     companion object {
         const val PREVIEW_EDGE = 1024
+        const val SOURCE_PREVIEW_EDGE = 360
     }
 }

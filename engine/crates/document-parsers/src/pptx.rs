@@ -23,7 +23,7 @@ use document_core::style::{BOLD, ITALIC, STRIKE, UNDERLINE};
 use document_core::{Block, Build, CancelToken, EngineError, Geometry, Result, Rich, Shape, ShapeText};
 
 use crate::dom::{self, Node};
-use crate::ooxml::{Relationship, hyperlinks, relationships, target_of};
+use crate::ooxml::{Relationship, is_safe_link, relationships, target_of};
 use crate::rich::{RichBuilder, drop_color};
 use crate::stream::{BlockSource, Parts, is_media, is_raster_picture};
 
@@ -34,6 +34,8 @@ pub(crate) struct PptxSource {
     parts: Parts,
     cancel: CancelToken,
     slides: VecDeque<String>,
+    /// Archive path of each slide to its 1-based position, for internal jumps.
+    slide_index: HashMap<String, u32>,
     slide_number: u32,
     /// The slide count goes out before the first slide.
     counted: bool,
@@ -50,7 +52,7 @@ impl PptxSource {
             rels.iter().filter(|r| !r.external).map(|r| (r.id.as_str(), r.target.as_str())).collect();
         let bytes = parts.archive().read_to_vec(&presentation)?;
         let root = dom::parse(&bytes, &cancel)?.ok_or_else(|| EngineError::malformed("the presentation is empty"))?;
-        let slides = root
+        let slides: VecDeque<String> = root
             .child("sldIdLst")
             .map(|list| {
                 list.children_named("sldId")
@@ -62,10 +64,13 @@ impl PptxSource {
             .child("sldSz")
             .and_then(|s| Some((s.attr_f32("cx")? / EMU_PER_POINT, s.attr_f32("cy")? / EMU_PER_POINT)))
             .unwrap_or((960.0, 540.0));
+        let slide_index: HashMap<String, u32> =
+            slides.iter().enumerate().map(|(i, path)| (path.clone(), i as u32 + 1)).collect();
         Ok(Self {
             parts,
             cancel,
             slides,
+            slide_index,
             slide_number: 0,
             counted: false,
             slide_size,
@@ -160,7 +165,7 @@ impl PptxSource {
         let ctx = SlideCtx {
             layout: &layout,
             rels: &rels,
-            links: hyperlinks(&rels),
+            slide_index: &self.slide_index,
             dir: dir_of(path),
             size: self.slide_size,
         };
@@ -663,10 +668,45 @@ impl Transform {
 struct SlideCtx<'a> {
     layout: &'a Layout,
     rels: &'a [Relationship],
-    links: HashMap<String, String>,
+    slide_index: &'a HashMap<String, u32>,
     dir: &'a str,
     /// Slide size in points.
     size: (f32, f32),
+}
+
+/// The click target of a `a:hlinkClick`, in the encoding of [`document_core::Span::link`]:
+/// a web or mail URL, `slide:N` for a jump to slide N, or `slide:next` and
+/// friends for the slide show's own navigation. Other targets (files, macros,
+/// unknown actions) give `None`.
+fn link_of(hlink: &Node, ctx: &SlideCtx<'_>) -> Option<String> {
+    let action = hlink.attr("action").unwrap_or_default();
+    if let Some(query) = action.strip_prefix("ppaction://hlinkshowjump") {
+        let jump = query.split_once("jump=").map(|(_, v)| v)?;
+        let target = match jump {
+            "nextslide" => "next",
+            "previousslide" => "previous",
+            "firstslide" => "first",
+            "lastslide" => "last",
+            _ => return None,
+        };
+        return Some(format!("slide:{target}"));
+    }
+    let id = hlink.prefixed_attr("id")?;
+    let rel = ctx.rels.iter().find(|r| r.id == id)?;
+    if rel.external {
+        return is_safe_link(&rel.target).then(|| rel.target.clone());
+    }
+    ctx.slide_index.get(&rel.target).map(|n| format!("slide:{n}"))
+}
+
+/// The link on a shape itself: the `a:hlinkClick` of its `cNvPr`, whichever
+/// `nv*Pr` element holds it (sp, pic, cxnSp, grpSp).
+fn shape_link(node: &Node, ctx: &SlideCtx<'_>) -> Option<String> {
+    node.children
+        .iter()
+        .filter(|c| c.name().starts_with("nv"))
+        .filter_map(|nv| nv.child("cNvPr")?.child("hlinkClick"))
+        .find_map(|h| link_of(h, ctx))
 }
 
 fn collect_shapes(tree: &Node, ctx: &SlideCtx<'_>, xf: Transform, out: &mut Vec<(Option<u32>, Shape)>) {
@@ -719,6 +759,9 @@ pub(crate) fn blank_shape(x: f32, y: f32, w: f32, h: f32, rotation: f32) -> Shap
         line_width: 0.0,
         image: None,
         media: None,
+        media_external: false,
+        media_audio: false,
+        link: None,
         paragraphs: Vec::new(),
         anchor: 0,
         insets: [7.2, 3.6, 7.2, 3.6],
@@ -760,6 +803,7 @@ fn shape(node: &Node, ctx: &SlideCtx<'_>, xf: Transform) -> Option<(Option<u32>,
     let (x, y, w, h) = xf.apply(rect);
     let mut out = blank_shape(x, y, w, h, rect.rotation);
     out.geometry = geometry_of(sp_pr, connector);
+    out.link = shape_link(node, ctx);
 
     let style = node.child("style");
     let style_color = |name: &str| {
@@ -862,12 +906,8 @@ fn paragraphs(
                     if rpr.and_then(|r| r.attr("strike")).is_some_and(|s| s != "noStrike") {
                         style |= STRIKE;
                     }
-                    let link = rpr
-                        .and_then(|r| r.child("hlinkClick"))
-                        .and_then(|h| h.prefixed_attr("id"))
-                        .and_then(|id| ctx.links.get(id))
-                        .map(String::as_str);
-                    text.push_colored(t, style, link, run_color);
+                    let link = rpr.and_then(|r| r.child("hlinkClick")).and_then(|h| link_of(h, ctx));
+                    text.push_colored(t, style, link.as_deref(), run_color);
                 }
                 "br" => text.push_plain("\n"),
                 _ => {}
@@ -911,7 +951,7 @@ fn paragraphs(
 fn picture(node: &Node, ctx: &SlideCtx<'_>, xf: Transform) -> Option<(Option<u32>, Shape)> {
     let image = node.child("blipFill").and_then(|b| image_of(b, ctx.rels, ctx.dir));
     let media = media_of(node, ctx.rels);
-    if image.is_none() && media.is_none() {
+    if image.is_none() && media.is_none() && shape_link(node, ctx).is_none() {
         return None;
     }
     let ph = node.path(&["nvPicPr", "nvPr", "ph"]);
@@ -925,29 +965,55 @@ fn picture(node: &Node, ctx: &SlideCtx<'_>, xf: Transform) -> Option<(Option<u32
     let mut out = blank_shape(x, y, w, h, rect.rotation);
     out.geometry = geometry_of(node.child("spPr"), false);
     out.image = image;
-    out.media = media;
+    out.link = shape_link(node, ctx);
+    if let Some(media) = media {
+        out.media = Some(media.target);
+        out.media_external = media.external;
+        out.media_audio = media.audio;
+    }
     Some((shape_id(node, "nvPicPr"), out))
 }
 
-/// The package path of the audio or video a picture plays: an `a:videoFile` or
-/// `a:audioFile` link, or PowerPoint 2010's `p14:media` embed. Files outside
-/// the package are never followed.
-fn media_of(pic: &Node, rels: &[Relationship]) -> Option<String> {
+/// Audio or video a picture plays.
+struct MediaRef {
+    /// Container path when embedded; the URL when linked.
+    target: String,
+    external: bool,
+    audio: bool,
+}
+
+/// The media a picture plays: an `a:videoFile` or `a:audioFile` (embedded via
+/// `r:link`, or linked to a URL), or PowerPoint 2010's `p14:media` embed.
+/// Embedded media must be a package part; linked media must be http(s).
+fn media_of(pic: &Node, rels: &[Relationship]) -> Option<MediaRef> {
     let nv = pic.path(&["nvPicPr", "nvPr"])?;
     let linked = nv
         .children
         .iter()
         .filter(|c| matches!(c.name(), "videoFile" | "audioFile"))
-        .filter_map(|c| c.prefixed_attr("link"));
+        .filter_map(|c| Some((c.prefixed_attr("link")?, c.name() == "audioFile")));
     let embedded = nv
         .child("extLst")
         .into_iter()
         .flat_map(|l| l.children_named("ext"))
-        .filter_map(|e| e.child("media")?.prefixed_attr("embed"));
-    let ids: Vec<&str> = embedded.chain(linked).collect();
-    ids.iter().find_map(|id| {
-        rels.iter().find(|r| r.id == *id && !r.external && is_media(&r.target)).map(|r| r.target.clone())
+        .filter_map(|e| Some((e.child("media")?.prefixed_attr("embed")?, false)));
+    embedded.chain(linked).find_map(|(id, element_audio)| {
+        let rel = rels.iter().find(|r| r.id == id)?;
+        let usable = if rel.external { is_safe_link(&rel.target) } else { is_media(&rel.target) };
+        usable.then(|| MediaRef {
+            target: rel.target.clone(),
+            external: rel.external,
+            audio: element_audio || is_audio_name(&rel.target),
+        })
     })
+}
+
+const AUDIO_EXTENSIONS: [&str; 11] = ["mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "amr", "mid", "wma"];
+
+/// Whether a part name or URL names an audio file (query and fragment ignored).
+fn is_audio_name(target: &str) -> bool {
+    let path = target.split(['?', '#']).next().unwrap_or(target);
+    path.rsplit_once('.').is_some_and(|(_, ext)| AUDIO_EXTENSIONS.iter().any(|a| ext.eq_ignore_ascii_case(a)))
 }
 
 fn frame(node: &Node, ctx: &SlideCtx<'_>, xf: Transform) -> Option<(Option<u32>, Shape)> {
@@ -1121,15 +1187,16 @@ mod tests {
                 "SH • Point red",
                 "SH ",
                 "IMG ppt/media/image1.png",
-                "IMG ppt/media/image1.png"
+                "IMG ppt/media/image1.png",
+                "SH "
             ]
         );
-        // The movie keeps its picture as the poster; a video outside the package is never followed.
+        // The movie keeps its picture as the poster; a linked video plays from its URL.
         let media: Vec<_> = blocks
             .iter()
             .filter_map(|b| if let Block::Shape(s) = b { Some(s.media.as_deref()) } else { None })
             .collect();
-        assert_eq!(media, [None, None, None, None, Some("ppt/media/media1.mp4")]);
+        assert_eq!(media, [None, None, None, None, Some("ppt/media/media1.mp4"), Some("https://example.com/a.mp4")]);
 
         let shapes: Vec<_> =
             blocks.iter().filter_map(|b| if let Block::Shape(s) = b { Some(s) } else { None }).collect();
@@ -1179,5 +1246,54 @@ mod tests {
         assert_eq!(shapes[0].paragraphs[0].size, 44.0);
         assert!(shapes[1].y > shapes[0].y + shapes[0].height - 1.0);
         assert_eq!(shapes[1].paragraphs[0].size, 28.0);
+    }
+
+    #[test]
+    fn hyperlinks_jumps_and_linked_media() {
+        let rels = br#"<Relationships><Relationship Id="r1" Type="http://x/officeDocument" Target="ppt/presentation.xml"/></Relationships>"#;
+        let presentation = format!(
+            r#"<p:presentation {NS}><p:sldIdLst><p:sldId id="256" r:id="rId2"/><p:sldId id="257" r:id="rId3"/></p:sldIdLst></p:presentation>"#
+        );
+        let pres_rels = br#"<Relationships><Relationship Id="rId2" Type="http://x/slide" Target="slides/slide1.xml"/><Relationship Id="rId3" Type="http://x/slide" Target="slides/slide2.xml"/></Relationships>"#;
+        let xfrm = r#"<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1270000" cy="635000"/></a:xfrm></p:spPr>"#;
+        let slide1 = format!(
+            r#"<p:sld {NS}><p:cSld><p:spTree>
+<p:sp><p:nvSpPr><p:cNvPr id="2" name="Button"><a:hlinkClick r:id="rId4" action="ppaction://hlinkshowjump?jump=nextslide"/></p:cNvPr><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1270000" cy="635000"/></a:xfrm><a:solidFill><a:srgbClr val="112233"/></a:solidFill></p:spPr></p:sp>
+<p:sp><p:nvSpPr><p:cNvPr id="3" name="Text"/><p:nvPr/></p:nvSpPr>{xfrm}<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:hlinkClick r:id="rId5"/></a:rPr><a:t>Site</a:t></a:r><a:r><a:rPr><a:hlinkClick r:id="rId3" action="ppaction://hlinksldjump"/></a:rPr><a:t>Next</a:t></a:r><a:r><a:rPr><a:hlinkClick r:id="rId6"/></a:rPr><a:t>File</a:t></a:r></a:p></p:txBody></p:sp>
+<p:pic><p:nvPicPr><p:cNvPr id="6" name="Song"/><p:nvPr><a:audioFile r:link="rId7"/></p:nvPr></p:nvPicPr><p:blipFill/>{xfrm}</p:pic>
+</p:spTree></p:cSld></p:sld>"#
+        );
+        let slide1_rels = br#"<Relationships><Relationship Id="rId3" Type="http://x/slide" Target="slide2.xml"/><Relationship Id="rId4" Type="http://x/slide" Target="slide2.xml"/><Relationship Id="rId5" Type="http://x/hyperlink" Target="https://example.com/a" TargetMode="External"/><Relationship Id="rId6" Type="http://x/hyperlink" Target="file:///C:/secret.docx" TargetMode="External"/><Relationship Id="rId7" Type="http://x/audio" Target="https://example.com/song.mp3" TargetMode="External"/></Relationships>"#;
+        let slide2 = format!(
+            r#"<p:sld {NS}><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="T"/><p:nvPr/></p:nvSpPr>{xfrm}<p:txBody><a:bodyPr/><a:p><a:r><a:t>Target</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#
+        );
+        let deck = zip(&[
+            ("_rels/.rels", rels),
+            ("ppt/presentation.xml", presentation.as_bytes()),
+            ("ppt/_rels/presentation.xml.rels", pres_rels),
+            ("ppt/slides/slide1.xml", slide1.as_bytes()),
+            ("ppt/slides/_rels/slide1.xml.rels", slide1_rels),
+            ("ppt/slides/slide2.xml", slide2.as_bytes()),
+        ]);
+        let (_, blocks) = open_zip(deck);
+        let shapes: Vec<_> =
+            blocks.iter().filter_map(|b| if let Block::Shape(s) = b { Some(s) } else { None }).collect();
+        // Slide 1 has three shapes; slide 2's text follows them.
+        assert_eq!(shapes.len(), 4, "{:?}", texts(&blocks));
+        // A shape-level jump to the next slide.
+        assert_eq!(shapes[0].link.as_deref(), Some("slide:next"));
+        // Runs: an external URL, an internal jump to slide 2 (its 1-based index); the file link is dropped.
+        let links: Vec<_> = shapes[1].paragraphs[0]
+            .text
+            .spans
+            .iter()
+            .filter_map(|s| s.link.as_deref().map(|l| (s.start, s.end, l)))
+            .collect();
+        assert_eq!(links, [(0, 4, "https://example.com/a"), (4, 8, "slide:2")]);
+        assert_eq!(shapes[1].link, None);
+        // Linked audio: its URL, flagged external and audio; no poster.
+        assert_eq!(shapes[2].media.as_deref(), Some("https://example.com/song.mp3"));
+        assert!(shapes[2].media_external && shapes[2].media_audio);
+        assert_eq!(shapes[2].image, None);
     }
 }

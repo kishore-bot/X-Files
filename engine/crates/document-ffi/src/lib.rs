@@ -360,8 +360,16 @@ pub struct NativeShape {
     pub line: Option<u32>,
     pub line_width: f32,
     pub image: Option<String>,
-    /// Embedded audio or video this shape plays; `image` is its poster.
+    /// Audio or video this shape plays; `image` is its poster. A container
+    /// path when embedded, or the URL when `media_external`.
     pub media: Option<String>,
+    /// `media` is a web URL to stream rather than a document part.
+    pub media_external: bool,
+    /// `media` is audio rather than video.
+    pub media_audio: bool,
+    /// Where a tap on the shape goes: a web or mail URL, or `slide:N` /
+    /// `slide:next|previous|first|last` (N counts slides from 1).
+    pub link: Option<String>,
     pub paragraphs: Vec<NativeShapeText>,
     pub anchor: u8,
     pub insets: Vec<f32>,
@@ -389,6 +397,9 @@ impl From<Shape> for NativeShape {
             line_width: s.line_width,
             image: s.image,
             media: s.media,
+            media_external: s.media_external,
+            media_audio: s.media_audio,
+            link: s.link,
             paragraphs: s
                 .paragraphs
                 .into_iter()

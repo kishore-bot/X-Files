@@ -44,6 +44,15 @@ data class SlideShape(
     val table: List<List<String>>,
     val tableHeader: Boolean,
     val build: ShapeBuild?,
-    /** Embedded audio or video this shape plays; [image] is its poster. */
+    /** Audio or video this shape plays; [image] is its poster. A part path, or a URL when [mediaExternal]. */
     val media: String? = null,
+    /** [media] is a web URL to stream. */
+    val mediaExternal: Boolean = false,
+    /** [media] is audio rather than video. */
+    val mediaAudio: Boolean = false,
+    /**
+     * Where a tap on the shape goes: a web or mail URL, or `slide:N` (1-based), `slide:next`,
+     * `slide:previous`, `slide:first` or `slide:last`. Text runs carry their own links in [TextSpan.link].
+     */
+    val link: String? = null,
 )

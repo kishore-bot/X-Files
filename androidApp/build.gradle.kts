@@ -143,3 +143,6 @@ tasks.configureEach {
     if (name.startsWith("uploadCrashlytics")) enabled = false
     if (firebaseReports && name.contains("Dev") && (name.endsWith("GoogleServices") || name.contains("Crashlytics"))) enabled = false
 }
+
+// Optional local-only dependencies; the app builds the same without this file.
+rootProject.file("private.app.gradle.kts").takeIf { it.exists() }?.let { apply(from = it) }

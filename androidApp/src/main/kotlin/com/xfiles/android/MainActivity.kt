@@ -23,6 +23,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.zIndex
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.splashscreen.SplashScreenViewProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,7 +49,10 @@ import com.xfiles.core.documents.launchSystemPrint
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import com.xfiles.design.EzTheme
+import com.xfiles.design.LocalEzPalette
 import com.xfiles.design.LocalHapticsEnabled
+import android.graphics.drawable.ColorDrawable
+import androidx.compose.ui.graphics.toArgb
 import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.ReducedMotionMonitor
 import com.xfiles.design.glassScreen
@@ -123,6 +127,7 @@ class MainActivity : ComponentActivity() {
         systemSplash.setKeepOnScreenCondition { StartupGate.keepSplash() }
         // The branded intro plays on a cold start only; rotation and warm starts skip it.
         val showIntro = savedInstanceState == null && StartupGate.claimIntro()
+        systemSplash.setOnExitAnimationListener { provider -> playSplashExit(provider, showIntro) }
         enableEdgeToEdge()
         if (savedInstanceState == null) captureOpenRequest(intent)
         setContent {
@@ -190,6 +195,9 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(LocalHapticsEnabled provides haptics, LocalReducedMotion provides reducedMotion, LocalMediaPip provides mediaPip) {
                 EzTheme(darkTheme = darkTheme) {
+                    // The window behind the Compose tree follows the (animated) palette, so bars and gaps never flash.
+                    val windowColor = LocalEzPalette.current.background.toArgb()
+                    SideEffect { window.setBackgroundDrawable(ColorDrawable(windowColor)) }
                     sharedLink?.let { link ->
                         SharedLinkSheet(
                             link = link,
@@ -255,6 +263,31 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * The system splash's exit: on a cold start the mark scales up and fades while the Compose intro reveals the name
+     * and tagline beneath it; a tap skips the rest. Warm starts and rotation remove the splash at once.
+     */
+    private fun playSplashExit(provider: SplashScreenViewProvider, cold: Boolean) {
+        if (!cold) {
+            provider.remove()
+            return
+        }
+        val view = provider.view
+        val length = StartupGate.beginExit().toLong()
+        view.setOnClickListener {
+            view.animate().cancel()
+            provider.remove()
+            StartupGate.skipIntro()
+        }
+        view.animate()
+            .alpha(0f)
+            .scaleX(1.25f)
+            .scaleY(1.25f)
+            .setDuration(length)
+            .withEndAction { provider.remove() }
+            .start()
     }
 
     @Composable
@@ -385,6 +418,7 @@ class MainActivity : ComponentActivity() {
             onTwoPage = analysis::setTwoPage,
             pdfThumbnail = analysis::pdfThumbnail,
             pdfText = analysis::pdfText,
+            pagePreview = analysis::pagePreview,
             gallery = gallery,
             onGalleryPage = analysis::selectGalleryPage,
             galleryPage = analysis::galleryPage,
@@ -395,6 +429,7 @@ class MainActivity : ComponentActivity() {
             rotationOf = analysis::rotationOf,
             onRotate = analysis::rotate,
             onEditedPreview = analysis::showEditedPreview,
+            onAttachScroll = analysis::attachViewerScroll,
         )
     }
 
@@ -425,7 +460,8 @@ class MainActivity : ComponentActivity() {
         val pdf = active?.preview is FilePreview.Pdf
         SideEffect { session.openDocumentId = activeFile?.toString() }
         DisposableEffect(control, activeFile, pdf) {
-            val unbind = if (pdf) control.attach(FilyPdfTarget(analysis)) else null
+            // Page commands for PDFs; scroll commands for HTML and spreadsheets (the target reads what is on screen).
+            val unbind = if (active != null) control.attach(FilyViewerTarget(analysis)) else null
             onDispose { unbind?.invoke() }
         }
         val install by voice.install.collectAsStateWithLifecycle()
@@ -499,6 +535,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         motion.stop()
+        // Changing the launcher icon is safe only once the app is in the background.
+        appearance.applyPendingLauncherIcon()
         super.onStop()
     }
 

@@ -1,0 +1,358 @@
+package com.xfiles.feature.library
+
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.xfiles.core.documents.ArchiveHandoff
+import com.xfiles.core.documents.FileBookmark
+import com.xfiles.core.documents.FileEntry
+import com.xfiles.core.documents.FolderLibrary
+import com.xfiles.core.documents.LibraryContentSearch
+import com.xfiles.core.documents.LibrarySearchHit
+import com.xfiles.core.documents.LinkedFolder
+import com.xfiles.core.documents.canPrint
+import com.xfiles.design.BarIconButton
+import com.xfiles.design.EzBadgeColors
+import com.xfiles.design.EzChip
+import com.xfiles.design.EzColors
+import com.xfiles.design.EzDialog
+import com.xfiles.design.EzEmptyCard
+import com.xfiles.design.EzFloatingAction
+import com.xfiles.design.EzIcons
+import com.xfiles.design.EzNavItem
+import com.xfiles.design.EzNavigationBar
+import com.xfiles.design.EzSectionPill
+import com.xfiles.design.EzShapes
+import com.xfiles.design.EzSpacing
+import com.xfiles.design.EzTextButton
+import com.xfiles.design.FileNameStyle
+import com.xfiles.design.FileTypeTile
+import com.xfiles.design.FilyMascot
+import com.xfiles.design.FilyMascotCallToAction
+import com.xfiles.design.GlassIconButton
+import com.xfiles.design.LocalHapticsEnabled
+import com.xfiles.design.PrimaryActionButton
+import com.xfiles.design.floatingGlass
+import com.xfiles.design.glass
+import com.xfiles.design.glassCard
+import com.xfiles.design.pressScale
+import com.xfiles.design.rememberHaptics
+import com.xfiles.documents.DocumentKind
+import com.xfiles.documents.library.LibraryCategory
+import com.xfiles.documents.library.libraryCategories
+
+internal enum class HomeTab { Library, Recent, Bookmarks }
+
+/** Menu, the app's name, Fily's mic and About (when there is one). */
+@Composable
+internal fun Header(
+    onAbout: (() -> Unit)?,
+    onVoice: (() -> Unit)?,
+    compact: Boolean,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = EzSpacing.Gutter, end = EzSpacing.Gutter, top = if (compact) 4.dp else 12.dp, bottom = if (compact) 2.dp else 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text(
+            "Xfiles",
+            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
+            color = EzColors.Text,
+            modifier = Modifier.weight(1f).semantics { heading() },
+        )
+        if (onVoice != null) MicButton(onVoice)
+        if (onAbout != null) GlassIconButton(EzIcons.Info, "About Xfiles", onAbout)
+    }
+}
+
+/** The round glass button that opens Fily; Fily's mascot sits inside it. */
+@Composable
+internal fun MicButton(onVoice: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val haptics = rememberHaptics()
+    val hapticsOn = LocalHapticsEnabled.current
+    Box(
+        Modifier
+            .size(48.dp)
+            .pressScale(interaction, 0.9f)
+            .floatingGlass(CircleShape)
+            .clickable(interaction, indication = null, role = Role.Button) {
+                if (hapticsOn) haptics.confirm() 
+                onVoice()
+            }
+            .semantics { contentDescription = "Voice assistant" },
+        contentAlignment = Alignment.Center,
+    ) {
+        FilyMascot(size = 40.dp)
+    }
+}
+
+/** The search pill: a red search icon, one line of text, a clear button while there is text. */
+@Composable
+internal fun LibrarySearch(search: TextFieldState, compact: Boolean, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .glassCard(EzShapes.Pill, 0.62f)
+            .padding(start = 18.dp, end = 8.dp, top = if (compact) 6.dp else 12.dp, bottom = if (compact) 6.dp else 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(EzIcons.Search, null, Modifier.size(EzSpacing.BarIcon), tint = EzColors.Primary)
+        BasicTextField(
+            state = search,
+            modifier = Modifier.weight(1f),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = EzColors.Text),
+            lineLimits = TextFieldLineLimits.SingleLine,
+            cursorBrush = SolidColor(EzColors.Primary),
+            decorator = { field ->
+                Box {
+                    if (search.text.isEmpty()) {
+                        Text("Search files, docs, sheets, and more", color = EzColors.TextSecondary, fontSize = 16.sp, maxLines = 1)
+                    }
+                    field()
+                }
+            },
+        )
+        if (search.text.isNotEmpty()) {
+            BarIconButton(EzIcons.Close, "Clear search", { search.clearText() }, tint = EzColors.TextSecondary)
+        }
+    }
+}
+
+/** The filter chips in one row that scrolls sideways; each carries its type's icon and colour. */
+@Composable
+internal fun FilterRow(selected: LibraryCategory, onSelect: (LibraryCategory) -> Unit, compact: Boolean) {
+    LazyRow(
+        Modifier.fillMaxWidth(),
+        // Room above and below for the chips' shadows, which the row would otherwise clip.
+        contentPadding = PaddingValues(horizontal = EzSpacing.Gutter, vertical = if (compact) 2.dp else 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(Categories, key = { it.name }, contentType = { "chip" }) { chip ->
+            val colors = chip.typeColors()
+            EzChip(
+                label = chip.label,
+                selected = selected == chip,
+                onClick = { onSelect(chip) },
+                icon = chip.icon(),
+                iconTint = colors?.let { EzBadgeColors.ink(it) } ?: EzColors.Text,
+            )
+        }
+    }
+}
+
+/** The folders as glass chips, with Add folder, Search inside files and Refresh beside them. */
+@Composable
+internal fun FolderRow(
+    folders: List<LinkedFolder>,
+    searchEnabled: Boolean,
+    scanning: Boolean,
+    onAdd: () -> Unit,
+    onSearchEnabled: (Boolean) -> Unit,
+    onRefresh: () -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = EzSpacing.Gutter, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        item(key = "add", contentType = "add") {
+            EzChip(label = "Add folder", selected = false, onClick = onAdd, icon = EzIcons.Plus, iconTint = EzColors.Primary)
+        }
+        if (folders.isNotEmpty()) {
+            item(key = "search-inside", contentType = "toggle") {
+                EzChip(label = "Search inside files", selected = searchEnabled, onClick = { onSearchEnabled(!searchEnabled) })
+            }
+            item(key = "refresh", contentType = "toggle") {
+                EzChip(label = "Refresh", selected = false, onClick = onRefresh, icon = null)
+            }
+        }
+        items(folders, key = { it.uri.toString() }, contentType = { "folder" }) { folder ->
+            Row(
+                Modifier.widthIn(max = 240.dp).glass(EzShapes.Pill, 0.5f).padding(start = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(EzIcons.Folder, null, tint = EzColors.Primary, modifier = Modifier.size(18.dp))
+                Text(
+                    folder.name,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = EzColors.Text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                BarIconButton(EzIcons.Close, "Remove ${folder.name}", { onRemove(folder.uri.toString()) }, tint = EzColors.TextSecondary)
+            }
+        }
+    }
+}
+
+/** The first-run card: explains folders and offers the one main action. */
+@Composable
+internal fun NoFoldersCard(onAddFolder: () -> Unit, modifier: Modifier) {
+    Column(
+        modifier.fillMaxWidth().glass(EzShapes.Card, 0.6f).padding(EzSpacing.Panel),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Bring in your documents", style = MaterialTheme.typography.titleMedium, color = EzColors.Text)
+        Text(
+            "Add a folder, such as Documents, and Xfiles lists every file in it. Files stay on this device.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = EzColors.TextSecondary,
+        )
+        Text(
+            "Android doesn't allow adding Download as a folder. Use Open file for those files.",
+            style = MaterialTheme.typography.bodySmall,
+            color = EzColors.TextSecondary,
+        )
+        PrimaryActionButton("Add folder", EzIcons.Plus, onAddFolder, Modifier.fillMaxWidth().padding(top = 6.dp))
+    }
+}
+
+/** A section heading in a glass pill, with a count, a busy spinner and a trailing action. */
+@Composable
+internal fun SectionTitle(
+    title: String,
+    count: String?,
+    busy: Boolean = false,
+    onClear: (() -> Unit)? = null,
+    compact: Boolean = false,
+) {
+    EzSectionPill(
+        title = title,
+        modifier = RowGutter,
+        count = count,
+        compact = compact,
+        trailing = {
+            if (busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = EzColors.Primary)
+            if (onClear != null) {
+                Box(Modifier.weight(1f))
+                EzTextButton("Clear", onClear)
+            }
+        },
+    )
+}
+
+/** A quiet line under a section title, or a warning when [warning]. */
+@Composable
+internal fun SearchNote(text: String, warning: Boolean = false) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (warning) EzColors.Accent else EzColors.TextSecondary,
+        modifier = RowGutter.padding(horizontal = 4.dp, vertical = 2.dp),
+    )
+}
+
+/** The selection bar: the count, Open for a single file, Share (up to 32) and Clear. */
+@Composable
+internal fun SelectionBar(count: Int, onOpen: (() -> Unit)?, onShare: () -> Unit, onClear: () -> Unit) {
+    Row(
+        RowGutter
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .glassCard(EzShapes.Pill, 0.55f)
+            .padding(start = 18.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$count selected", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = EzColors.Text)
+        if (onOpen != null) EzTextButton("Open", onOpen)
+        EzTextButton(
+            if (count > MaxSharedFiles) "Share (max $MaxSharedFiles)" else "Share",
+            onShare,
+            enabled = count in 1..MaxSharedFiles,
+        )
+        EzTextButton("Clear", onClear)
+    }
+}
+
+/** The empty and no-results card: a red icon, a title and one line of explanation. */
+@Composable
+internal fun EmptyMessage(title: String, body: String, icon: ImageVector = EzIcons.Folder) {
+    EzEmptyCard(title, body, icon, Modifier.padding(horizontal = EzSpacing.Gutter, vertical = 12.dp))
+}
+
+/**
+ * A file row. Tap opens it, or toggles it while a selection is active; long-press
+ * starts a selection (with a haptic tick). Open and Share for a single file are
+ * in the selection bar.
+ */

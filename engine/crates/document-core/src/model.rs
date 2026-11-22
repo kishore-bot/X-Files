@@ -118,6 +118,9 @@ pub struct Span {
     pub end: u32,
     /// Bitwise OR of [`style`] flags.
     pub style: u8,
+    /// Where a click goes: a web or mail URL (`https:`, `http:`, `mailto:`),
+    /// or a jump in the presentation: `slide:N` (N counts slides from 1), or
+    /// `slide:next`, `slide:previous`, `slide:first`, `slide:last`.
     pub link: Option<String>,
     /// ARGB text colour, where it differs from the block's own.
     pub color: Option<u32>,
@@ -305,8 +308,15 @@ pub struct Shape {
     pub line: Option<u32>,
     pub line_width: f32,
     pub image: Option<String>,
-    /// Embedded audio or video played from this shape; [`Self::image`] is its poster.
+    /// Audio or video played from this shape; [`Self::image`] is its poster.
+    /// A container path when embedded, or the URL when [`Self::media_external`].
     pub media: Option<String>,
+    /// The media is a linked URL rather than a part of the document.
+    pub media_external: bool,
+    /// The media is audio (otherwise video).
+    pub media_audio: bool,
+    /// Where a click on the shape goes, encoded as [`Span::link`].
+    pub link: Option<String>,
     pub paragraphs: Vec<ShapeText>,
     /// 0 top, 1 middle, 2 bottom.
     pub anchor: u8,
@@ -321,6 +331,7 @@ impl Shape {
     fn cost(&self) -> usize {
         64 + self.image.as_ref().map_or(0, String::len)
             + self.media.as_ref().map_or(0, String::len)
+            + self.link.as_ref().map_or(0, String::len)
             + self
                 .paragraphs
                 .iter()

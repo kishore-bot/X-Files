@@ -63,6 +63,9 @@ internal fun ExternalOpen(file: FileEntry, message: String = "An in-app preview 
                 context.startActivity(Intent.createChooser(intent, "Open with"))
             } catch (_: ActivityNotFoundException) {
                 Toast.makeText(context, "No app can open this file.", Toast.LENGTH_SHORT).show()
+            } catch (_: SecurityException) {
+                // The app that shared the file didn't let Xfiles pass it on.
+                Toast.makeText(context, "This file can't be passed to another app. Open it from where it's stored.", Toast.LENGTH_LONG).show()
             }
         }) { Text("Open with") }
     }

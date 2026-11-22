@@ -48,7 +48,7 @@ hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt"
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
 mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkit-text" }
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
-core-splashscreen = { module = "androidx.core:core-splashscreen", version = "1.0.1" }
+core-splashscreen = { module = "androidx.core:core-splashscreen", version = "1.2.0" }
 camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
 camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }

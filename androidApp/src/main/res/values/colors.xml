@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="splash_background">#FFFFFFFF</color>
-    <color name="splash_brand">#FFE60023</color>
-    <color name="splash_motto">#FF6B6570</color>
+    <color name="splash_background">#FFFFF4F8</color>
+    <!-- Disc behind the splash mark: the launcher icon slate, so the glass document reads in light and dark. -->
+    <color name="brand_icon_background">#FF1C202E</color>
 </resources>

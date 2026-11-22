@@ -1,12 +1,15 @@
 package com.xfiles.feature.reader
 
-import androidx.compose.material3.TextButton
+import kotlinx.coroutines.delay
 import android.graphics.Bitmap
 import android.graphics.drawable.AnimatedImageDrawable
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,54 +17,47 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.runtime.produceState
-import kotlinx.coroutines.CancellationException
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfPageText
 import com.xfiles.design.EzIcons
+import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.DocumentKind
-import com.xfiles.documents.PdfBox
 import com.xfiles.documents.PdfMarkup
-import com.xfiles.documents.PdfMarkupKind
-import com.xfiles.design.BarIconButton
-import com.xfiles.design.glassBar
-import androidx.compose.foundation.layout.size
+import com.xfiles.documents.structure.DocumentFormat
+import com.xfiles.feature.reader.domain.isInDeviceStorage
+import com.xfiles.tidy.SensitiveFindings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
-import com.xfiles.tidy.SensitiveFindings
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.xfiles.design.rememberHaptics
-import com.xfiles.feature.reader.domain.isInDeviceStorage
 import kotlinx.coroutines.launch
 
+/**
+ * The document reader. Stateful only at the edges: the state, flags and lambdas come in from the activity
+ * and [ReaderUiViewModel]. The top bar holds Back and the name; every other action is in the floating
+ * action button, which the content's gestures show and hide.
+ */
 @Composable
 fun ReaderScreen(
     state: ReaderState,
@@ -111,9 +107,14 @@ fun ReaderScreen(
     structuredEdits: StructuredEditSession? = null,
     /** Character geometry of a PDF page for text selection; see DocumentAnalysisViewModel.pdfText. */
     pdfText: suspend (Int) -> PdfPageText? = { null },
+    /** One page of the open PDF for the continuous view and its thumbnails; see DocumentAnalysisViewModel.pagePreview. */
+    pagePreview: suspend (Int) -> FilePreview.Pdf? = { null },
+    /** Registers the HTML or spreadsheet viewer for the assistant's scroll commands; see DocumentAnalysisViewModel.attachViewerScroll. */
+    onAttachScroll: (ViewerScroll) -> () -> Unit = { {} },
 ) {
     PrintRequests(printRequests)
     val context = LocalContext.current
+    val haptics = rememberHaptics()
     (printing as? PrintStatus.Failed)?.let { failed ->
         AlertDialog(
             onDismissRequest = onDismissPrintError,
@@ -126,24 +127,21 @@ fun ReaderScreen(
     // A gallery of two or more pictures; a single picture keeps the plain viewer.
     val paged = (gallery as? GalleryUiState.Paged)?.session?.takeIf { it.size > 1 }
     val documentKey = ready?.file?.uri?.toString()
+    val fileName = ready?.file?.name.orEmpty()
     // Quarter turns belong to each picture (the view model keeps them), so a gallery page keeps its own turn.
     val rotation = documentKey?.let(rotationOf) ?: 0
-    var sortMenu by remember { mutableStateOf(false) }
-    var showSearch by rememberSaveable(documentKey) { mutableStateOf(false) }
-    var showSource by rememberSaveable(documentKey) { mutableStateOf(false) }
-    var reading by rememberSaveable(documentKey) { mutableStateOf(ReadingTheme.Standard) }
-    var showPdfFind by rememberSaveable(documentKey) { mutableStateOf(false) }
-    var editingMarkup by rememberSaveable(documentKey) { mutableStateOf(false) }
-    var mode by rememberSaveable(documentKey) { mutableStateOf(PdfMarkupKind.Pen) }
-    var confirmDiscard by rememberSaveable(documentKey) { mutableStateOf(false) }
-    var showJump by rememberSaveable(documentKey) { mutableStateOf(false) }
-    var showOffice by rememberSaveable(documentKey) { mutableStateOf(false) }
-    var showGrid by rememberSaveable(documentKey) { mutableStateOf(false) }
-    // Original view is remembered per file type; the menu toggle writes the choice back.
-    var original by rememberSaveable(documentKey) {
-        mutableStateOf(readOriginalView(context, originalViewKey(ready?.file?.name.orEmpty())))
-    }
-    val haptics = rememberHaptics()
+
+    val chromeVm: ReaderUiViewModel = hiltViewModel()
+    val chromeState by chromeVm.state.collectAsStateWithLifecycle()
+    val ui = chromeState.forDocument(documentKey)
+    LaunchedEffect(documentKey) { chromeVm.onEvent(ReaderUiEvent.DocumentChanged(documentKey)) }
+    val onEvent: (ReaderUiEvent) -> Unit = chromeVm::onEvent
+
+    // The page style is chosen per file type (its extension) and remembered in preferences.
+    var pageStyle by rememberSaveable(documentKey) { mutableStateOf(readPageStyle(context, pageStyleKey(fileName))) }
+    // The text size of plain and code views is remembered per kind of viewer, not per file.
+    val textKind = if (isSourceCode(fileName) || isSvgName(fileName)) "code" else "text"
+    var textScale by rememberSaveable(textKind) { mutableStateOf(readTextScale(context, textKind)) }
     val saveVm: SaveToDownloadsViewModel = hiltViewModel()
     val saveState by saveVm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -160,7 +158,7 @@ fun ReaderScreen(
         snackScope.launch { snackbar.showSnackbar(text) }
     }
     val structuredUi by (structuredEdits?.state ?: kotlinx.coroutines.flow.emptyFlow<StructuredEditState>()).collectAsState(StructuredEditState())
-    val saveEdited = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(structuredMimeType(ready?.file?.name.orEmpty()))) { uri ->
+    val saveEdited = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(structuredMimeType(fileName))) { uri ->
         if (uri != null) structuredEdits?.saveCopy(uri)
     }
     val saveAnnotated = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
@@ -168,11 +166,12 @@ fun ReaderScreen(
     }
     val closeReader: () -> Unit = {
         if (!markup.saving) {
-            if (markup.marks.isNotEmpty()) confirmDiscard = true else if (!onNestedBack()) onBack()
+            if (markup.marks.isNotEmpty()) onEvent(ReaderUiEvent.SetConfirmDiscard(true)) else if (!onNestedBack()) onBack()
         }
     }
+    BackHandler(enabled = ui.actionsOpen) { onEvent(ReaderUiEvent.SetActionsOpen(false)) }
     BackHandler(enabled = markup.marks.isNotEmpty() || markup.saving, onBack = closeReader)
-    BackHandler(enabled = showGrid, onBack = { showGrid = false })
+    BackHandler(enabled = ui.showGrid, onBack = { onEvent(ReaderUiEvent.SetGrid(false)) })
     // Picture-in-Picture shows only the picture: no bars, hints or panels, and no margins.
     val inPip by LocalMediaPip.current.isInPictureInPicture.collectAsStateWithLifecycle()
     // Video and audio take the whole screen, with their own close button, as in EzFiles.
@@ -181,381 +180,226 @@ fun ReaderScreen(
         MediaScreen(ready.file, media.video, onClose = closeReader)
         return
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = if (inPip) 0.dp else 12.dp, vertical = if (inPip) 0.dp else 8.dp)) {
-        if (!inPip) Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-            BarIconButton(EzIcons.Back, "Back to library", closeReader, enabled = !markup.saving)
-            Text(
-                ready?.file?.name ?: "Reader",
-                Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            paged?.let { session ->
-                Text(
-                    "${session.index + 1} / ${session.size}",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                )
-                Box {
-                    IconButton(onClick = { sortMenu = true }) {
-                        Icon(EzIcons.ListLines, "Sort: ${gallerySort.label}")
-                    }
-                    DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                        GallerySort.entries.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(if (option == gallerySort) "${option.label} (current)" else option.label) },
-                                onClick = {
-                                    sortMenu = false
-                                    onGallerySort(option)
-                                },
-                            )
-                        }
-                    }
-                }
+    // An EPUB book has its own chrome (with Fily), so the reader's bar and action button stay away from it.
+    val epub = (ready?.preview as? FilePreview.Structured)?.document?.info?.format == DocumentFormat.Epub
+    val preview = ready?.preview
+    val textOf = when (preview) {
+        is FilePreview.Text -> preview
+        is FilePreview.Structured -> preview.source
+        is FilePreview.Html -> preview.text
+        else -> null
+    }
+    val bottomInset = if (preview is FilePreview.Pdf || (preview is FilePreview.Structured && preview.document.info.kind == com.xfiles.documents.structure.DocumentKind.Presentation)) 96.dp else 20.dp
+
+    val actions = buildList {
+        if (ready != null && !ui.editingMarkup) {
+            if (preview is FilePreview.Pdf && preview.searchable) {
+                add(ReaderAction(if (ui.showPdfFind) "Close find" else "Find in PDF", EzIcons.Search) {
+                    onEvent(ReaderUiEvent.SetPdfFind(!ui.showPdfFind))
+                    if (ui.showPdfFind) onClosePdfFind()
+                })
             }
-            if (ready != null && ready.preview != FilePreview.Unsupported) {
-                IconButton(onClick = {
-                    haptics.toggle(!bookmarked)
-                    onBookmark()
-                }) {
-                    Icon(
-                        if (bookmarked) EzIcons.Bookmark else EzIcons.BookmarkOutline,
-                        if (bookmarked) "Remove bookmark" else "Add bookmark",
-                    )
-                }
+            if (preview is FilePreview.Structured || (textOf != null && textOf.content.isNotBlank())) {
+                add(ReaderAction("Find in file", EzIcons.Search) { onEvent(ReaderUiEvent.SetSearch(!ui.showSearch)) })
             }
-            if (!editingMarkup && (ready?.preview is FilePreview.Picture || ready?.preview is FilePreview.Pdf)) {
-                IconButton(onClick = {
-                    haptics.tick()
-                    documentKey?.let(onRotate)
-                }) {
-                    Icon(EzIcons.Rotate, "Rotate clockwise")
-                }
-            }
-            if (ready?.preview is FilePreview.Pdf) {
-                IconButton(
-                    onClick = {
-                        editingMarkup = !editingMarkup
-                        if (editingMarkup) {
-                            showPdfFind = false
-                            showGrid = false
-                            onClosePdfFind()
-                        }
-                    },
-                    enabled = !markup.working,
-                ) { Icon(if (editingMarkup) EzIcons.Close else EzIcons.Edit, if (editingMarkup) "Hide annotations" else "Annotate PDF") }
-            }
-            if (!editingMarkup && (ready?.preview as? FilePreview.Pdf)?.searchable == true) {
-                IconButton(onClick = {
-                    showPdfFind = !showPdfFind
-                    if (!showPdfFind) onClosePdfFind()
-                }) { Icon(EzIcons.Search, "Find in PDF") }
-            }
-            val text = when (val preview = ready?.preview) {
-                is FilePreview.Text -> preview
-                is FilePreview.Structured -> preview.source
-                is FilePreview.Html -> preview.text
-                else -> null
-            }
-            // Pages, JSON and code have a rich view and a plain-text view.
-            val hasRichView = when (ready?.preview) {
+            val rich = when (preview) {
                 is FilePreview.Html -> true
-                is FilePreview.Text -> ready.file.name.let { it.endsWith(".json", ignoreCase = true) || isSourceCode(it) }
+                is FilePreview.Text -> fileName.let { it.endsWith(".json", ignoreCase = true) || isSourceCode(it) }
+                is FilePreview.Structured -> preview.source != null
                 else -> false
             }
-            if (hasRichView) {
-                IconButton(onClick = {
-                    showSearch = false
-                    showSource = !showSource
-                }) {
-                    val svg = ready?.file?.name?.let(::isSvgName) == true
-                    Icon(
-                        if (showSource) EzIcons.Eye else EzIcons.Code,
-                        when {
-                            svg && showSource -> "Show preview"
-                            svg -> "Show source"
-                            showSource -> "Show formatted"
-                            else -> "Show plain text"
-                        },
+            if (rich) {
+                add(ReaderAction(if (ui.showSource) "Preview" else "Source", if (ui.showSource) EzIcons.Eye else EzIcons.Code) {
+                    onEvent(ReaderUiEvent.SetSource(!ui.showSource))
+                })
+            }
+            if (textOf != null && ready.file.kind == DocumentKind.Text && !textOf.truncated) {
+                add(ReaderAction("Edit text", EzIcons.Edit) {
+                    val openFile = onEditFile
+                    if (openFile != null) openFile(ready.file.uri, ready.file.name) else onEdit(ready.file.name, textOf.content)
+                })
+            }
+            if (preview is FilePreview.Structured && isOfficeEditable(fileName)) {
+                add(ReaderAction("Find & replace", EzIcons.Edit) { onEvent(ReaderUiEvent.SetOffice(!ui.showOffice)) })
+            }
+            if (preview is FilePreview.Pdf) {
+                add(ReaderAction("Annotate", EzIcons.Edit) {
+                    onEvent(ReaderUiEvent.SetEditingMarkup(true))
+                    onClosePdfFind()
+                })
+                add(ReaderAction("Page grid", EzIcons.Grid) { onEvent(ReaderUiEvent.SetGrid(true)) })
+            }
+            if (preview is FilePreview.Picture || preview is FilePreview.Pdf) {
+                add(ReaderAction("Rotate", EzIcons.Rotate) { documentKey?.let(onRotate) })
+            }
+            if (paged != null) {
+                val next = GallerySort.entries[(gallerySort.ordinal + 1) % GallerySort.entries.size]
+                add(ReaderAction("Sort: ${gallerySort.label}", EzIcons.ListLines) { onGallerySort(next) })
+            }
+            if (preview != FilePreview.Unsupported) {
+                add(
+                    ReaderAction(if (bookmarked) "Remove bookmark" else "Bookmark", if (bookmarked) EzIcons.Bookmark else EzIcons.BookmarkOutline) {
+                        haptics.toggle(!bookmarked)
+                        onBookmark()
+                    },
+                )
+            }
+            if (preview is FilePreview.Pdf || preview is FilePreview.Structured || (textOf != null && textOf.content.isNotBlank())) {
+                add(ReaderAction("At a glance", EzIcons.Lightbulb) { onSummary() })
+            }
+            if (preview is FilePreview.Text) {
+                val percent = (textScale * 100).toInt()
+                add(ReaderAction("Larger text ($percent%)", EzIcons.TextT) {
+                    val next = (textScale + TEXT_SCALE_STEP).coerceAtMost(TEXT_SCALE_MAX)
+                    textScale = next
+                    writeTextScale(context, textKind, next)
+                })
+                add(ReaderAction("Smaller text ($percent%)", EzIcons.TextT) {
+                    val next = (textScale - TEXT_SCALE_STEP).coerceAtLeast(TEXT_SCALE_MIN)
+                    textScale = next
+                    writeTextScale(context, textKind, next)
+                })
+            }
+            add(ReaderAction("Ask Fily", EzIcons.Mic) { onFily() })
+            add(ReaderAction("Page style: ${pageStyle.label}", EzIcons.Eye) { onEvent(ReaderUiEvent.SetPageStyleSheet(true)) })
+            val printable = ready.file.kind !in setOf(DocumentKind.Audio, DocumentKind.Video, DocumentKind.Unknown)
+            if (printable) add(ReaderAction("Print", EzIcons.Print) { onPrint() })
+            add(ReaderAction("Share original", EzIcons.Share) { onShare() })
+            if (!isInDeviceStorage(ready.file.uri)) {
+                add(ReaderAction("Save to Downloads", EzIcons.Share) { saveVm.onEvent(SaveUiEvent.Save(ready.file.uri, ready.file.name)) })
+            }
+            if (structuredUi.edited) add(ReaderAction("Save edited copy", EzIcons.Share) { saveEdited.launch(fileName) })
+        }
+    }
+
+    CompositionLocalProvider(LocalViewerScroll provides onAttachScroll, LocalTextScale provides textScale) {
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(horizontal = if (inPip) 0.dp else 12.dp, vertical = if (inPip) 0.dp else 8.dp)) {
+                if (!inPip && !epub) {
+                    val galleryCounter = paged?.let { "  ${it.index + 1}/${it.size}" }.orEmpty()
+                    ReaderTopBar(
+                        title = fileName.ifEmpty { "Reader" } + galleryCounter,
+                        backEnabled = !markup.saving,
+                        onBack = closeReader,
+                    )
+                }
+                if (!inPip) SensitiveFileHint(documentKey, sensitive, Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally))
+                if (!inPip && ui.showOffice && ready != null && isOfficeEditable(ready.file.name)) {
+                    OfficeFindReplacePanel(
+                        uri = ready.file.uri,
+                        name = ready.file.name,
+                        onPreview = onEditedPreview,
+                        onClose = { onEvent(ReaderUiEvent.SetOffice(false)) },
+                    )
+                }
+                if (!inPip && ui.editingMarkup && ready?.preview is FilePreview.Pdf) {
+                    PdfMarkupControls(
+                        mode = ui.markupMode,
+                        state = markup,
+                        onMode = { onEvent(ReaderUiEvent.SetMarkupMode(it)) },
+                        onUndo = onUndoMarkup,
+                        onPrepare = onPrepareMarkup,
+                        onSave = { saveAnnotated.launch("${ready.file.name.substringBeforeLast('.')}-annotated.pdf") },
+                    )
+                }
+                if (!inPip && ui.showPdfFind && ready?.preview is FilePreview.Pdf) {
+                    PdfFindBar(pdfFind, onPdfQuery, onPdfMatch, onClose = {
+                        onEvent(ReaderUiEvent.SetPdfFind(false))
+                        onClosePdfFind()
+                    })
+                }
+                ReaderBody(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .chromeGestures(
+                            onScrollDown = { onEvent(ReaderUiEvent.SetActionsVisible(false)) },
+                            onScrollUp = { onEvent(ReaderUiEvent.SetActionsVisible(true)) },
+                            onTap = { onEvent(ReaderUiEvent.ToggleActionsVisible) },
+                        ),
+                    state = state,
+                    ui = ui,
+                    onEvent = onEvent,
+                    pageStyle = pageStyle,
+                    gallery = gallery,
+                    paged = paged,
+                    rotation = rotation,
+                    rotationOf = rotationOf,
+                    markup = markup,
+                    pdfFind = pdfFind,
+                    structuredEdits = structuredEdits,
+                    onBack = onBack,
+                    onClose = closeReader,
+                    onFily = onFily,
+                    onPassword = onPassword,
+                    onPage = onPage,
+                    onPdfQuery = onPdfQuery,
+                    onAddMarkup = onAddMarkup,
+                    pdfThumbnail = pdfThumbnail,
+                    pdfText = pdfText,
+                    pagePreview = pagePreview,
+                    onOpenArchiveEntry = onOpenArchiveEntry,
+                    onGalleryPage = onGalleryPage,
+                    galleryPage = galleryPage,
+                    galleryAnimation = galleryAnimation,
+                    pictureAnimation = pictureAnimation,
+                )
+                if (ready?.bookmarkError == true) {
+                    Text("This file provider does not allow Xfiles to keep access for bookmarks.", color = MaterialTheme.colorScheme.error)
+                }
+                val pdf = ready?.preview as? FilePreview.Pdf
+                if (ready != null && pdf != null) {
+                    if (ready.turningPage) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (ready.pageError) Text("This page could not be opened.", color = MaterialTheme.colorScheme.error)
+                    if (!ui.editingMarkup) PdfToolbar(
+                        page = pdf.page,
+                        pageCount = pdf.pageCount,
+                        zoom = ui.pdfZoom,
+                        twoUp = ui.pdfTwoUp,
+                        grid = ui.showGrid,
+                        busy = ready.turningPage,
+                        thumbnail = pdfThumbnail,
+                        onPage = onPage,
+                        onJump = { onEvent(ReaderUiEvent.SetJump(true)) },
+                        onZoom = { onEvent(ReaderUiEvent.SetPdfZoom(it)) },
+                        onTwoUp = { onEvent(ReaderUiEvent.SetPdfTwoUp(it)) },
+                        onGrid = { onEvent(ReaderUiEvent.SetGrid(it)) },
+                    )
+                    if (ui.showJump) {
+                        PdfJumpDialog(pdf.page, pdf.pageCount, onJump = onPage, onDismiss = { onEvent(ReaderUiEvent.SetJump(false)) })
+                    }
+                }
+                if (saveState.saving) {
+                    saveState.progress?.let { fraction ->
+                        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                    } ?: LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                SnackbarHost(snackbar, Modifier.align(Alignment.CenterHorizontally))
+            }
+            if (ready != null && !inPip && !epub) {
+                // Hidden while reading, the button comes back by itself once the content has been still for a moment.
+                LaunchedEffect(ui.actionsVisible) {
+                    if (!ui.actionsVisible) {
+                        delay(ACTIONS_RETURN_MS)
+                        onEvent(ReaderUiEvent.SetActionsVisible(true))
+                    }
+                }
+                if (ui.actionsOpen) ReaderActionScrim(onClose = { onEvent(ReaderUiEvent.SetActionsOpen(false)) })
+                AnimatedVisibility(
+                    visible = ui.actionsVisible || ui.actionsOpen,
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                ) {
+                    ReaderActionButton(
+                        actions = actions,
+                        open = ui.actionsOpen,
+                        onOpenChange = { onEvent(ReaderUiEvent.SetActionsOpen(it)) },
+                        modifier = Modifier.padding(end = 16.dp, bottom = bottomInset),
                     )
                 }
             }
-            if (ready != null && text != null && ready.file.kind == DocumentKind.Text && !text.truncated) {
-                IconButton(onClick = {
-                    val openFile = onEditFile
-                    if (openFile != null) openFile(ready.file.uri, ready.file.name) else onEdit(ready.file.name, text.content)
-                }) {
-                    Icon(EzIcons.Edit, "Edit text")
-                }
-            }
-            if (ready?.preview is FilePreview.Structured && ready.preview.source != null) {
-                IconButton(onClick = {
-                    showSearch = false
-                    showSource = !showSource
-                }) {
-                    Icon(if (showSource) EzIcons.Eye else EzIcons.Code, if (showSource) "Show preview" else "Show source")
-                }
-            }
-            if (!editingMarkup && ready != null && ready.preview is FilePreview.Structured && isOfficeEditable(ready.file.name)) {
-                IconButton(onClick = { showOffice = !showOffice }) { Icon(EzIcons.Edit, "Find and replace") }
-            }
-            if (ready?.preview is FilePreview.Structured || (text != null && text.content.isNotBlank())) {
-                IconButton(onClick = { showSearch = !showSearch }) { Icon(EzIcons.Search, "Find in file") }
-                IconButton(onClick = onSummary) { Icon(EzIcons.Lightbulb, "At a glance") }
-            } else if (ready?.preview is FilePreview.Pdf && !editingMarkup) {
-                IconButton(onClick = onSummary) { Icon(EzIcons.Lightbulb, "At a glance") }
-            }
-            if (ready != null && !editingMarkup) IconButton(onClick = onFily) { Icon(EzIcons.Mic, "Voice assistant") }
-            if (ready != null && !editingMarkup) {
-                val printable = ready.file.kind !in setOf(DocumentKind.Audio, DocumentKind.Video, DocumentKind.Unknown)
-                var menu by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { menu = true }) {
-                        if (printing == PrintStatus.Preparing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Icon(EzIcons.More, "More options")
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Share original") },
-                            leadingIcon = { Icon(EzIcons.Share, null) },
-                            onClick = { menu = false; onShare() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Page: ${reading.name} reading") },
-                            leadingIcon = { Icon(EzIcons.Eye, null) },
-                            onClick = { menu = false; reading = reading.next() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (original) "Original view: on" else "Original view: off") },
-                            leadingIcon = { Icon(EzIcons.Eye, null) },
-                            onClick = {
-                                menu = false
-                                original = !original
-                                haptics.toggle(original)
-                                writeOriginalView(context, originalViewKey(ready.file.name), original)
-                            },
-                        )
-                        if (ready != null && !isInDeviceStorage(ready.file.uri)) DropdownMenuItem(
-                            text = { Text("Save to Downloads") },
-                            leadingIcon = { Icon(EzIcons.Share, null) },
-                            enabled = !saveState.saving,
-                            onClick = {
-                                menu = false
-                                haptics.tick()
-                                saveVm.onEvent(SaveUiEvent.Save(ready.file.uri, ready.file.name))
-                            },
-                        )
-                        if (structuredUi.edited) DropdownMenuItem(
-                            text = { Text("Save edited copy") },
-                            leadingIcon = { Icon(EzIcons.Share, null) },
-                            onClick = { menu = false; saveEdited.launch(ready?.file?.name.orEmpty()) },
-                        )
-                        if (printable) DropdownMenuItem(
-                            text = { Text("Print") },
-                            leadingIcon = { Icon(EzIcons.Print, null) },
-                            enabled = printing != PrintStatus.Preparing,
-                            onClick = { menu = false; onPrint() },
-                        )
-                    }
-                }
-            }
         }
-        if (!inPip) SensitiveFileHint(documentKey, sensitive, Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally))
-        if (!inPip && showOffice && ready != null && isOfficeEditable(ready.file.name)) {
-            OfficeFindReplacePanel(
-                uri = ready.file.uri,
-                name = ready.file.name,
-                onPreview = onEditedPreview,
-                onClose = { showOffice = false },
-            )
-        }
-        if (!inPip && editingMarkup && ready?.preview is FilePreview.Pdf) {
-            PdfMarkupControls(
-                mode = mode,
-                state = markup,
-                onMode = { mode = it },
-                onUndo = onUndoMarkup,
-                onPrepare = onPrepareMarkup,
-                onSave = { saveAnnotated.launch("${ready.file.name.substringBeforeLast('.')}-annotated.pdf") },
-            )
-        }
-        if (!inPip && showPdfFind && ready?.preview is FilePreview.Pdf) {
-            PdfFindBar(pdfFind, onPdfQuery, onPdfMatch, onClose = {
-                showPdfFind = false
-                onClosePdfFind()
-            })
-        }
-        Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-            val gridPdf = ready?.preview as? FilePreview.Pdf
-            if (showGrid && gridPdf != null) {
-                PdfPageGrid(
-                    pageCount = gridPdf.pageCount,
-                    current = gridPdf.page,
-                    load = pdfThumbnail,
-                    onOpen = { index ->
-                        showGrid = false
-                        onPage(index)
-                    },
-                    onClose = { showGrid = false },
-                )
-            } else when (state) {
-                ReaderState.Loading -> CircularProgressIndicator()
-                ReaderState.ReadError -> Text("This file could not be opened. Try selecting it again.")
-                ReaderState.EngineUnavailable -> Text("The document engine is unavailable on this device.")
-                is ReaderState.Password -> {
-                    Text(state.file.name)
-                    DocumentPasswordDialog(state, onPassword, onBack)
-                }
-                is ReaderState.Failure -> Text(state.message)
-                // A gallery keeps one key across page turns, so the pager is not recreated when the file changes.
-                is ReaderState.Ready -> CompositionLocalProvider(LocalOriginalView provides original) { key(paged?.id ?: state.file.uri) {
-                    when (val preview = state.preview) {
-                        is FilePreview.Text -> {
-                            val plain = showSearch || showSource
-                            val json = remember(preview) {
-                                if (state.file.name.endsWith(".json", ignoreCase = true)) parseJsonOrNull(preview.content) else null
-                            }
-                            when {
-                                // SVG: the drawn picture by default, its highlighted markup under "Source".
-                                isSvgName(state.file.name) && !showSearch && !showSource -> HtmlPreview(svgAsHtml(preview.content), reading)
-                                isSvgName(state.file.name) && !showSearch -> CodePreview(preview.content, state.file.name, reading)
-                                !plain && json != null -> JsonTreePreview(json, preview.content)
-                                !plain && isSourceCode(state.file.name) -> CodePreview(preview.content, state.file.name, reading)
-                                else -> TextPreview(preview, showSearch, onSearchClose = { showSearch = false }, reading = reading)
-                            }
-                        }
-                        is FilePreview.Html ->
-                            if (showSearch || showSource) TextPreview(preview.text, showSearch, onSearchClose = { showSearch = false }, reading = reading)
-                            // Relative links open the sibling file through the same nested-open path as archive entries.
-                            else HtmlPreview(preview.html, reading, baseUri = state.file.uri, onOpenSibling = onOpenArchiveEntry)
-                        is FilePreview.Structured -> if (isZipName(state.file.name)) {
-                            ArchiveBrowser(archive = state.file.uri, onOpenFile = onOpenArchiveEntry)
-                        } else {
-                            if (showSearch || (showSource && preview.source != null)) {
-                                val text = preview.source ?: remember(preview.document) {
-                                    val content = preview.document.plainText(256_000)
-                                    FilePreview.Text(content, preview.document.truncated || content.length >= 256_000)
-                                }
-                                TextPreview(text, showSearch, onSearchClose = { showSearch = false }, reading = reading)
-                            } else {
-                                CompositionLocalProvider(LocalDocumentImages provides preview.document.images) {
-                                    StructuredPreview(preview.document, structuredEdits)
-                                }
-                            }
-                        }
-                        is FilePreview.Picture -> if (paged != null) {
-                            val seeded = gallery as GalleryUiState.Paged
-                            GalleryPager(
-                                session = paged,
-                                seed = seeded.seed,
-                                seedUri = seeded.seedUri,
-                                rotationOf = rotationOf,
-                                onSettle = onGalleryPage,
-                                load = galleryPage,
-                                animate = galleryAnimation,
-                            )
-                        } else {
-                            // GIF, WebP and AVIF play here too; stills get null and stay on the bitmap.
-                            val animation by produceState<AnimatedImageDrawable?>(null, state.file.uri, preview.bitmap) {
-                                value = try {
-                                    pictureAnimation(state.file, maxOf(preview.bitmap.width, preview.bitmap.height))
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (_: Exception) {
-                                    null
-                                }
-                            }
-                            ReaderImage(
-                                bitmap = preview.bitmap,
-                                description = state.file.name,
-                                rotation = rotation,
-                                regions = rememberPictureRegions(state.file.uri),
-                                animated = animation,
-                                animating = true,
-                            )
-                        }
-                        is FilePreview.Pdf -> Box(Modifier.fillMaxSize()) {
-                            if (editingMarkup) {
-                                PdfMarkupCanvas(
-                                    preview.bitmap,
-                                    preview.page,
-                                    mode,
-                                    markup.marks.filter { it.page == preview.page },
-                                    enabled = !markup.working && !state.turningPage,
-                                    onAdd = onAddMarkup,
-                                )
-                            } else {
-                                val active = pdfFind.matches.getOrNull(pdfFind.selected)
-                                fun highlights(page: Int) = active?.takeIf { showPdfFind && it.page == page }?.boxes.orEmpty()
-                                // Highlights made in this session show on their page; the marks save with the annotated copy.
-                                fun marksOn(page: Int): List<PdfBox> = markup.marks.asSequence()
-                                    .filterIsInstance<PdfMarkup.Highlight>()
-                                    .filter { it.page == page }
-                                    .flatMap { it.boxes.asSequence() }
-                                    .toList()
-                                fun textSource(page: Int): PdfTextSource = PdfTextSource(
-                                    page = page,
-                                    load = { pdfText(page) },
-                                    onHighlight = { boxes -> onAddMarkup(PdfMarkup.Highlight(page, boxes)) },
-                                    onSearch = { query ->
-                                        showPdfFind = true
-                                        onPdfQuery(query)
-                                    },
-                                )
-                                val facing = state.facing
-                                if (state.twoPage && facing != null) {
-                                    PdfSpread(preview, facing, rotation, ::highlights, ::textSource, ::marksOn)
-                                } else {
-                                    ReaderImage(
-                                        preview.bitmap,
-                                        "Page ${preview.page + 1}",
-                                        rotation,
-                                        highlights(preview.page),
-                                        text = textSource(preview.page),
-                                        marks = marksOn(preview.page),
-                                        onSwipePage = { delta -> onPage((preview.page + delta).coerceIn(0, preview.pageCount - 1)) },
-                                    )
-                                }
-                            }
-                            if (!editingMarkup) {
-                                PdfSignatureBadge(state.file.uri, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
-                            }
-                        }
-                        is FilePreview.Media -> MediaScreen(state.file, preview.video, closeReader)
-                        FilePreview.Unsupported -> ExternalOpen(state.file)
-                    }
-                } }
-            }
-        }
-        if (ready?.bookmarkError == true) {
-            Text("This file provider does not allow Xfiles to keep access for bookmarks.", color = MaterialTheme.colorScheme.error)
-        }
-        val pdf = ready?.preview as? FilePreview.Pdf
-        if (ready != null && pdf != null) {
-            if (ready.turningPage) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (ready.pageError) Text("This page could not be opened.", color = MaterialTheme.colorScheme.error)
-            PdfPageBar(
-                page = pdf.page,
-                pageCount = pdf.pageCount,
-                twoPage = ready.twoPage,
-                busy = ready.turningPage,
-                canSpread = !editingMarkup,
-                onPage = onPage,
-                onJump = { showJump = true },
-                onTwoPage = onTwoPage,
-                onGrid = { showGrid = true },
-            )
-            if (showJump) {
-                PdfJumpDialog(pdf.page, pdf.pageCount, onJump = onPage, onDismiss = { showJump = false })
-            }
-        }
-        if (saveState.saving) {
-            saveState.progress?.let { fraction ->
-                LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-            } ?: LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
-        SnackbarHost(snackbar, Modifier.align(Alignment.CenterHorizontally))
     }
     val summaryState = ready?.summary
     if (ready != null && summaryState != null) {
@@ -565,7 +409,7 @@ fun ReaderScreen(
             documentName = ready.file.name,
             onReference = { query ->
                 if (inPdf) {
-                    showPdfFind = true
+                    onEvent(ReaderUiEvent.SetPdfFind(true))
                     onPdfQuery(query)
                 } else {
                     copyToClipboard(context, query)
@@ -574,12 +418,26 @@ fun ReaderScreen(
             onDismiss = onDismissSummary,
         )
     }
-    if (confirmDiscard) {
+    if (ui.showPageStyle) {
+        PageStyleSheet(
+            current = pageStyle,
+            onPick = { style ->
+                pageStyle = style
+                writePageStyle(context, pageStyleKey(fileName), style)
+                onEvent(ReaderUiEvent.SetPageStyleSheet(false))
+            },
+            onDismiss = { onEvent(ReaderUiEvent.SetPageStyleSheet(false)) },
+        )
+    }
+    if (ui.confirmDiscard) {
         AlertDialog(
-            onDismissRequest = { confirmDiscard = false },
+            onDismissRequest = { onEvent(ReaderUiEvent.SetConfirmDiscard(false)) },
             title = { Text("Discard unsaved annotations?") },
-            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") } },
+            dismissButton = { TextButton(onClick = { onEvent(ReaderUiEvent.SetConfirmDiscard(false)) }) { Text("Keep editing") } },
             confirmButton = { TextButton(onClick = onBack) { Text("Discard") } },
         )
     }
 }
+
+/** How long the hidden action button stays away before it returns. */
+private const val ACTIONS_RETURN_MS = 2_500L

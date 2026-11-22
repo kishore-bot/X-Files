@@ -13,6 +13,7 @@ import com.xfiles.documents.structure.DocumentException
 import com.xfiles.documents.structure.DocumentFormat
 import com.xfiles.documents.structure.DocumentInfo
 import com.xfiles.documents.structure.DocumentKind
+import com.xfiles.documents.structure.DocumentParts
 import com.xfiles.documents.structure.ShapeBuild
 import com.xfiles.documents.structure.ShapeGeometry
 import com.xfiles.documents.structure.ShapeParagraph
@@ -109,7 +110,19 @@ class StructuredDocumentReader(private val resolver: ContentResolver) {
                 } else {
                     null
                 }
-                StructuredDocument(info, blocks, images, truncated, book)
+                // Parts are read by reopening the file, so they work after this session closes.
+                val parts = DocumentParts { path ->
+                    withContext(io) {
+                        try {
+                            descriptorOf().use { source ->
+                                openBorrowedFd(source.fd, name, limits, password).use { it.resource(path) }
+                            }
+                        } catch (error: ReadException) {
+                            throw error.toDomain()
+                        }
+                    }
+                }
+                StructuredDocument(info, blocks, images, truncated, book, parts)
             }
         } catch (error: ReadException) {
             throw error.toDomain()
@@ -291,4 +304,7 @@ private fun NativeShape.toDomain() = SlideShape(
     tableHeader = tableHeader,
     build = build?.let { ShapeBuild(it.step.toInt(), it.effect.toInt()) },
     media = media,
+    mediaExternal = mediaExternal,
+    mediaAudio = mediaAudio,
+    link = link,
 )

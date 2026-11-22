@@ -50,22 +50,48 @@ import com.xfiles.documents.structure.ShapeBuild
 import com.xfiles.documents.structure.ShapeGeometry
 import com.xfiles.documents.structure.ShapeParagraph
 import com.xfiles.documents.structure.SlideShape
+import com.xfiles.documents.structure.TextSpan
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.runtime.remember
+import com.xfiles.design.EzColors
 
 private const val MAX_SLIDE_PICTURE_DIMENSION = 1600
+
+/**
+ * What a tap on an interactive slide does. Thumbnails pass none, so they stay inert.
+ * [onLink] takes a link as the model encodes it (see [TextSpan.link]); [onMedia] gets the media shape;
+ * [onPicture] gets the picture's container path.
+ */
+internal class SlideActions(
+    val onLink: (String) -> Unit,
+    val onMedia: (SlideShape) -> Unit,
+    val onPicture: (String) -> Unit,
+)
 
 /**
  * Draws a slide as designed: [canvas] gives its size in points and
  * background; each shape sits at its own position, scaled to the available
  * width. Shapes with an entrance build appear once [step] reaches theirs;
  * with [animate] they play an entrance effect matching PowerPoint's preset.
+ * With [actions], linked text and shapes are tappable, media shapes show a play badge,
+ * and pictures open in the zoom viewer.
  */
 @Composable
-fun SlideCanvas(
+internal fun SlideCanvas(
     canvas: ContentBlock.Slide,
     shapes: List<SlideShape>,
     modifier: Modifier = Modifier,
     step: Int = Int.MAX_VALUE,
     animate: Boolean = false,
+    actions: SlideActions? = null,
 ) {
     if (!canvas.width.isFinite() || !canvas.height.isFinite() || canvas.width <= 0f || canvas.height <= 0f) return
     BoxWithConstraints(
@@ -85,10 +111,10 @@ fun SlideCanvas(
                 val state = remember(shape) { MutableTransitionState(build.step < step) }
                 state.targetState = shown
                 AnimatedVisibility(state, enter = entrance(build), exit = fadeOut(tween(150))) {
-                    ShapeView(shape, scale)
+                    ShapeView(shape, scale, actions)
                 }
             } else if (shown) {
-                ShapeView(shape, scale)
+                ShapeView(shape, scale, actions)
             }
         }
     }
@@ -103,15 +129,25 @@ private fun entrance(build: ShapeBuild): EnterTransition = when (build.effect) {
 }
 
 @Composable
-private fun ShapeView(shape: SlideShape, scale: Dp) {
+private fun ShapeView(shape: SlideShape, scale: Dp, actions: SlideActions?) {
     val outline = shape.line?.let(::Color)
     val fill = shape.fill?.let(::Color)
     val stroke = (shape.lineWidth.coerceAtLeast(0.5f) * scale.value)
+    // A shape's own link wins; a plain picture opens the zoom viewer. Media has its badge instead.
+    val link = shape.link
+    val picture = shape.image
+    val tap: (() -> Unit)? = when {
+        actions == null -> null
+        link != null -> { { actions.onLink(link) } }
+        picture != null && shape.media == null -> { { actions.onPicture(picture) } }
+        else -> null
+    }
     Box(
         Modifier
             .offset(scale * shape.x, scale * shape.y)
             .size(scale * shape.width.coerceAtLeast(0.5f), scale * shape.height.coerceAtLeast(0.5f))
             .graphicsLayer { rotationZ = shape.rotation }
+            .then(if (tap != null) Modifier.clickable(role = Role.Button, onClick = tap) else Modifier)
             .drawBehind {
                 val strokePx = stroke * density
                 when (shape.geometry) {
@@ -145,13 +181,16 @@ private fun ShapeView(shape: SlideShape, scale: Dp) {
         if (shape.table.isNotEmpty()) {
             SlideTable(shape, scale)
         } else if (shape.paragraphs.isNotEmpty()) {
-            ShapeTextView(shape, scale)
+            ShapeTextView(shape, scale, actions?.onLink)
+        }
+        if (actions != null && shape.media != null) {
+            SlideMediaBadge(audio = shape.mediaAudio, onClick = { actions.onMedia(shape) }, modifier = Modifier.align(Alignment.Center))
         }
     }
 }
 
 @Composable
-private fun ShapeTextView(shape: SlideShape, scale: Dp) {
+private fun ShapeTextView(shape: SlideShape, scale: Dp, onLink: ((String) -> Unit)?) {
     val insets = shape.insets
     Column(
         Modifier
@@ -168,12 +207,12 @@ private fun ShapeTextView(shape: SlideShape, scale: Dp) {
             else -> Arrangement.Top
         },
     ) {
-        for (paragraph in shape.paragraphs) ParagraphView(paragraph, scale)
+        for (paragraph in shape.paragraphs) ParagraphView(paragraph, scale, onLink)
     }
 }
 
 @Composable
-private fun ParagraphView(paragraph: ShapeParagraph, scale: Dp) {
+private fun ParagraphView(paragraph: ShapeParagraph, scale: Dp, onLink: ((String) -> Unit)?) {
     val density = LocalDensity.current
     // Point sizes scale with the canvas; toSp keeps the user's font scale neutral.
     val fontSize = with(density) { (scale * paragraph.size).toSp() }
@@ -198,10 +237,58 @@ private fun ParagraphView(paragraph: ShapeParagraph, scale: Dp) {
             Text(bullet, style = style.copy(textAlign = TextAlign.Start), modifier = Modifier.width(scale * paragraph.size * 1.2f))
         }
         Text(
-            richText(paragraph.text.ifEmpty { " " }, paragraph.spans),
+            slideText(paragraph.text.ifEmpty { " " }, paragraph.spans, onLink),
             style = style,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+/**
+ * Slide text with its runs styled. Linked runs are drawn in the Primary colour and underlined; with
+ * [onLink] they are tappable and report their link.
+ */
+@Composable
+private fun slideText(text: String, spans: List<TextSpan>, onLink: ((String) -> Unit)?): AnnotatedString {
+    val linkColor = EzColors.Primary
+    return remember(text, spans, onLink, linkColor) {
+        buildAnnotatedString {
+            append(text)
+            for (span in spans) {
+                val start = span.start.coerceIn(0, text.length)
+                val end = span.end.coerceIn(start, text.length)
+                if (start == end) continue
+                val decoration = when {
+                    span.underline && span.strikethrough -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+                    span.underline -> TextDecoration.Underline
+                    span.strikethrough -> TextDecoration.LineThrough
+                    else -> null
+                }
+                addStyle(
+                    SpanStyle(
+                        fontWeight = if (span.bold) FontWeight.Bold else null,
+                        fontStyle = if (span.italic) FontStyle.Italic else null,
+                        textDecoration = decoration,
+                        color = span.color?.let(::Color) ?: Color.Unspecified,
+                    ),
+                    start,
+                    end,
+                )
+                val url = span.link ?: continue
+                addStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline), start, end)
+                if (onLink != null) {
+                    addLink(
+                        LinkAnnotation.Clickable(
+                            tag = url,
+                            styles = TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
+                            linkInteractionListener = LinkInteractionListener { onLink(url) },
+                        ),
+                        start,
+                        end,
+                    )
+                }
+            }
+        }
     }
 }
 

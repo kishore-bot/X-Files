@@ -39,12 +39,22 @@ internal class FilyLibrary private constructor(
     }
 }
 
-internal class FilyPdfTarget(private val reader: DocumentAnalysisViewModel) : ReaderTarget {
-    override val operations = setOf("next_page", "previous_page", "go_to_page")
+/**
+ * The open viewer as Fily drives it: PDF pages when a PDF is open, otherwise the scroll viewer on screen
+ * (HTML or spreadsheet) when one is registered. The operations follow what is on screen right now.
+ */
+internal class FilyViewerTarget(private val reader: DocumentAnalysisViewModel) : ReaderTarget {
+    // A PDF takes page commands; every viewer that registered a scroller (PDF pages included) takes scrolling.
+    override val operations: Set<String>
+        get() = (if (current() != null) PAGE_OPERATIONS else emptySet()) + reader.currentScrollViewer?.operations.orEmpty()
     override val position: ReaderPosition
         get() = current()?.let { ReaderPosition(page = it.page + 1, pageCount = it.pageCount) } ?: ReaderPosition()
 
     override suspend fun perform(operation: String, value: String?): String? {
+        if (current() == null || operation !in PAGE_OPERATIONS) {
+            val scroll = reader.currentScrollViewer ?: return "unsupported_here"
+            return if (scroll.scroll(operation)) null else "unsupported_here"
+        }
         val initial = reader.state.value as? ReaderState.Ready ?: return "no_document"
         val pdf = initial.preview as? FilePreview.Pdf ?: return "unsupported_here"
         if (initial.turningPage) return "not_available"
@@ -64,3 +74,5 @@ internal class FilyPdfTarget(private val reader: DocumentAnalysisViewModel) : Re
 
     private fun current(): FilePreview.Pdf? = (reader.state.value as? ReaderState.Ready)?.preview as? FilePreview.Pdf
 }
+
+private val PAGE_OPERATIONS = setOf("next_page", "previous_page", "go_to_page")

@@ -1,327 +1,220 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package com.xfiles.feature.reader
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.BarIconButton
+import com.xfiles.design.EzChip
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.documents.book.BookManifest
-import com.xfiles.documents.book.BookNote
-import com.xfiles.documents.book.Highlight
 import com.xfiles.documents.book.HighlightColor
-import com.xfiles.documents.book.LineSpacing
 import com.xfiles.documents.book.NotebookEntry
 import com.xfiles.documents.book.NotebookKind
-import com.xfiles.documents.book.PageMargin
-import com.xfiles.documents.book.ReadingFont
-import com.xfiles.documents.book.ReadingSettings
-import com.xfiles.documents.book.ReadingTheme
 
-/** The table of contents from the book's navigation file, or its chapters when it has none. */
-@Composable
-internal fun BookContentsSheet(manifest: BookManifest?, onJump: (Int) -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        val entries = manifest?.toc ?: emptyList()
-        if (entries.isNotEmpty()) {
-            LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                items(entries) { entry ->
-                    val block = manifest?.blockOf(entry.href)
-                    SheetRow(
-                        title = entry.title,
-                        detail = null,
-                        indent = entry.depth * 16,
-                        enabled = block != null,
-                        onClick = { block?.let(onJump) },
-                    )
-                }
-            }
-        } else {
-            val chapters = (manifest?.chapters ?: emptyList()).withIndex().filter { it.value.firstBlock != null }
-            if (chapters.isEmpty()) {
-                Text("This book has no contents.", modifier = Modifier.padding(24.dp), color = EzColors.TextSecondary)
-            } else {
-                LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                    items(chapters) { (index, chapter) ->
-                        SheetRow(
-                            title = manifest?.chapterTitle(index) ?: "",
-                            detail = null,
-                            indent = 0,
-                            enabled = true,
-                            onClick = { chapter.firstBlock?.let(onJump) },
-                        )
-                    }
-                }
-            }
-        }
-    }
+/** A solid colour for swatches and marks: the reader's four, as the EzFiles reader draws them. */
+internal fun HighlightColor.swatch(): Color = when (this) {
+    HighlightColor.Yellow -> Color(0xFFFFD84D)
+    HighlightColor.Green -> Color(0xFF7FD99A)
+    HighlightColor.Blue -> Color(0xFF7FB8FF)
+    HighlightColor.Pink -> Color(0xFFFF8FBF)
+}
+
+/** A line of the table of contents, and the block it opens at (null when the book has no such place). */
+private class ContentsRow(val title: String, val depth: Int, val block: Int?)
+
+private fun contentsRows(manifest: BookManifest?): List<ContentsRow> {
+    val toc = manifest?.toc.orEmpty()
+    if (toc.isNotEmpty()) return toc.map { ContentsRow(it.title, it.depth, manifest?.blockOf(it.href)) }
+    return manifest?.chapters.orEmpty().withIndex()
+        .filter { it.value.firstBlock != null }
+        .map { (index, chapter) -> ContentsRow(manifest?.chapterTitle(index).orEmpty(), 0, chapter.firstBlock) }
 }
 
 /**
- * Theme, font, size, line spacing and margins: the "Aa" sheet. Every change applies at once, to the
- * settings this book reads with. [ownSettings] says whether the book has its own, which [onOwnSettings]
- * turns on (a copy of the current settings) or off (back to the global ones). [onReset] puts the settings back to the defaults.
+ * Contents and Notebook in one sheet, as the EzFiles reader has them: the book's table of contents,
+ * and every bookmark, highlight and note in reading order. [notebook] opens it on the Notebook tab.
  */
 @Composable
-internal fun BookSettingsSheet(
-    settings: ReadingSettings,
-    ownSettings: Boolean,
-    mode: BookReadingMode,
-    onMode: (BookReadingMode) -> Unit,
-    onChange: (ReadingSettings) -> Unit,
-    onOwnSettings: (Boolean) -> Unit,
-    onReset: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Reading mode", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BookReadingMode.entries.forEach { option ->
-                    FilterChip(
-                        selected = mode == option,
-                        onClick = { onMode(option) },
-                        label = { Text(option.label) },
-                    )
-                }
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Use for this book only", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        if (ownSettings) "This book keeps its own settings." else "This book follows the global settings.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = EzColors.TextSecondary,
-                    )
-                }
-                Switch(checked = ownSettings, onCheckedChange = onOwnSettings)
-            }
-            Text("Theme", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ReadingTheme.entries.forEach { theme ->
-                    val paint = bookPalette(theme)
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(paint.background)
-                            .border(if (settings.theme == theme) 2.dp else 1.dp, if (settings.theme == theme) EzColors.Primary else EzColors.TextSecondary.copy(alpha = 0.4f), CircleShape)
-                            .clickable { onChange(settings.copy(theme = theme)) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("Aa", color = paint.text, style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-            }
-            Text("Font", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ReadingFont.entries.forEach { font ->
-                    FilterChip(
-                        selected = settings.font == font,
-                        onClick = { onChange(settings.copy(font = font)) },
-                        label = { Text(font.label()) },
-                    )
-                }
-            }
-            Text("Text size", style = MaterialTheme.typography.titleSmall)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = { onChange(settings.withTextSize(settings.textSizeSp - 1)) },
-                    enabled = settings.textSizeSp > ReadingSettings.MIN_TEXT_SIZE,
-                ) { Icon(EzIcons.Minus, "Smaller text") }
-                Text("${settings.textSizeSp}", modifier = Modifier.widthIn(min = 40.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                IconButton(
-                    onClick = { onChange(settings.withTextSize(settings.textSizeSp + 1)) },
-                    enabled = settings.textSizeSp < ReadingSettings.MAX_TEXT_SIZE,
-                ) { Icon(EzIcons.Plus, "Larger text") }
-            }
-            Text("Line spacing", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LineSpacing.entries.forEach { spacing ->
-                    FilterChip(
-                        selected = settings.lineSpacing == spacing,
-                        onClick = { onChange(settings.copy(lineSpacing = spacing)) },
-                        label = { Text(spacing.name) },
-                    )
-                }
-            }
-            Text("Margins", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PageMargin.entries.forEach { margin ->
-                    FilterChip(
-                        selected = settings.margin == margin,
-                        onClick = { onChange(settings.copy(margin = margin)) },
-                        label = { Text(margin.name) },
-                    )
-                }
-            }
-            TextButton(onClick = onReset, modifier = Modifier.align(Alignment.End)) { Text("Reset to default") }
-        }
-    }
-}
-
-/** Every bookmark, highlight and note, in reading order. A tap jumps to it. */
-@Composable
-internal fun BookNotebookSheet(
+internal fun BookContentsSheet(
+    manifest: BookManifest?,
     entries: List<NotebookEntry>,
+    notebook: Boolean,
+    current: Int,
     onJump: (Int) -> Unit,
     onDelete: (NotebookEntry) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        if (entries.isEmpty()) {
+    var onNotebook by remember(notebook) { mutableStateOf(notebook) }
+    val rows = remember(manifest) { contentsRows(manifest) }
+    val active = rows.indexOfLast { row -> row.block?.let { it <= current } == true }
+    BookSheetFrame(onDismiss = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                "Nothing marked yet. Long-press a word to highlight or note it, or tap the bookmark icon for a place.",
-                modifier = Modifier.padding(24.dp),
-                color = EzColors.TextSecondary,
+                manifest?.title?.takeIf { it.isNotBlank() } ?: "Contents",
+                style = MaterialTheme.typography.titleMedium,
+                color = EzColors.Text,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            return@ModalBottomSheet
-        }
-        LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            items(entries, key = { it.kind.name + it.id }) { entry ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { onJump(entry.block) }.padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    val (icon, tint) = when (entry.kind) {
-                        NotebookKind.Bookmark -> EzIcons.Bookmark to EzColors.Primary
-                        NotebookKind.Highlight -> EzIcons.Edit to (entry.color?.swatch() ?: EzColors.Accent)
-                        NotebookKind.Note -> EzIcons.NoteAdd to EzColors.Accent
-                    }
-                    Icon(icon, null, tint = tint)
-                    Column(Modifier.weight(1f)) {
-                        Text(entry.title.ifBlank { "Bookmark" }, maxLines = 2, style = MaterialTheme.typography.bodyMedium)
-                        if (entry.detail.isNotBlank()) {
-                            Text(entry.detail, color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                    IconButton(onClick = { onDelete(entry) }) { Icon(EzIcons.Delete, "Remove") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun BookFootnoteSheet(label: String, text: String, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(label.ifBlank { "Note" }, style = MaterialTheme.typography.titleSmall, color = EzColors.Primary)
-            Text(text, style = MaterialTheme.typography.bodyLarge)
-        }
-    }
-}
-
-@Composable
-internal fun BookNoteSheet(quote: String, initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        var text by rememberSaveable(quote) { mutableStateOf(initial) }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("“${quote.take(160)}”", style = MaterialTheme.typography.bodySmall, maxLines = 3, color = EzColors.TextSecondary)
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth().height(160.dp),
-                placeholder = { Text("Your note") },
-            )
-            Button(
-                onClick = { onSave(text.trim()) },
-                enabled = text.isNotBlank(),
-                modifier = Modifier.align(Alignment.End),
-            ) { Text("Save") }
-        }
-    }
-}
-
-/** A highlight or note the reader tapped: its colour, its note, and removal. */
-@Composable
-internal fun BookMarkedSheet(
-    highlight: Highlight?,
-    note: BookNote?,
-    onColor: (HighlightColor) -> Unit,
-    onEditNote: () -> Unit,
-    onDelete: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        val quote = highlight?.quote ?: note?.quote ?: ""
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("“${quote.take(160)}”", style = MaterialTheme.typography.bodyMedium, maxLines = 4, color = EzColors.TextSecondary)
-            note?.let { Text(it.text, style = MaterialTheme.typography.bodyLarge) }
-            if (highlight != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    HighlightColor.entries.forEach { color ->
-                        Box(
-                            Modifier.size(36.dp).clip(CircleShape).background(color.swatch())
-                                .border(if (highlight.color == color) 2.dp else 0.dp, EzColors.Primary, CircleShape)
-                                .clickable { onColor(color) },
-                        )
-                    }
-                }
-            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (note != null) TextButton(onClick = onEditNote) { Text("Edit note") }
-                TextButton(onClick = onDelete) { Text(if (note != null && highlight == null) "Remove note" else "Remove highlight") }
+                EzChip("Contents", selected = !onNotebook, onClick = { onNotebook = false })
+                EzChip(
+                    if (entries.isEmpty()) "Notebook" else "Notebook (${entries.size})",
+                    selected = onNotebook,
+                    onClick = { onNotebook = true },
+                )
             }
+        }
+        if (!onNotebook) {
+            ContentsList(rows, active, onJump)
+        } else {
+            NotebookList(entries, onJump, onDelete)
         }
     }
 }
 
 @Composable
-private fun SheetRow(title: String, detail: String?, indent: Int, enabled: Boolean, onClick: () -> Unit) {
-    Column(
+private fun ContentsList(rows: List<ContentsRow>, active: Int, onJump: (Int) -> Unit) {
+    if (rows.isEmpty()) {
+        Text(
+            "This book has no contents.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = EzColors.TextSecondary,
+            modifier = Modifier.padding(24.dp),
+        )
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxWidth().heightIn(max = 480.dp).padding(top = 8.dp),
+        state = rememberLazyListState(initialFirstVisibleItemIndex = (active - 3).coerceAtLeast(0)),
+    ) {
+        itemsIndexed(rows) { index, row ->
+            val selected = index == active
+            Text(
+                row.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else if (row.depth == 0) FontWeight.Medium else FontWeight.Normal,
+                color = if (selected) EzColors.Accent else EzColors.Text,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (selected) EzColors.Primary.copy(alpha = 0.08f) else Color.Transparent)
+                    .clickable(enabled = row.block != null, role = Role.Button) { row.block?.let(onJump) }
+                    .padding(start = (24 + 18 * row.depth.coerceAtMost(4)).dp, end = 24.dp, top = 12.dp, bottom = 12.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotebookList(entries: List<NotebookEntry>, onJump: (Int) -> Unit, onDelete: (NotebookEntry) -> Unit) {
+    if (entries.isEmpty()) {
+        Text(
+            "Nothing marked yet. Press and hold text to highlight it or add a note, and use the bookmark in the top bar to mark a page.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = EzColors.TextSecondary,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+        )
+        return
+    }
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp).padding(top = 8.dp)) {
+        items(entries, key = { it.kind.name + it.id }) { entry ->
+            NotebookRow(entry, onOpen = { onJump(entry.block) }, onDelete = { onDelete(entry) })
+        }
+    }
+}
+
+/** One mark in the notebook: a bookmark, or a highlight with its note. A tap goes there. */
+@Composable
+private fun NotebookRow(entry: NotebookEntry, onOpen: () -> Unit, onDelete: () -> Unit) {
+    val label = when (entry.kind) {
+        NotebookKind.Bookmark -> "Bookmark"
+        NotebookKind.Highlight -> "Highlight"
+        NotebookKind.Note -> "Note"
+    }
+    Row(
         Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(start = 20.dp + indent.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
+            .clickable(role = Role.Button, onClickLabel = "Go there") { onOpen() }
+            .padding(start = 24.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge, color = if (enabled) EzColors.Text else EzColors.TextSecondary)
-        if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = EzColors.TextSecondary)
+        if (entry.kind == NotebookKind.Bookmark) {
+            Icon(EzIcons.Bookmark, null, tint = EzColors.Primary, modifier = Modifier.padding(top = 2.dp).size(18.dp))
+        } else {
+            Box(
+                Modifier
+                    .padding(top = 4.dp)
+                    .size(width = 4.dp, height = 36.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(entry.color?.swatch() ?: EzColors.Accent),
+            )
+        }
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = EzColors.TextSecondary, maxLines = 1)
+            Text(
+                entry.title.ifBlank { label },
+                style = MaterialTheme.typography.bodyMedium,
+                color = EzColors.Text,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (entry.detail.isNotBlank()) {
+                Text(
+                    entry.detail,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = EzColors.Accent,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        BarIconButton(EzIcons.Delete, "Remove $label", onDelete)
     }
 }
 
-private fun ReadingFont.label(): String = when (this) {
-    ReadingFont.Serif -> "Serif"
-    ReadingFont.Sans -> "Sans"
-    ReadingFont.Mono -> "Mono"
+/** A scrolling row of EzChips that picks one value; each chip gives its own haptic cue. */
+@Composable
+internal fun <T> ChoiceRow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { (value, name) ->
+            EzChip(name, selected = value == selected, onClick = { onSelect(value) })
+        }
+    }
 }
-
-/** A solid colour for swatches; the translucent paint is for the page. */
-internal fun HighlightColor.swatch(): Color = paint(onDark = false).copy(alpha = 1f)

@@ -52,7 +52,12 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.BarIconButton
+import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.rememberHaptics
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.Role
 import com.xfiles.documents.book.HighlightColor
 import com.xfiles.documents.book.TextPoint
 import com.xfiles.documents.book.wordEndAt
@@ -503,30 +508,49 @@ internal fun SelectionBar(
     onShare: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = palette.background,
-        shadowElevation = 6.dp,
+    // The EzFiles reader's highlight bar: a dark scrim pill, colour dots, then the text actions.
+    val haptics = rememberHaptics()
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(EzColors.Scrim.copy(alpha = 0.92f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(
-            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            HighlightColor.entries.forEach { color ->
-                Box(
-                    Modifier
-                        .padding(4.dp)
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(color.swatch())
-                        .clickable { onHighlight(color) },
-                )
-            }
-            TextButton(onClick = onNote) { Text("Note", color = palette.text) }
-            TextButton(onClick = onCopy) { Text("Copy", color = palette.text) }
-            IconButton(onClick = onShare) { Icon(EzIcons.Share, "Share selection", tint = palette.text) }
-            IconButton(onClick = onClose) { Icon(EzIcons.Close, "Clear selection", tint = palette.text) }
+        HighlightColor.entries.forEach { color ->
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(color.swatch())
+                    .clickable(role = Role.Button, onClickLabel = "Highlight in ${color.name}") {
+                        haptics.longPress()
+                        onHighlight(color)
+                    },
+            )
         }
+        SelectionAction("Note", onNote)
+        SelectionAction("Copy", onCopy)
+        BarIconButton(EzIcons.Share, "Share selection", onShare, tint = EzColors.OnScrim)
+        BarIconButton(EzIcons.Close, "Clear selection", onClose, tint = EzColors.OnScrim)
     }
+}
+
+/** A text action on the selection bar: a pill with its label in white. */
+@Composable
+private fun SelectionAction(label: String, onClick: () -> Unit) {
+    val haptics = rememberHaptics()
+    Text(
+        label,
+        style = MaterialTheme.typography.labelLarge,
+        color = EzColors.OnScrim,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(role = Role.Button) {
+                haptics.tick()
+                onClick()
+            }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    )
 }

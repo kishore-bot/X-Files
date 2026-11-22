@@ -62,6 +62,7 @@ internal fun PagedBook(
 ) {
     val index = layout.index
     val pagerState = rememberPagerState(pageCount = { layout.revision.let { index.pageCount + if (index.isComplete) 0 else 1 } })
+    RegisterViewerScroll(pagerState) { PagerScroll(pagerState) }
     val scope = rememberCoroutineScope()
 
     DisposableEffect(pagerState) {

@@ -32,7 +32,7 @@ import com.xfiles.documents.structure.StructuredDocument
  * Each book opens where it was left. This file wires the ViewModel to the reader's parts.
  */
 @Composable
-internal fun BookPreview(document: StructuredDocument) {
+internal fun BookPreview(document: StructuredDocument, onClose: () -> Unit = {}, onFily: (() -> Unit)? = null) {
     val blocks = document.blocks
     if (blocks.isEmpty()) {
         Text("This book has no readable content.")
@@ -113,9 +113,10 @@ internal fun BookPreview(document: StructuredDocument) {
     }
 
     val chrome = BookChromeActions(
+        onClose = onClose,
+        onFily = onFily,
         onSearch = { vm.showSheet(BookSheet.Search) },
         onContents = { vm.showSheet(BookSheet.Contents) },
-        onNotebook = { vm.showSheet(BookSheet.Notebook) },
         onBookmark = {
             haptics.tick()
             vm.toggleBookmark(current, manifest?.let { chapterLabel(it, current) } ?: "Bookmark")
@@ -153,6 +154,7 @@ internal fun BookPreview(document: StructuredDocument) {
         annotations = annotations,
         manifest = manifest,
         blocks = blocks,
+        current = current,
         haptics = haptics,
         onJump = jump,
         onMode = { mode ->

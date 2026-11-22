@@ -63,7 +63,7 @@ internal fun DocumentTable(rows: List<ContentBlock.TableRow>) {
     Box(
         Modifier.fillMaxWidth()
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surface)
+            .background(pageSurface(MaterialTheme.colorScheme.surface))
             .horizontalScroll(rememberScrollState()),
     ) {
         Column(Modifier.border(1.dp, line, shape)) {
@@ -77,7 +77,7 @@ internal fun DocumentTable(rows: List<ContentBlock.TableRow>) {
                             Modifier.width(widths[column])
                                 .fillMaxHeight()
                                 .border(0.5.dp, line)
-                                .then(if (row.header) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
+                                .then(if (row.header) Modifier.background(pageVariant(MaterialTheme.colorScheme.surfaceVariant)) else Modifier)
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
                         ) {
                             Text(

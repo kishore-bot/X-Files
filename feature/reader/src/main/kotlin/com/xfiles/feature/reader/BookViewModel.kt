@@ -94,8 +94,8 @@ data class BookUiState(
     val backStack: List<Int> = emptyList(),
     /** Paged or scroll; global to every book. */
     val mode: BookReadingMode = BookReadingMode.Default,
-    /** Whether the top and bottom bars are shown. A centre tap toggles them. */
-    val chromeVisible: Boolean = true,
+    /** Whether the top and bottom bars are shown. Hidden on open, as in the EzFiles reader; a centre tap toggles them. */
+    val chromeVisible: Boolean = false,
     val search: BookSearchState = BookSearchState(),
 ) {
     val loaded: Boolean

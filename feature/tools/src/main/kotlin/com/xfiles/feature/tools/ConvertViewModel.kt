@@ -241,6 +241,16 @@ class ConvertViewModel @Inject constructor(
 
     fun removePicture(uri: Uri) = mutableState.update { it.copy(pictures = it.pictures - uri) }
 
+    /** Moves the picture at [from] to [to] in the page order. A finished PDF no longer matches, so it goes. */
+    fun movePicture(from: Int, to: Int) {
+        val current = state.value
+        if (current.busy || from == to || from !in current.pictures.indices || to !in current.pictures.indices) return
+        discardOutput()
+        mutableState.update {
+            it.copy(pictures = it.pictures.toMutableList().apply { add(to, removeAt(from)) }, output = null, error = null)
+        }
+    }
+
 
     fun pickPdf(uri: Uri) = launch("The PDF could not be opened.") {
         val file = documents.describe(uri)

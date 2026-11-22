@@ -1,46 +1,72 @@
 package com.xfiles.feature.reader
 
-import com.xfiles.design.rememberHaptics
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,33 +75,48 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzShapes
+import com.xfiles.design.PrimaryGradient
+import com.xfiles.design.glass
 import com.xfiles.design.glassBar
+import com.xfiles.design.raised
+import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.structure.ContentBlock
 import com.xfiles.documents.structure.SlideShape
 import com.xfiles.documents.structure.StructuredDocument
+import kotlin.math.absoluteValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -92,22 +133,88 @@ interface SlideEditor {
     suspend fun duplicate(index: Int): Int
 }
 
+/**
+ * The presentation viewer, matching the EzFiles layout: a swipeable stage of slides as cards (their
+ * notes below), a thumbnail strip, glass controls with the page counter and a Present pill, and an
+ * immersive presenter with each slide's own transition. Links, media and pictures on slides act
+ * through [SlidePresentationViewModel].
+ */
 @Composable
 internal fun PresentationPreview(document: StructuredDocument, slideEditor: SlideEditor? = null, onEdited: () -> Unit = {}) {
     val haptics = rememberHaptics()
+    val uriHandler = LocalUriHandler.current
+    val vm: SlidePresentationViewModel = hiltViewModel()
+    val ui by vm.state.collectAsStateWithLifecycle()
     val slides = remember(document.blocks) { groupSlides(document.blocks) }
+    val scope = rememberCoroutineScope()
+    // The deck position is shared by the viewer and the presenter, so either can hand over to the other.
     var current by rememberSaveable { mutableIntStateOf(0) }
-    var notesVisible by rememberSaveable { mutableStateOf(false) }
+    var step by rememberSaveable { mutableIntStateOf(0) }
     var presenting by rememberSaveable { mutableStateOf(false) }
     var sorting by rememberSaveable { mutableStateOf(false) }
     val position = current.coerceIn(0, slides.lastIndex.coerceAtLeast(0))
+    val pager = rememberPagerState(initialPage = position) { slides.size }
+    RegisterViewerScroll(pager) { PagerScroll(pager) }
+
+    LaunchedEffect(document) { vm.bind(document) }
+    LaunchedEffect(vm) {
+        vm.effects.collect { effect ->
+            when (effect) {
+                is SlideEffect.GoTo -> {
+                    current = effect.index
+                    step = 0
+                }
+                is SlideEffect.Open -> try {
+                    uriHandler.openUri(effect.url)
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (_: Exception) {
+                    vm.onEvent(SlideEvent.DismissMessage)
+                }
+            }
+        }
+    }
+    // Swiping the stage sets the position; a position set elsewhere (a link, the presenter) moves the stage.
+    LaunchedEffect(pager.settledPage) {
+        if (!presenting && pager.settledPage != current) {
+            current = pager.settledPage
+            step = 0
+        }
+    }
+    LaunchedEffect(position, presenting) {
+        if (!presenting && pager.currentPage != position && !pager.isScrollInProgress) pager.animateScrollToPage(position)
+    }
+
     val slide = slides.getOrNull(position)
     if (slide == null) {
         Text("This presentation has no readable slides.")
         return
     }
+
+    fun actionsFor(index: Int): SlideActions = SlideActions(
+        onLink = { link ->
+            haptics.tick()
+            vm.onEvent(SlideEvent.ActivateLink(link, index, slides.size))
+        },
+        onMedia = { shape ->
+            haptics.confirm()
+            vm.onEvent(SlideEvent.PlayMedia(shape))
+        },
+        onPicture = { path ->
+            haptics.tick()
+            vm.onEvent(SlideEvent.ViewPicture(path))
+        },
+    )
+
     if (presenting) {
-        Slideshow(slides, position, onSlide = { current = it }, onExit = { presenting = false })
+        Presenter(
+            slides = slides,
+            index = position,
+            step = step,
+            onMove = { index, nextStep -> current = index; step = nextStep },
+            actionsFor = ::actionsFor,
+            onClose = { presenting = false },
+        )
     }
     if (sorting && slideEditor != null) {
         SlideSorter(
@@ -117,80 +224,230 @@ internal fun PresentationPreview(document: StructuredDocument, slideEditor: Slid
             onEdited = { sorting = false; current = 0; onEdited() },
         )
     }
-    Column(
-        Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(
-            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-            contentAlignment = Alignment.Center,
-        ) {
-            SlideCanvas(slide.canvas, slide.shapes, Modifier.widthIn(max = 820.dp).fillMaxWidth())
-        }
-        if (notesVisible && slide.notes.isNotEmpty()) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-                slide.notes.forEach { DocumentBlock(it) }
+    ui.pendingUrl?.let { url ->
+        AlertDialog(
+            onDismissRequest = { vm.onEvent(SlideEvent.DismissWebLink) },
+            title = { Text("Open this link?") },
+            text = { Text(url, maxLines = 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+            confirmButton = {
+                TextButton(onClick = { haptics.confirm(); vm.onEvent(SlideEvent.ConfirmWebLink) }) { Text("Open") }
+            },
+            dismissButton = { TextButton(onClick = { vm.onEvent(SlideEvent.DismissWebLink) }) { Text("Cancel") } },
+        )
+    }
+    ui.media?.let { media -> SlideMediaPlayer(media) { vm.onEvent(SlideEvent.CloseMedia) } }
+    ui.picture?.let { picture -> SlidePictureViewer(picture.bytes) { vm.onEvent(SlideEvent.ClosePicture) } }
+
+    Column(Modifier.fillMaxSize().padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val pageHeight = maxHeight
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.fillMaxSize(),
+                pageSpacing = 12.dp,
+                beyondViewportPageCount = 1,
+                key = { it },
+            ) { page ->
+                val item = slides[page]
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .deckTransform(pager, page)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(min = pageHeight).padding(horizontal = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+                    ) {
+                        SlideFrame(item, Modifier.widthIn(max = 820.dp).fillMaxWidth(), actionsFor(page))
+                        if (item.notes.isNotEmpty()) NotesPanel(item.notes)
+                    }
+                }
             }
         }
+        Thumbnails(slides, position) { target -> scope.launch { pager.animateScrollToPage(target) } }
         if (document.truncated) Text("Showing the available slides within the preview limit.", color = EzColors.TextSecondary)
-        Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { haptics.tick(); current = position - 1 }, enabled = position > 0) {
-                Icon(EzIcons.ChevronLeft, "Previous slide")
-            }
-            Column(Modifier.weight(1f)) {
-                Text(slide.title.ifBlank { "Slide ${position + 1}" }, maxLines = 1, style = MaterialTheme.typography.titleSmall)
-                Text("${position + 1} / ${slides.size}", color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
-            }
-            if (slide.notes.isNotEmpty()) TextButton(onClick = { notesVisible = !notesVisible }) {
-                Text(if (notesVisible) "Hide notes" else "Notes")
-            }
-            if (slideEditor != null) IconButton(onClick = { sorting = true }) { Icon(EzIcons.Grid, "Arrange slides") }
-            IconButton(onClick = { haptics.confirm(); presenting = true }) { Icon(EzIcons.Fullscreen, "Present") }
-            IconButton(onClick = { haptics.tick(); current = position + 1 }, enabled = position < slides.lastIndex) {
-                Icon(EzIcons.ChevronRight, "Next slide")
+        SlideControls(
+            current = position,
+            count = slides.size,
+            onPrevious = { scope.launch { pager.animateScrollToPage(position - 1) } },
+            onNext = { scope.launch { pager.animateScrollToPage(position + 1) } },
+            onPresent = { haptics.confirm(); presenting = true },
+            onArrange = if (slideEditor != null) ({ haptics.tick(); sorting = true }) else null,
+        )
+    }
+}
+
+/**
+ * Slides away like cards in a deck while swiping: the outgoing slide shrinks,
+ * tilts and dims, the incoming one rises to full size. Runs in the graphics
+ * layer only, so scrolling never recomposes the slide.
+ */
+private fun Modifier.deckTransform(pager: PagerState, page: Int) = graphicsLayer {
+    val offset = ((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(-1f, 1f)
+    val distance = offset.absoluteValue
+    val scale = lerp(1f, 0.86f, distance)
+    scaleX = scale
+    scaleY = scale
+    alpha = lerp(1f, 0.55f, distance)
+    rotationY = offset * 18f
+    cameraDistance = 12f * density
+}
+
+/** A slide as a raised card, or flat in the presenter; its linked text, media and pictures use [actions]. */
+@Composable
+private fun SlideFrame(
+    slide: PreviewSlide,
+    modifier: Modifier = Modifier,
+    actions: SlideActions? = null,
+    step: Int = Int.MAX_VALUE,
+    animate: Boolean = false,
+    elevated: Boolean = true,
+) {
+    val shape = RoundedCornerShape(if (elevated) 14.dp else 0.dp)
+    Box(modifier.then(if (elevated) Modifier.raised(shape, 12.dp) else Modifier).clip(shape)) {
+        SlideCanvas(slide.canvas, slide.shapes, Modifier.fillMaxWidth(), step = step, animate = animate, actions = actions)
+    }
+}
+
+@Composable
+private fun NotesPanel(notes: List<ContentBlock>) {
+    Column(
+        Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), 0.55f).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Speaker notes", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold), color = EzColors.Accent)
+        notes.forEach { DocumentBlock(it) }
+    }
+}
+
+/** Miniatures of every slide in a row; the current one is outlined in red. Tapping one jumps to it. */
+@Composable
+private fun Thumbnails(slides: List<PreviewSlide>, current: Int, onSelect: (Int) -> Unit) {
+    val list = rememberLazyListState()
+    LaunchedEffect(current) {
+        val visible = list.layoutInfo.visibleItemsInfo
+        if (visible.none { it.index == current }) list.animateScrollToItem((current - 1).coerceAtLeast(0))
+    }
+    LazyRow(
+        state = list,
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        itemsIndexed(slides, key = { _, slide -> slide.number }) { index, slide ->
+            val selected = index == current
+            val shape = RoundedCornerShape(8.dp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier
+                        .width(92.dp)
+                        .clip(shape)
+                        .border(if (selected) 2.dp else 1.dp, if (selected) EzColors.Primary else EzColors.PageOutline, shape)
+                        .clickable(role = Role.Tab) { onSelect(index) },
+                ) {
+                    // Miniatures are inert: taps select the slide, media plays from the full stage.
+                    SlideCanvas(slide.canvas, slide.shapes, Modifier.fillMaxWidth())
+                }
+                Text(
+                    "${slide.number}",
+                    fontSize = 11.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (selected) EzColors.Primary else EzColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         }
     }
 }
 
+/** Glass bar: previous, counter and next on the left; Arrange and the red Present pill on the right. */
+@Composable
+private fun SlideControls(
+    current: Int,
+    count: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onPresent: () -> Unit,
+    onArrange: (() -> Unit)?,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 10.dp).glassBar().padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(Modifier.glass(EzShapes.Pill, 0.6f), verticalAlignment = Alignment.CenterVertically) {
+            BarIconButton(EzIcons.ChevronLeft, "Previous slide", onPrevious, enabled = current > 0)
+            Text(
+                if (count == 0) "-" else "${current + 1} / $count",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = EzColors.Text,
+            )
+            BarIconButton(EzIcons.ChevronRight, "Next slide", onNext, enabled = current < count - 1)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (onArrange != null) BarIconButton(EzIcons.Grid, "Arrange slides", onArrange)
+            Row(
+                Modifier
+                    .clip(EzShapes.Pill)
+                    .background(PrimaryGradient)
+                    .clickable(role = Role.Button, enabled = count > 0, onClick = onPresent)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(EzIcons.Play, null, tint = EzColors.OnPrimary, modifier = Modifier.size(18.dp))
+                Text("Present", color = EzColors.OnPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+/** Where the presenter is: a slide and how many of its click builds have played. */
+private data class Position(val index: Int, val step: Int)
+
 /**
- * Full-screen presenting: black background, system bars hidden, screen kept on.
- *
- * - Tap or swipe the left and right thirds, arrow/page/space keys, or volume keys to move (volume
- *   down goes forward, volume up goes back; the key event is consumed while presenting).
- * - Tap the middle to show the chrome: slide counter, elapsed timer, notes toggle and stop.
- * - Long-press and drag anywhere to show a laser-pointer dot.
- * - Escape or the stop button leaves; leaving restores the system bars and screen timeout.
+ * Full-screen presenter, landscape and immersive. A tap on the right or a swipe left plays the next
+ * build, then the next slide with its transition; a tap on the left or a swipe right goes back. Taps
+ * that land on a link, media badge or picture act on it instead of turning the page.
  */
 @Composable
-private fun Slideshow(slides: List<PreviewSlide>, start: Int, onSlide: (Int) -> Unit, onExit: () -> Unit) {
-    val pager = rememberPagerState(initialPage = start) { slides.size }
-    var chrome by remember { mutableStateOf(true) }
-    var notesOn by remember { mutableStateOf(false) }
-    var laser by remember { mutableStateOf<Offset?>(null) }
-    var elapsed by remember { mutableLongStateOf(0L) }
-    val scope = rememberCoroutineScope()
+private fun Presenter(
+    slides: List<PreviewSlide>,
+    index: Int,
+    step: Int,
+    onMove: (Int, Int) -> Unit,
+    actionsFor: (Int) -> SlideActions,
+    onClose: () -> Unit,
+) {
+    val haptics = rememberHaptics()
+    val position = Position(index.coerceIn(0, slides.lastIndex), step)
+    val slide = slides[position.index]
+
+    fun next() {
+        haptics.tick()
+        when {
+            position.step < slide.lastStep -> onMove(position.index, position.step + 1)
+            position.index < slides.lastIndex -> onMove(position.index + 1, 0)
+        }
+    }
+
+    fun previous() {
+        haptics.tick()
+        when {
+            position.step > 0 -> onMove(position.index, position.step - 1)
+            position.index > 0 -> onMove(position.index - 1, slides[position.index - 1].lastStep)
+        }
+    }
+
     val focus = remember { FocusRequester() }
-    val last = slides.lastIndex
-    fun go(to: Int) {
-        scope.launch { pager.animateScrollToPage(to.coerceIn(0, last)) }
-    }
-    LaunchedEffect(pager.currentPage) { onSlide(pager.currentPage) }
-    LaunchedEffect(chrome) {
-        if (chrome) {
-            delay(2_000)
-            chrome = false
-        }
-    }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1_000)
-            elapsed++
-        }
-    }
     LaunchedEffect(Unit) { focus.requestFocus() }
-    Dialog(onDismissRequest = onExit, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
         val view = LocalView.current
         DisposableEffect(view) {
             val window = (view.parent as? DialogWindowProvider)?.window
@@ -212,81 +469,127 @@ private fun Slideshow(slides: List<PreviewSlide>, start: Int, onSlide: (Int) -> 
                 .onKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
                     when (event.key) {
-                        Key.DirectionRight, Key.PageDown, Key.Spacebar, Key.VolumeDown -> go(pager.currentPage + 1)
-                        Key.DirectionLeft, Key.PageUp, Key.VolumeUp -> go(pager.currentPage - 1)
-                        Key.Escape -> onExit()
+                        Key.DirectionRight, Key.PageDown, Key.Spacebar, Key.VolumeDown -> next()
+                        Key.DirectionLeft, Key.PageUp, Key.VolumeUp -> previous()
+                        Key.Escape -> onClose()
                         else -> return@onKeyEvent false
                     }
                     true
                 }
                 .pointerInput(slides.size) {
-                    detectTapGestures { offset ->
-                        val third = size.width / 3
-                        when {
-                            offset.x < third -> go(pager.currentPage - 1)
-                            offset.x > 2 * third -> go(pager.currentPage + 1)
-                            else -> chrome = true
+                    // A tap counts only if nothing in it consumed the release (a link, badge or picture did).
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val up = waitForUpOrCancellation()
+                        if (up != null && !up.isConsumed && (up.position - down.position).getDistance() < viewConfiguration.touchSlop) {
+                            if (up.position.x > size.width / 3f) next() else previous()
                         }
                     }
                 }
-                .pointerInput(Unit) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = { laser = it },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            laser = change.position
-                        },
-                        onDragEnd = { laser = null },
-                        onDragCancel = { laser = null },
-                    )
+                .pointerInput(slides.size) {
+                    var drag = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { drag = 0f },
+                        onDragEnd = { if (drag < -60f) next() else if (drag > 60f) previous() },
+                    ) { change, amount ->
+                        change.consume()
+                        drag += amount
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) {
-            HorizontalPager(pager, Modifier.fillMaxSize(), key = { it }) { index ->
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    SlideCanvas(slides[index].canvas, slides[index].shapes, Modifier.fillMaxWidth())
+            AnimatedContent(
+                targetState = position,
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+                contentKey = { it.index },
+                transitionSpec = { slideTransition(slides) },
+                label = "slide",
+            ) { shown ->
+                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val shownSlide = slides[shown.index.coerceIn(0, slides.lastIndex)]
+                    // Letterbox: the widest slide that still fits the screen's height.
+                    val aspect = shownSlide.canvas.let { it.width / it.height }.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f)
+                    val width = minOf(maxWidth, maxHeight * aspect)
+                    // The outgoing slide keeps its builds; only the current one advances.
+                    SlideFrame(
+                        shownSlide,
+                        Modifier.width(width),
+                        actions = actionsFor(shown.index),
+                        step = if (shown.index == position.index) position.step else Int.MAX_VALUE,
+                        animate = true,
+                        elevated = false,
+                    )
                 }
             }
-            laser?.let { point ->
-                Canvas(Modifier.fillMaxSize()) {
-                    drawCircle(Color(0x66FF2A2A), radius = 22.dp.toPx(), center = point)
-                    drawCircle(Color(0xFFFF2A2A), radius = 6.dp.toPx(), center = point)
-                }
-            }
-            AnimatedVisibility(chrome, Modifier.align(Alignment.TopEnd).padding(24.dp), enter = fadeIn(), exit = fadeOut()) {
-                Text(
-                    "${pager.currentPage + 1} / ${slides.size}  ·  ${formatElapsed(elapsed)}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-            val notes = slides.getOrNull(pager.currentPage)?.notes.orEmpty()
-            if (notesOn && notes.isNotEmpty()) {
-                Column(
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = 180.dp)
-                        .background(Color(0xCC1B1B1F))
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                ) {
-                    Text("Speaker notes", color = Color(0xFFB0B0B8), style = MaterialTheme.typography.labelMedium)
-                    notes.forEach { DocumentBlock(it) }
-                }
-            }
-            AnimatedVisibility(chrome, Modifier.align(Alignment.BottomCenter).padding(24.dp), enter = fadeIn(), exit = fadeOut()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (notes.isNotEmpty()) {
-                        TextButton(onClick = { notesOn = !notesOn }) {
-                            Text(if (notesOn) "Hide notes" else "Notes", color = Color.White)
-                        }
-                    }
-                    IconButton(onClick = onExit) { Icon(EzIcons.FullscreenExit, "Stop presenting", tint = Color.White) }
-                }
-            }
+            PresenterChrome(position.index, slides.size, onClose)
         }
     }
 }
 
-private fun formatElapsed(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
+@Composable
+private fun BoxScope.PresenterChrome(index: Int, count: Int, onClose: () -> Unit) {
+    Row(
+        Modifier.align(Alignment.TopEnd).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            "${index + 1} / $count",
+            color = EzColors.OnScrim.copy(alpha = 0.85f),
+            fontSize = 13.sp,
+            modifier = Modifier.clip(EzShapes.Pill).background(EzColors.Scrim).padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+        Box(
+            Modifier.size(40.dp).clip(CircleShape).background(EzColors.Scrim).clickable(role = Role.Button, onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(EzIcons.Close, "Exit presentation", tint = EzColors.OnScrim)
+        }
+    }
+    // Progress through the deck.
+    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.12f))) {
+        Box(Modifier.fillMaxWidth((index + 1f) / count.coerceAtLeast(1)).height(3.dp).background(PrimaryGradient))
+    }
+}
+
+/**
+ * The slide's own transition (`p:transition`), with PowerPoint's direction:
+ * going back plays it mirrored. Slides without one get a short fade.
+ */
+private fun AnimatedContentTransitionScope<Position>.slideTransition(slides: List<PreviewSlide>): ContentTransform {
+    val forward = targetState.index >= initialState.index
+    val target = slides.getOrNull(if (forward) targetState.index else initialState.index)
+    val dir = if (forward) 1 else -1
+    val time = 520
+    val ease = tween<Float>(time, easing = FastOutSlowInEasing)
+    fun <T> t() = tween<T>(time, easing = FastOutSlowInEasing)
+    val fade = fadeIn(ease) togetherWith fadeOut(ease)
+    return when (target?.canvas?.transition) {
+        null -> fadeIn(tween(300)) togetherWith fadeOut(tween(300))
+        "cut" -> EnterTransition.None togetherWith ExitTransition.None
+        "fade", "dissolve", "morph", "random", "randomBar" -> fade
+        "push", "pan", "conveyor", "ferris", "flythrough", "gallery", "switch", "flip" ->
+            slideInHorizontally(t()) { it * dir } togetherWith slideOutHorizontally(t()) { -it * dir }
+        "cover", "comb", "doors", "window" ->
+            slideInHorizontally(t()) { it * dir } togetherWith fadeOut(tween(time, delayMillis = time / 2))
+        "pull", "uncover", "reveal", "curtains", "drape", "fallOver" ->
+            (EnterTransition.None togetherWith slideOutHorizontally(t()) { -it * dir }).apply { targetContentZIndex = -1f }
+        "wipe", "split", "strips", "blinds", "checker", "wedge", "wheel", "wheelReverse", "circle", "diamond", "plus", "shape", "honeycomb" ->
+            expandHorizontally(t(), expandFrom = if (forward) Alignment.Start else Alignment.End) togetherWith
+                fadeOut(tween(time, delayMillis = time / 2))
+        "newsflash", "vortex", "ripple", "glitter", "shred", "prism", "doors3d" ->
+            scaleIn(ease, initialScale = 0.4f) + fadeIn(ease) togetherWith scaleOut(ease, targetScale = 1.2f) + fadeOut(ease)
+        "zoom", "warp", "flash" ->
+            scaleIn(ease, initialScale = if (forward) 0.7f else 1.3f) + fadeIn(ease) togetherWith fadeOut(ease)
+        "cube", "box", "rotate", "orbit" ->
+            slideInHorizontally(t()) { it * dir } + scaleIn(ease, initialScale = 0.85f) togetherWith
+                slideOutHorizontally(t()) { -it * dir } + scaleOut(ease, targetScale = 0.85f)
+        "fly", "airplane", "origami", "fracture", "crush", "peelOff", "pageCurlSingle", "pageCurlDouble", "curl" ->
+            slideInVertically(t()) { it / 3 } + fadeIn(ease) togetherWith fadeOut(ease)
+        else -> fade
+    }
+}
 
 /**
  * Drag-to-reorder grid of slide thumbnails. Dragging a tile (long-press, then move) moves it to the
@@ -376,7 +679,7 @@ private fun SlideTile(
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val dragState = rememberUpdatedState(onDragMove)
+    val dragState = androidx.compose.runtime.rememberUpdatedState(onDragMove)
     Column(
         Modifier
             .pointerInput(enabled) {
@@ -457,11 +760,15 @@ private fun runEdit(
 }
 
 private data class PreviewSlide(
+    val number: Int,
     val title: String,
     val canvas: ContentBlock.Slide,
     val shapes: List<SlideShape>,
     val notes: List<ContentBlock>,
-)
+) {
+    /** The last click step of this slide's entrance builds. */
+    val lastStep: Int = shapes.maxOfOrNull { it.build?.step ?: 0 } ?: 0
+}
 
 private fun groupSlides(blocks: List<ContentBlock>): List<PreviewSlide> = buildList {
     var title = ""
@@ -469,7 +776,7 @@ private fun groupSlides(blocks: List<ContentBlock>): List<PreviewSlide> = buildL
     val shapes = mutableListOf<SlideShape>()
     val notes = mutableListOf<ContentBlock>()
     fun finish() {
-        canvas?.let { add(PreviewSlide(title, it, shapes.toList(), notes.toList())) }
+        canvas?.let { add(PreviewSlide(size + 1, title, it, shapes.toList(), notes.toList())) }
         canvas = null
         shapes.clear()
         notes.clear()

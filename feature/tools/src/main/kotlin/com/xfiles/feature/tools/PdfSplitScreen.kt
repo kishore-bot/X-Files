@@ -4,17 +4,10 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,22 +17,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.material3.FilterChip
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
+import com.xfiles.design.EzColors
+import com.xfiles.design.EzIcons
+import com.xfiles.design.EzTextButton
+import com.xfiles.design.HapticOnChange
 import com.xfiles.documents.PdfSpanParse
 import com.xfiles.documents.PdfSplitPlan
 import com.xfiles.documents.planPdfSplit
 
+private val SplitTint = Color(0xFF0B7F86)
+private val GridHeight = 460.dp
+
 /**
- * Splits a PDF three ways: page ranges such as `1-3, 4-8, 9-`, every N pages, or one
- * file per page. Each mode is checked as it's typed: bounds, order, shared pages and
- * file count. Names can be changed per part, and the parts are written into a folder.
+ * Splits one PDF three ways: every page, every N pages, or custom cuts tapped on the page grid (or typed as ranges).
+ * Each part can be renamed, and the parts are written into a folder the user picks.
  */
 @Composable
 fun PdfSplitScreen(
@@ -48,6 +44,8 @@ fun PdfSplitScreen(
 ) {
     val frame by viewModel.frame.collectAsStateWithLifecycle()
     val input by viewModel.tool.collectAsStateWithLifecycle()
+    HapticOnChange(frame.outputs) { if (it.isNotEmpty()) confirm() }
+    HapticOnChange(frame.error) { if (it != null) reject() }
     var pickedUri by rememberSaveable { mutableStateOf<String?>(null) }
     val choose = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -66,109 +64,146 @@ fun PdfSplitScreen(
     }
     BackHandler(onBack = back)
 
-    val parse = remember(input.plan, frame.pageCount) { planPdfSplit(input.plan, frame.pageCount) }
     val plan = input.plan
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    val parse = remember(plan, frame.pageCount) { planPdfSplit(plan, frame.pageCount) }
+    val spans = (parse as? PdfSpanParse.Valid)?.spans.orEmpty()
+    // The cuts the parts show: the custom cuts when set, otherwise the ends of the parts the plan makes.
+    val shownCuts = spans.dropLast(1).map { it.end }.toSet()
+    val names = remember(spans, input.names, frame.name) { viewModel.partNames(spans) }
+    val parts = frame.outputs.size
+    val step = when {
+        frame.saved || frame.outputs.isNotEmpty() -> ToolStep.Save
+        !frame.isOpen -> ToolStep.Pick
+        else -> ToolStep.Adjust
+    }
+
+    ToolScaffold(
+        title = "Split PDF",
+        backLabel = "Back to tools",
+        onBack = back,
+        bottomBar = {
+            Column(Modifier.fillMaxWidth()) {
+                if (frame.running) EzTextButton(text = "Cancel", onClick = viewModel::cancel, modifier = Modifier.fillMaxWidth())
+                ToolActionBar(
+                    label = when {
+                        parts > 0 -> "Save $parts ${if (parts == 1) "PDF" else "PDFs"} to a folder"
+                        parse is PdfSpanParse.Valid -> "Split into ${spans.size} ${if (spans.size == 1) "PDF" else "PDFs"}"
+                        else -> "Split"
+                    },
+                    enabled = !frame.busy && (parts > 0 || (frame.isOpen && parse is PdfSpanParse.Valid)),
+                    onClick = { if (parts > 0) folder.launch(null) else viewModel.split(spans) },
+                    icon = EzIcons.Lines,
+                    running = frame.running,
+                    progress = frame.progress,
+                )
+            }
+        },
     ) {
-        DedicatedToolHeader(title = "Split PDF", onBack = back)
-        PdfSourceCard(
-            frame = frame,
-            onChoose = { choose.launch(arrayOf("application/pdf")) },
-            onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },
-        )
-        if (frame.isOpen && frame.outputs.isEmpty()) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = plan is PdfSplitPlan.Ranges,
-                    onClick = { viewModel.setPlan(PdfSplitPlan.Ranges("")) },
-                    enabled = !frame.busy,
-                    label = { Text("Page ranges") },
-                )
-                FilterChip(
-                    selected = plan is PdfSplitPlan.EveryPages,
-                    onClick = { viewModel.setPlan(PdfSplitPlan.EveryPages("2")) },
-                    enabled = !frame.busy,
-                    label = { Text("Every N pages") },
-                )
-                FilterChip(
-                    selected = plan == PdfSplitPlan.OnePerPage,
-                    onClick = { viewModel.setPlan(PdfSplitPlan.OnePerPage) },
-                    enabled = !frame.busy,
-                    label = { Text("One file per page") },
+        if (frame.saved) {
+            item("saved") {
+                ToolResult(
+                    title = "Parts saved",
+                    outputName = "$parts ${if (parts == 1) "file" else "files"} in the folder you chose",
+                    onDoAnother = viewModel::release,
                 )
             }
-            when (plan) {
-                is PdfSplitPlan.Ranges -> OutlinedTextField(
-                    value = plan.text,
-                    onValueChange = { viewModel.setPlan(PdfSplitPlan.Ranges(it)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !frame.busy,
-                    singleLine = true,
-                    label = { Text("Page ranges") },
-                    placeholder = { Text("1-3, 4-8, 9-") },
-                    supportingText = { Text(rangeMessage(parse)) },
-                    isError = parse is PdfSpanParse.Invalid,
-                )
-                is PdfSplitPlan.EveryPages -> OutlinedTextField(
-                    value = plan.pagesText,
-                    onValueChange = { viewModel.setPlan(PdfSplitPlan.EveryPages(it)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !frame.busy,
-                    singleLine = true,
-                    label = { Text("Pages per file") },
-                    supportingText = { Text(rangeMessage(parse)) },
-                    isError = parse is PdfSpanParse.Invalid,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-                PdfSplitPlan.OnePerPage -> Text(
-                    rangeMessage(parse),
-                    style = MaterialTheme.typography.bodySmall,
+        } else {
+            item("hero") {
+                ToolHero(
+                    icon = EzIcons.Lines,
+                    tint = SplitTint,
+                    title = "Split PDF",
+                    blurb = "Cut one PDF into several. Tap pages to choose where each part ends.",
+                    step = step,
                 )
             }
-            if (parse is PdfSpanParse.Valid) {
-                val names = viewModel.partNames(parse.spans)
-                parse.spans.forEachIndexed { index, span ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        AssistChip(
-                            onClick = {},
-                            label = { Text("Part ${index + 1} · ${span.start + 1}–${span.end + 1}") },
+            item("source") {
+                PdfSourceSection(
+                    frame = frame,
+                    tint = SplitTint,
+                    firstPage = viewModel::firstPreview,
+                    onChoose = { choose.launch(arrayOf("application/pdf")) },
+                    onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },
+                )
+            }
+            if (frame.isOpen && frame.outputs.isEmpty()) {
+                item("modes") {
+                    SplitModeCards(
+                        plan = plan,
+                        enabled = !frame.busy,
+                        onPlan = viewModel::setPlan,
+                        onCustom = { viewModel.startCustom(shownCuts) },
+                    )
+                }
+                when (plan) {
+                    is PdfSplitPlan.EveryPages -> item("every") {
+                        EveryNStepper(
+                            pagesText = plan.pagesText,
+                            pageCount = frame.pageCount,
+                            enabled = !frame.busy,
+                            onChange = { viewModel.setPlan(PdfSplitPlan.EveryPages(it)) },
                         )
+                    }
+                    is PdfSplitPlan.Ranges -> item("ranges") {
                         OutlinedTextField(
-                            value = names[index],
-                            onValueChange = { viewModel.setName(index, it) },
-                            modifier = Modifier.weight(1f),
+                            value = plan.text,
+                            onValueChange = { viewModel.setPlan(PdfSplitPlan.Ranges(it)) },
+                            modifier = Modifier.fillMaxWidth(),
                             enabled = !frame.busy,
                             singleLine = true,
-                            label = { Text("File name") },
+                            label = { Text("Page ranges") },
+                            placeholder = { Text("1-3, 4-8, 9-") },
+                            supportingText = { Text(rangeMessage(parse)) },
+                            isError = parse is PdfSpanParse.Invalid,
                         )
+                    }
+                    PdfSplitPlan.OnePerPage -> Unit
+                }
+                item("grid-hint") {
+                    Text(
+                        "Tap a page to end a PDF after it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = EzColors.TextSecondary,
+                    )
+                }
+                item("grid") {
+                    SplitPageGrid(
+                        pageCount = frame.pageCount,
+                        cuts = shownCuts,
+                        enabled = !frame.busy,
+                        preview = viewModel::pagePreview,
+                        onTap = { page ->
+                            if (plan !is PdfSplitPlan.Ranges) viewModel.startCustom(shownCuts)
+                            viewModel.toggleCut(page)
+                        },
+                        modifier = Modifier.fillMaxWidth().height(GridHeight),
+                    )
+                }
+                if (spans.isNotEmpty()) {
+                    item("parts-hint") {
+                        Text(rangeMessage(parse), style = MaterialTheme.typography.bodySmall, color = EzColors.TextSecondary)
+                    }
+                    item("names") {
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SplitPartNames(
+                                spans = spans,
+                                names = names,
+                                enabled = !frame.busy,
+                                onName = viewModel::setName,
+                            )
+                        }
                     }
                 }
             }
-        }
-        PdfBusyBar(frame = frame, onCancel = viewModel::cancel)
-        PdfMessages(frame)
-        if (frame.outputs.isNotEmpty()) {
-            Text(
-                "${frame.outputs.size} ${if (frame.outputs.size == 1) "file" else "files"} ready · " +
-                    frame.outputs.sumOf { it.pages }.toString() + " pages in total",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             if (frame.outputs.isNotEmpty()) {
-                Button(onClick = { folder.launch(null) }, enabled = !frame.busy) { Text("Save to folder") }
-            } else if (frame.isOpen) {
-                Button(
-                    onClick = { (parse as? PdfSpanParse.Valid)?.let { viewModel.split(it.spans) } },
-                    enabled = !frame.busy && parse is PdfSpanParse.Valid,
-                ) { Text("Split") }
+                item("ready") {
+                    ReadyCard(
+                        title = "$parts ${if (parts == 1) "file" else "files"} ready · ${frame.outputs.sumOf { it.pages }} pages",
+                        notes = listOf("Choose a folder to write them into."),
+                    )
+                }
             }
+            frame.error?.let { message -> item("error") { ErrorLine(message) } }
         }
     }
 }

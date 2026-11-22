@@ -18,8 +18,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -45,19 +47,27 @@ import java.io.ByteArrayInputStream
 @Composable
 internal fun HtmlPreview(
     html: String,
-    reading: ReadingTheme = ReadingTheme.Standard,
     baseUri: Uri? = null,
     onOpenSibling: (Uri) -> Unit = {},
 ) {
     val context = LocalContext.current
     val haptics = rememberHaptics()
-    val original = LocalOriginalView.current
-    // Original view keeps the page's own colours on white; the themed view adds glass or a reading page.
-    val palette = if (original) null else reading.palette()
+    val style = LocalPageStyle.current
+    // Original keeps the page's own CSS on white and injects nothing; Standard keeps the glass; Dark and Sepia
+    // add their page colours and a stylesheet.
+    val original = style == PageStyle.Original
+    val palette = if (style == PageStyle.Standard || original) null else style.colors()
     // The page keeps an about:blank base, so relative hrefs reach the link handler as written.
     val pageUrl = "about:blank"
     var pendingLink by rememberSaveable(html) { mutableStateOf<String?>(null) }
     val siblingHandler by rememberUpdatedState(onOpenSibling)
+    // The assistant pages this web view through the handle while it is on screen.
+    val webHandle = remember { WebViewHandle() }
+    val registerScroll = LocalViewerScroll.current
+    DisposableEffect(registerScroll) {
+        val unregister = registerScroll(WebViewScroll(webHandle))
+        onDispose { unregister() }
+    }
     val page = when {
         original -> Modifier.fillMaxSize().background(Color.White, RoundedCornerShape(16.dp))
         palette == null -> Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
@@ -105,6 +115,7 @@ internal fun HtmlPreview(
                             }
                         }
                     }
+                    webHandle.view = this
                 }
             },
             update = { view ->
@@ -113,7 +124,10 @@ internal fun HtmlPreview(
                     view.loadDataWithBaseURL(pageUrl, pageHtml, "text/html", "utf-8", null)
                 }
             },
-            onRelease = { it.destroy() },
+            onRelease = {
+                if (webHandle.view === it) webHandle.view = null
+                it.destroy()
+            },
         )
         pendingLink?.let { link ->
             AlertDialog(
@@ -146,7 +160,7 @@ private fun openExternalLink(context: Context, link: String): Boolean = try {
  * Backgrounds and text colours are forced with !important so the page's own colours yield; links keep the
  * palette's secondary tone. The page's markup and scripts (none run) are untouched.
  */
-internal fun readingHtml(html: String, palette: ReadingPalette): String {
+internal fun readingHtml(html: String, palette: PageColors): String {
     val page = palette.page.hex()
     val text = palette.text.hex()
     val muted = palette.secondary.hex()

@@ -20,6 +20,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +58,8 @@ import com.xfiles.design.EzOptionMenu
 import com.xfiles.design.EzTopBar
 import com.xfiles.design.EzShapes
 import com.xfiles.design.EzSwitch
+import com.xfiles.design.EzSectionHeader
+import com.xfiles.design.EzListItem
 import androidx.compose.runtime.LaunchedEffect
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
@@ -81,6 +87,7 @@ fun AboutScreen(
     var showingFormats by rememberSaveable { mutableStateOf(false) }
     var showingLicences by rememberSaveable { mutableStateOf(false) }
     var showingFeedback by rememberSaveable { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val back: () -> Unit = { if (vision) vision = false else onBack() }
     BackHandler(onBack = back)
     val context = LocalContext.current
@@ -92,9 +99,26 @@ fun AboutScreen(
             backLabel = if (vision) "Back to About" else "Back to library",
             gutter = 0.dp,
         )
+        if (!vision) {
+            PrimaryTabRow(
+                selectedTabIndex = tab,
+                containerColor = Color.Transparent,
+                modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth().align(Alignment.CenterHorizontally),
+            ) {
+                listOf("About", "Upcoming").forEachIndexed { index, label ->
+                    Tab(
+                        selected = tab == index,
+                        onClick = { tab = index },
+                        text = { Text(label, style = MaterialTheme.typography.titleSmall) },
+                    )
+                }
+            }
+        }
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
             if (vision) {
                 VisionScreen()
+            } else if (tab == 1) {
+                UpcomingScreen()
             } else {
                 LazyColumn(
                     Modifier.widthIn(max = 620.dp).fillMaxWidth(),
@@ -305,33 +329,21 @@ private fun SwitchRow(title: String, body: String, checked: Boolean, onCheckedCh
 
 @Composable
 private fun SectionHeading(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleLarge,
-        color = EzColors.Text,
-        modifier = Modifier.padding(top = 28.dp, bottom = 12.dp, start = 4.dp).semantics { heading() },
-    )
+    EzSectionHeader(title)
 }
 
 /** A glass card that opens something: icon badge, title and line, chevron. */
 @Composable
 private fun NavigationCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, body: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .glassCard()
-            .clickable(role = Role.Button, onClick = onClick)
-            .heightIn(min = 72.dp)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        IconBadge(icon)
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = EzColors.Text)
-            Text(body, style = MaterialTheme.typography.bodyMedium, color = EzColors.TextSecondary)
-        }
-        Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary, modifier = Modifier.size(22.dp))
+    // The shared list row inside a glass card: haptic tick, press scale and a 64 dp+ target.
+    Box(Modifier.fillMaxWidth().glassCard()) {
+        EzListItem(
+            title = title,
+            supporting = body,
+            icon = icon,
+            trailing = { Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary, modifier = Modifier.size(22.dp)) },
+            onClick = onClick,
+        )
     }
 }
 
@@ -373,7 +385,7 @@ private data class TeamMember(val name: String, val role: String, val linkedIn: 
 
 private val Team = listOf(
     TeamMember(
-        name = "KISHORE K",
+        name = "Kishore K",
         role = "Developer",
         linkedIn = "https://www.linkedin.com/in/kishorek1",
         email = "kishoreabhi333@gmail.com",

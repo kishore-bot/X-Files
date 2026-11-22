@@ -30,11 +30,25 @@ internal class AppearanceStore @Inject constructor(@ApplicationContext private v
         launcherScope.launch { LauncherIcons.apply(context, saved) }
     }
 
+    /**
+     * Switches the theme in place: the UI animates from the new state and no activity is recreated. Enabling a
+     * different launcher alias while the task is on screen makes many launchers relaunch the app (the "flash" or
+     * close), so the icon swap waits until Xfiles leaves the foreground ([applyPendingLauncherIcon]).
+     */
     fun setTheme(theme: ThemePreference) {
         settings.edit().putString("theme", theme.name).apply()
         mutableTheme.value = theme
+        pendingLauncherTheme = theme
+    }
+
+    /** Called from MainActivity.onStop, so the launcher icon follows the theme once the app is in the background. */
+    fun applyPendingLauncherIcon() {
+        val theme = pendingLauncherTheme ?: return
+        pendingLauncherTheme = null
         launcherScope.launch { LauncherIcons.apply(context, theme) }
     }
+
+    @Volatile private var pendingLauncherTheme: ThemePreference? = null
 
     fun setHaptics(enabled: Boolean) {
         settings.edit().putBoolean("haptics", enabled).apply()

@@ -1247,12 +1247,13 @@ mod tests {
 
     #[test]
     fn oversized_pictures_are_refused() {
-        let big = vec![0u8; 16 * 1024 * 1024 + 1];
+        let big = vec![0u8; 64 * 1024 * 1024 + 1];
         let bytes = zip_with(
             &[("_rels/.rels", RELS), ("word/document.xml", b"<w:document/>"), ("word/media/big.png", &big)],
             false,
         );
-        let mut session = crate::engine(Limits::default()).open(Cursor::new(bytes)).unwrap();
+        let limits = Limits { max_part_bytes: 128 * 1024 * 1024, ..Limits::default() };
+        let mut session = crate::engine(limits).open(Cursor::new(bytes)).unwrap();
         assert_eq!(session.resource("word/media/big.png").unwrap_err().kind, ErrorKind::LimitExceeded);
     }
 

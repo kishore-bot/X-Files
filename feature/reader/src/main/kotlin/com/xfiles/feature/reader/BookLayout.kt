@@ -7,9 +7,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
+import com.xfiles.documents.book.TextAlignment
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -39,33 +43,30 @@ internal class BookPalette(
 
 internal fun bookPalette(theme: ReadingTheme): BookPalette = when (theme) {
     ReadingTheme.Light -> BookPalette(
-        background = Color(0xFFFFFFFF), text = Color(0xFF1C1B1F), secondaryText = Color(0xFF625B66),
+        background = Color(0xFFFFFFFF), text = Color(0xFF1B1B1B), secondaryText = Color(0xFF625B66),
         onDark = false, selection = Color(0x663D7BFF), codeFill = Color(0xFFF2F2F5),
     )
     ReadingTheme.Sepia -> BookPalette(
-        background = Color(0xFFF4ECD8), text = Color(0xFF5B4636), secondaryText = Color(0xFF7A6A58),
+        background = Color(0xFFF4ECD8), text = Color(0xFF4A3B2A), secondaryText = Color(0xFF7A6A58),
         onDark = false, selection = Color(0x665B7BC0), codeFill = Color(0xFFEADFC6),
+    )
+    ReadingTheme.Green -> BookPalette(
+        background = Color(0xFFCFE5CB), text = Color(0xFF1D2B1D), secondaryText = Color(0xFF4A5E4A),
+        onDark = false, selection = Color(0x663D7BFF), codeFill = Color(0xFFBED6B8),
     )
     ReadingTheme.Dark -> BookPalette(
         background = Color(0xFF1B1B1F), text = Color(0xFFE6E1E5), secondaryText = Color(0xFFB8B2BC),
         onDark = true, selection = Color(0x665B7BC0), codeFill = Color(0xFF2A2A30),
     )
     ReadingTheme.Black -> BookPalette(
-        background = Color(0xFF000000), text = Color(0xFFBDBDBD), secondaryText = Color(0xFF8A8A8A),
+        background = Color(0xFF000000), text = Color(0xFFD2D2D2), secondaryText = Color(0xFF8A8A8A),
         onDark = true, selection = Color(0x6683A6FF), codeFill = Color(0xFF111114),
     )
 }
 
 /** The paint for a highlight: translucent, so the text stays readable on every theme. */
-internal fun HighlightColor.paint(onDark: Boolean): Color {
-    val base = when (this) {
-        HighlightColor.Yellow -> Color(0xFFFFE066)
-        HighlightColor.Green -> Color(0xFF81C784)
-        HighlightColor.Blue -> Color(0xFF64B5F6)
-        HighlightColor.Pink -> Color(0xFFF06292)
-    }
-    return base.copy(alpha = if (onDark) 0.38f else 0.55f)
-}
+internal fun HighlightColor.paint(onDark: Boolean): Color =
+    swatch().copy(alpha = if (onDark) 0.38f else 0.55f)
 
 /** Text styles for one settings-and-theme combination. */
 internal class BookTypography(
@@ -77,25 +78,39 @@ internal class BookTypography(
     fun heading(level: Int): TextStyle = headings[(level - 1).coerceIn(0, headings.lastIndex)]
 }
 
+/** Caladea, the metric twin of Cambria, bundled as in the EzFiles reader (SIL Open Font License). */
+private val CaladeaFamily = FontFamily(
+    Font(R.font.caladea_regular, FontWeight.Normal, FontStyle.Normal),
+    Font(R.font.caladea_bold, FontWeight.Bold, FontStyle.Normal),
+    Font(R.font.caladea_italic, FontWeight.Normal, FontStyle.Italic),
+    Font(R.font.caladea_bolditalic, FontWeight.Bold, FontStyle.Italic),
+)
+
 internal fun bookTypography(settings: ReadingSettings, palette: BookPalette): BookTypography {
     val size = settings.textSizeSp.toFloat()
     val family = when (settings.font) {
-        ReadingFont.Serif -> FontFamily.Serif
+        // The book's own face is not read from its styles here, so it takes the serif a book usually uses.
+        ReadingFont.Original, ReadingFont.Serif -> FontFamily.Serif
+        ReadingFont.Caladea -> CaladeaFamily
         ReadingFont.Sans -> FontFamily.SansSerif
         ReadingFont.Mono -> FontFamily.Monospace
     }
-    fun style(scale: Float, bold: Boolean = false, italic: Boolean = false, mono: Boolean = false) = TextStyle(
+    val justify = if (settings.alignment == TextAlignment.Justified) TextAlign.Justify else null
+    val multiplier = settings.lineSpacing.multiplier
+    // "Book's own" line spacing leaves the height unset, so the font's own line height applies.
+    fun style(scale: Float, bold: Boolean = false, italic: Boolean = false, mono: Boolean = false, justified: Boolean = false) = TextStyle(
         fontFamily = if (mono) FontFamily.Monospace else family,
         fontSize = (size * scale).sp,
-        lineHeight = (size * scale * settings.lineSpacing.multiplier).sp,
+        lineHeight = if (multiplier > 0f) (size * scale * multiplier).sp else TextUnit.Unspecified,
         fontWeight = if (bold) FontWeight.Bold else null,
         fontStyle = if (italic) FontStyle.Italic else null,
+        textAlign = (if (justified) justify else null) ?: TextAlign.Unspecified,
         color = palette.text,
     )
     return BookTypography(
-        body = style(1f),
+        body = style(1f, justified = true),
         headings = listOf(style(1.6f, bold = true), style(1.35f, bold = true), style(1.15f, bold = true)),
-        quote = style(1f, italic = true),
+        quote = style(1f, italic = true, justified = true),
         code = style(0.85f, mono = true),
     )
 }

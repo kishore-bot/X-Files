@@ -51,6 +51,41 @@ object QuickCommands {
             text.matches(Regex("""^rotate( it| this| the (photo|picture|image))?( clockwise)?$""")) -> pick("rotate_photo")
             text.matches(Regex("""^(play|resume|continue)( it| this| the (video|song|audio|track))?$""")) -> pick("play")
             text.matches(Regex("""^(pause|stop)( it| this| the (video|song|audio|track)| playback)?$""")) -> pick("pause")
+            else -> scrollIntent(text)?.let { pick(it) }
+        }
+    }
+
+    // Scrolling isn't in the trained tool catalog, so the model can't do it: natural phrasings are caught here.
+    private val scrollVerb = Regex("""\b(scroll|scrolling|move|go|swipe|take me|jump|skip)\b""")
+    private val scrollObject = Regex("""^((the|this|a|my) )?(page|file|document|doc|screen|text|content|sheet|list|table|book|chapter|it|bit|little|more|further|lower|higher|again|some|lot|way|all|down|up|of|to|the|a|now|please)( |$)""")
+
+    /**
+     * "scroll down the page", "scroll a bit more", "move up", "take me to the end", "scroll all the way up":
+     * the scroll operation meant, or null. Only short commands count, so a question that mentions scrolling
+     * ("why can't you scroll the table") still goes to the model.
+     */
+    internal fun scrollIntent(text: String): String? {
+        val words = text.split(' ').filter(String::isNotEmpty)
+        if (words.isEmpty() || words.size > 9 || !scrollVerb.containsMatchIn(text)) return null
+        if (Regex("""\b(why|how|what|can't|cannot|not|don't|dont)\b""").containsMatchIn(text)) return null
+        val toEnd = Regex("""\b(bottom|end|last line|all the way down)\b""").containsMatchIn(text)
+        val toStart = Regex("""\b(top|start|beginning|all the way up)\b""").containsMatchIn(text)
+        val up = Regex("""\b(up|upward|upwards|back up|higher|previous)\b""").containsMatchIn(text)
+        val down = Regex("""\b(down|downward|downwards|lower|further|more|next)\b""").containsMatchIn(text)
+        // Every word must be part of the command: a verb, a direction, or a filler such as "the page".
+        val rest = text.replace(scrollVerb, " ")
+            .replace(Regex("""\b(down|downward|downwards|up|upward|upwards|back|bottom|end|top|start|beginning|last line|lower|higher|further|more|next|previous|of)\b"""), " ")
+            .replace(Regex(" +"), " ").trim()
+        var leftover = rest
+        while (leftover.isNotEmpty()) {
+            val match = scrollObject.find(leftover) ?: return null
+            leftover = leftover.substring(match.range.last + 1).trim()
+        }
+        return when {
+            toEnd -> "scroll_bottom"
+            toStart -> "scroll_top"
+            up -> "scroll_up"
+            down || Regex("""\bscroll\b""").containsMatchIn(text) -> "scroll_down"
             else -> null
         }
     }

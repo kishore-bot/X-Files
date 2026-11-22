@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzSectionHeader
 import com.xfiles.design.EzTopBar
 import com.xfiles.design.EzShapes
 import com.xfiles.design.HapticOnChange
@@ -209,7 +210,7 @@ private fun Results(report: TidyReport, onOpen: (TidyFile) -> Unit, onShare: (Ti
 }
 
 private fun LazyListScope.title(key: String, text: String) {
-    item(key = "t:$key") { Text(text, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium, color = EzColors.Text) }
+    item(key = "t:$key") { EzSectionHeader(text) }
 }
 
 @Composable

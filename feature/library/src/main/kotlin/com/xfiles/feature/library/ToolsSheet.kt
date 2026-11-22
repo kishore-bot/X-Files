@@ -1,12 +1,7 @@
 package com.xfiles.feature.library
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,18 +13,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
-import com.xfiles.design.EzShapes
-import com.xfiles.design.glass
-import com.xfiles.design.rememberHaptics
+import com.xfiles.design.EzListItem
+import com.xfiles.design.EzSectionHeader
 import com.xfiles.design.staggeredEnter
 
 /** The library's Tools menu, as in EzFiles: PDF tools first, then the tools that make something new. */
@@ -45,40 +37,42 @@ enum class LibraryTool(val title: String, val subtitle: String, val icon: ImageV
     ExtractArchive("Extract", "Open a ZIP and save all or selected files", EzIcons.Folder),
 }
 
+/** Tools are grouped: making and converting documents first, then tidying and archives. */
+private val ToolGroups: List<Pair<String, List<LibraryTool>>> = listOf(
+    "Documents" to listOf(
+        LibraryTool.PdfTools,
+        LibraryTool.ScanToPdf,
+        LibraryTool.ImageToText,
+        LibraryTool.ImagesToPdf,
+        LibraryTool.TextToPdf,
+        LibraryTool.NewText,
+    ),
+    "Files" to listOf(LibraryTool.TidyUp, LibraryTool.CompressZip, LibraryTool.ExtractArchive),
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ToolsSheet(onSelect: (LibraryTool) -> Unit, onDismiss: () -> Unit) {
-    val haptics = rememberHaptics()
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 12.dp)) {
+        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
             Text(
                 "Tools",
                 style = MaterialTheme.typography.headlineSmall,
                 color = EzColors.Text,
-                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp).semantics { heading() },
+                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 0.dp).semantics { heading() },
             )
-            LibraryTool.entries.forEachIndexed { index, tool ->
-                Row(
-                    Modifier
-                        .staggeredEnter(index)
-                        .fillMaxWidth()
-                        .heightIn(min = 64.dp)
-                        .clickable(role = Role.Button) {
-                            haptics.contextClick()
-                            onSelect(tool)
-                        }
-                        .padding(horizontal = 24.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Box(Modifier.size(44.dp).glass(EzShapes.Small, 0.9f), contentAlignment = Alignment.Center) {
-                        Icon(tool.icon, null, tint = EzColors.Primary, modifier = Modifier.size(24.dp))
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(tool.title, style = MaterialTheme.typography.titleMedium, color = EzColors.Text)
-                        Text(tool.subtitle, style = MaterialTheme.typography.bodyMedium, color = EzColors.TextSecondary)
-                    }
-                    Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary, modifier = Modifier.size(20.dp))
+            var index = 0
+            ToolGroups.forEach { (group, tools) ->
+                EzSectionHeader(group, Modifier.padding(horizontal = 24.dp))
+                tools.forEach { tool ->
+                    EzListItem(
+                        title = tool.title,
+                        supporting = tool.subtitle,
+                        icon = tool.icon,
+                        trailing = { Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary, modifier = Modifier.size(20.dp)) },
+                        modifier = Modifier.staggeredEnter(index++).fillMaxWidth().padding(horizontal = 8.dp),
+                        onClick = { onSelect(tool) },
+                    )
                 }
             }
         }

@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.lazy.rememberLazyListState
 import android.graphics.BitmapFactory
 import android.text.format.Formatter
 import androidx.compose.foundation.Image
@@ -85,18 +86,17 @@ internal fun StructuredPreview(document: StructuredDocument, editing: Structured
 private fun DocumentBlocks(document: StructuredDocument) {
     // Consecutive table rows form one table item, so a table scrolls and aligns as a single unit.
     val items = remember(document) { documentItems(document.blocks) }
-    val page = if (LocalOriginalView.current) {
-        Modifier.fillMaxSize().background(Color.White, RoundedCornerShape(16.dp))
-    } else {
-        Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
-    }
+    val page = Modifier.fillMaxSize().pagePanel()
+    val blocksList = rememberLazyListState()
+    RegisterViewerScroll(blocksList) { LazyScroll(blocksList) }
     Box(page, contentAlignment = Alignment.TopCenter) {
         LazyColumn(
-            Modifier.widthIn(max = 760.dp).fillMaxWidth(),
+            state = blocksList,
+            modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (document.truncated) item { Text("Showing the beginning of this file.", color = EzColors.TextSecondary) }
+            if (document.truncated) item { Text("Showing the beginning of this file.", color = pageSecondary(EzColors.TextSecondary)) }
             if (document.blocks.isEmpty()) item { Text("This file has no readable content.") }
             itemsIndexed(items, key = { index, _ -> index }) { _, item ->
                 when (item) {
@@ -122,7 +122,7 @@ internal fun DocumentBlock(block: ContentBlock) {
             SelectionContainer { Text(styled, modifier = Modifier.semantics { heading() }, style = style) }
         }
         is ContentBlock.Paragraph -> RichParagraph(block.text, block.spans)
-        is ContentBlock.Quote -> Box(Modifier.fillMaxWidth().glassCard().padding(12.dp)) {
+        is ContentBlock.Quote -> Box(Modifier.fillMaxWidth().pageCard().padding(12.dp)) {
             RichParagraph(block.text, block.spans, italic = true)
         }
         is ContentBlock.ListItem -> Row(
@@ -140,7 +140,7 @@ internal fun DocumentBlock(block: ContentBlock) {
                         "${block.firstLine!! + index}  $line"
                     }.joinToString("\n")
                 },
-                modifier = Modifier.fillMaxWidth().glassCard().padding(12.dp),
+                modifier = Modifier.fillMaxWidth().pageCard().padding(12.dp),
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -149,7 +149,7 @@ internal fun DocumentBlock(block: ContentBlock) {
             val images = LocalDocumentImages.current
             val image = embeddedImage(block.path?.let(images::get), 1280)
             if (image == null) {
-                if (block.alt != null) Text(block.alt.orEmpty(), color = EzColors.TextSecondary)
+                if (block.alt != null) Text(block.alt.orEmpty(), color = pageSecondary(EzColors.TextSecondary))
             } else {
                 Image(
                     image,
@@ -165,14 +165,14 @@ internal fun DocumentBlock(block: ContentBlock) {
         is ContentBlock.Entry -> {
             val context = LocalContext.current
             Row(
-                Modifier.fillMaxWidth().glassCard().padding(horizontal = 12.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().pageCard().padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Icon(if (block.isDirectory) EzIcons.Folder else EzIcons.Document, null, tint = EzColors.Primary)
                 Text(block.path, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 if (!block.isDirectory) {
-                    Text(Formatter.formatShortFileSize(context, block.size), color = EzColors.TextSecondary)
+                    Text(Formatter.formatShortFileSize(context, block.size), color = pageSecondary(EzColors.TextSecondary))
                 }
             }
         }

@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -72,6 +73,8 @@ internal fun ReaderImage(
     animating: Boolean = false,
     text: PdfTextSource? = null,
     marks: List<PdfBox> = emptyList(),
+    /** Filter for the page's pixels (the page style's dark or sepia tone); null draws the page as it is. */
+    colorFilter: ColorFilter? = null,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -208,7 +211,7 @@ internal fun ReaderImage(
             if (animated != null) {
                 AnimatedPicture(animated, animating, Modifier.fillMaxSize())
             } else {
-                Image(image, description, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                Image(image, description, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, colorFilter = colorFilter)
             }
             if (regions != null && animated == null && zoom > SHARP_ZOOM && viewport.width > 0) {
                 SharpTiles(

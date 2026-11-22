@@ -69,3 +69,7 @@ replay_pid*
 
 # FFmpeg built by scripts/build-ffmpeg.sh
 .cache/
+
+# Local-only build additions (optional modules kept outside the repository)
+private.settings.gradle.kts
+private.app.gradle.kts

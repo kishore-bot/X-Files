@@ -1,38 +1,18 @@
 package com.xfiles.feature.tools
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedSecureTextField
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,35 +21,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.xfiles.core.documents.PageImageDpiChoices
-import com.xfiles.core.documents.PageImageFormat
-import com.xfiles.core.documents.PdfImageQuality
-import com.xfiles.core.documents.PdfPaper
-import com.xfiles.core.documents.TextPdfAlignment
-import com.xfiles.core.documents.TextPdfFont
-import com.xfiles.core.documents.TextPdfStyle
-import com.xfiles.core.documents.TextPdfTemplate
-import com.xfiles.design.EzChip
+import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
-import com.xfiles.design.EzSectionPill
-import com.xfiles.design.EzShapes
+import com.xfiles.design.EzTextButton
 import com.xfiles.design.glassCard
-import com.xfiles.design.raised
 
-/** Create and convert tools. Stateless apart from text fields; every action goes to [ConvertViewModel]. */
+/** The pickers and the camera a convert tool can open. The route owns the system launchers; the content is stateless. */
+internal class ConvertLaunch(
+    val pickPictures: () -> Unit,
+    val pickPicture: () -> Unit,
+    val pickPdf: () -> Unit,
+    val scan: () -> Unit,
+)
+
+/**
+ * One create or convert tool on the shared skeleton: hero, pick, adjust, a sticky action bar that names the job, and the
+ * result. The tool's own sections live in ConvertPictures, ConvertText and ConvertPdfOutputs.
+ */
 @Composable
-internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modifier, picker: Boolean = true) {
+internal fun ConvertToolScreen(viewModel: ConvertViewModel, onBack: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val text = rememberTextFieldState()
     val position = rememberTextFieldState()
-    val password = remember(state.pdf) { androidx.compose.foundation.text.input.TextFieldState() }
+    val password = remember(state.pdf) { TextFieldState() }
     var scanning by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.openScanner) {
         if (state.openScanner) {
@@ -104,273 +83,213 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
     val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri -> uri?.let(viewModel::savePdf) }
     val saveText = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> uri?.let(viewModel::saveText) }
 
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (picker) {
-            ChipRow {
-                ConvertTool.entries.forEach { tool ->
-                    EzChip(tool.label, state.tool == tool, { viewModel.select(tool) })
-                }
-            }
-        }
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state.tool == ConvertTool.TextToPdf) {
-                item { TextPreviewCard(state, onPage = viewModel::showPreviewPage) }
-            }
-            item {
-                when (state.tool.input) {
-                    ToolInput.Pictures -> Button(onClick = {
-                        pictures.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }, enabled = !state.busy) { Text(if (state.pictures.isEmpty()) "Choose pictures" else "Add pictures") }
-                    ToolInput.Camera -> Button(onClick = { scanning = true }, enabled = !state.busy) {
-                        Text(if (state.pictures.isEmpty()) "Scan pages" else "Scan more pages")
-                    }
-                    ToolInput.Picture -> Button(onClick = {
-                        picture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }, enabled = !state.busy) { Text("Choose a picture") }
-                    ToolInput.Pdf -> Button(onClick = { pdf.launch(arrayOf("application/pdf")) }, enabled = !state.busy) {
-                        Text(if (state.pdf == null) "Choose a PDF" else "Choose another PDF")
-                    }
-                    ToolInput.PdfAndPictures -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { pdf.launch(arrayOf("application/pdf")) }, enabled = !state.busy) {
-                            Text(if (state.pdf == null) "Choose a PDF" else "Another PDF")
-                        }
-                        OutlinedButton(onClick = {
-                            pictures.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                        }, enabled = !state.busy) { Text(if (state.pictures.isEmpty()) "Choose pictures" else "Add pictures") }
-                    }
-                    ToolInput.Typing -> OutlinedTextField(
-                        state = text,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp),
-                        enabled = !state.busy,
-                        label = { Text("Text") },
-                    )
-                }
-            }
-            if (state.tool == ConvertTool.TextToPdf) {
-                item { TextStyleSection(state.textStyle, enabled = !state.busy, onChange = viewModel::setTextStyle) }
-            }
-            if (state.tool.input in setOf(ToolInput.Pictures, ToolInput.Camera, ToolInput.Picture, ToolInput.PdfAndPictures)) {
-                items(state.pictures, key = Uri::toString) { uri ->
-                    Row(Modifier.fillMaxWidth().glassCard().padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(EzIcons.Image, null, tint = MaterialTheme.colorScheme.primary)
-                        Text("Page ${state.pictures.indexOf(uri) + 1}", Modifier.weight(1f).padding(start = 8.dp))
-                        IconButton(onClick = { viewModel.removePicture(uri) }, enabled = !state.busy) { Icon(EzIcons.Close, "Remove page ${state.pictures.indexOf(uri) + 1}") }
-                    }
-                }
-            }
-            state.pdf?.takeIf { state.tool.input == ToolInput.Pdf || state.tool.input == ToolInput.PdfAndPictures }?.let { file ->
-                item {
-                    Row(Modifier.fillMaxWidth().glassCard().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(EzIcons.PdfFile, null, tint = MaterialTheme.colorScheme.primary)
-                        Text(file.name, Modifier.weight(1f).padding(start = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                if (state.tool == ConvertTool.AddPictures) {
-                    item {
-                        OutlinedTextField(
-                            state = position,
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !state.busy,
-                            lineLimits = androidx.compose.foundation.text.input.TextFieldLineLimits.SingleLine,
-                            label = { Text("Insert before page") },
-                            supportingText = { Text("Leave blank to add the pictures at the end.") },
-                        )
-                    }
-                }
-                if (state.tool == ConvertTool.PdfToPictures || state.tool == ConvertTool.AddPictures) {
-                    item { OutlinedSecureTextField(state = password, modifier = Modifier.fillMaxWidth(), enabled = !state.busy, label = { Text("Password, if needed") }) }
-                }
-            }
-            if (state.tool == ConvertTool.PdfToPictures) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        EzSectionPill("Format", compact = true)
-                        ChipRow {
-                            PageImageFormat.entries.forEach { format ->
-                                EzChip(format.label, state.pageImageFormat == format, { viewModel.setPageImageFormat(format) })
-                            }
-                        }
-                        EzSectionPill("Resolution", compact = true)
-                        ChipRow {
-                            PageImageDpiChoices.forEach { dpi ->
-                                EzChip("$dpi DPI", state.pageImageDpi == dpi, { viewModel.setPageImageDpi(dpi) })
-                            }
-                        }
-                    }
-                }
-            }
-            if (state.tool in setOf(ConvertTool.PicturesToPdf, ConvertTool.ScanToPdf, ConvertTool.TextToPdf, ConvertTool.AddPictures)) {
-                item {
-                    ChipRow {
-                        // Text takes its paper from the text style, so the chosen size is the one the preview shows.
-                        val selectedPaper = if (state.tool == ConvertTool.TextToPdf) state.textStyle.paper else state.paper
-                        val choosePaper: (PdfPaper?) -> Unit = { paper ->
-                            if (state.tool == ConvertTool.TextToPdf) {
-                                if (paper != null) viewModel.setTextStyle(state.textStyle.copy(paper = paper))
-                            } else {
-                                viewModel.setPaper(paper)
-                            }
-                        }
-                        if (state.tool != ConvertTool.TextToPdf) {
-                            EzChip("Fit picture", selectedPaper == null, { choosePaper(null) })
-                        }
-                        PdfPaper.entries.forEach { size ->
-                            EzChip(size.label, selectedPaper == size, { choosePaper(size) })
-                        }
-                    }
-                }
-            }
-            if (state.tool == ConvertTool.PicturesToPdf || state.tool == ConvertTool.ScanToPdf || state.tool == ConvertTool.AddPictures) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        EzSectionPill("Compression", compact = true)
-                        ChipRow {
-                            PdfImageQuality.entries.forEach { quality ->
-                                EzChip(quality.label, state.quality == quality, { viewModel.setQuality(quality) })
-                            }
-                        }
-                    }
-                }
-            }
-            if (state.tool == ConvertTool.PicturesToPdf || state.tool == ConvertTool.ScanToPdf) {
-                item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Searchable text")
-                            Text(
-                                "Reads each page on this phone and adds invisible text, so it can be searched and copied.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        Switch(checked = state.searchable, onCheckedChange = viewModel::setSearchable, enabled = !state.busy)
-                    }
-                }
-            }
-            state.error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
-            when (val output = state.output) {
-                is ConvertOutput.Pdf -> item {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Ready to save · ${output.pdf.pages} ${if (output.pdf.pages == 1) "page" else "pages"}")
-                        output.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    }
-                }
-                is ConvertOutput.Text -> item {
-                    SelectionContainer {
-                        Text(output.text.take(4000), Modifier.fillMaxWidth().glassCard().padding(12.dp), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                is ConvertOutput.Done -> item { Text(output.message) }
-                null -> Unit
-            }
-        }
-        if (state.busy) {
-            val fraction = state.progress
-            if (fraction == null) LinearProgressIndicator(Modifier.fillMaxWidth()) else LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-            TextButton(onClick = viewModel::cancel) { Text("Cancel") }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-            when (val output = state.output) {
-                is ConvertOutput.Pdf -> Button(onClick = { savePdf.launch(output.suggestedName) }, enabled = !state.busy) { Text("Save PDF") }
-                is ConvertOutput.Text -> Button(onClick = { saveText.launch(output.suggestedName) }, enabled = !state.busy) { Text("Save text") }
-                else -> {
-                    val ready = when (state.tool.input) {
-                        ToolInput.Pictures, ToolInput.Camera, ToolInput.Picture -> state.pictures.isNotEmpty()
-                        ToolInput.Pdf -> state.pdf != null
-                        ToolInput.PdfAndPictures -> state.pdf != null && state.pictures.isNotEmpty()
-                        ToolInput.Typing -> text.text.isNotBlank()
-                    }
-                    if (ready) {
-                        OutlinedButton(onClick = {
-                            when (state.tool) {
-                                ConvertTool.PdfToPictures -> folder.launch(null)
-                                ConvertTool.PdfToZip -> zip.launch(state.pdf?.name?.removeSuffix(".pdf").orEmpty() + ".zip")
-                                ConvertTool.AddPictures -> viewModel.run(
-                                    text = position.text.toString(),
-                                    password = password.text.toString().ifEmpty { null },
-                                )
-                                else -> viewModel.run(text = text.text.toString())
-                            }
-                        }, enabled = !state.busy) { Text(state.tool.label) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** A row of chips that scrolls sideways when it runs out of width. */
-@Composable
-private fun ChipRow(content: @Composable RowScope.() -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        content = content,
+    val launch = ConvertLaunch(
+        pickPictures = { pictures.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        pickPicture = { picture.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        pickPdf = { pdf.launch(arrayOf("application/pdf")) },
+        scan = { scanning = true },
     )
-}
+    val tool = state.tool
+    val output = state.output
+    val step = when {
+        output is ConvertOutput.Pdf || output is ConvertOutput.Text -> ToolStep.Save
+        !isReady(state, text.text.toString()) -> ToolStep.Pick
+        else -> ToolStep.Adjust
+    }
 
-/** The first page as the export will draw it, with paging when the text runs to more than one. */
-@Composable
-private fun TextPreviewCard(state: ConvertState, onPage: (Int) -> Unit) {
-    val paper = state.textStyle.paper
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(
-            Modifier
-                .fillMaxWidth(0.66f)
-                .aspectRatio(paper.width / paper.height)
-                .raised(EzShapes.Card)
-                .clip(EzShapes.Card),
-            contentAlignment = Alignment.Center,
-        ) {
-            val preview = state.preview
-            if (preview != null) {
-                Image(preview, "Preview of the page", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-            } else {
-                Text(
-                    state.previewError ?: "Type some text to see it here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(12.dp),
+    ToolScaffold(
+        title = tool.label,
+        backLabel = "Back to tools",
+        onBack = onBack,
+        bottomBar = {
+            if (output !is ConvertOutput.Done) {
+                ConvertBottomBar(
+                    state = state,
+                    typed = text.text.toString(),
+                    position = position.text.toString(),
+                    password = password.text.toString(),
+                    onRun = {
+                        when (tool) {
+                            ConvertTool.PdfToPictures -> folder.launch(null)
+                            ConvertTool.PdfToZip -> zip.launch(state.pdf?.name?.removeSuffix(".pdf").orEmpty() + ".zip")
+                            ConvertTool.AddPictures -> viewModel.run(
+                                text = position.text.toString(),
+                                password = password.text.toString().ifEmpty { null },
+                            )
+                            else -> viewModel.run(text = text.text.toString())
+                        }
+                    },
+                    onSave = { result ->
+                        when (result) {
+                            is ConvertOutput.Pdf -> savePdf.launch(result.suggestedName)
+                            is ConvertOutput.Text -> saveText.launch(result.suggestedName)
+                            else -> Unit
+                        }
+                    },
+                    onCancel = viewModel::cancel,
                 )
             }
-        }
-        if (state.previewPages > 1) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onPage(state.previewPage - 1) }, enabled = state.previewPage > 0) {
-                    Icon(EzIcons.ChevronLeft, "Previous page")
+        },
+    ) {
+        when (output) {
+            is ConvertOutput.Done -> item("done") {
+                ToolResult(
+                    title = output.message,
+                    outputName = tool.label,
+                    onDoAnother = {
+                        viewModel.close()
+                        viewModel.select(tool)
+                    },
+                )
+            }
+            else -> {
+                item("hero") {
+                    ToolHero(
+                        icon = toolIcon(tool),
+                        tint = toolTint(tool),
+                        title = tool.label,
+                        blurb = toolBlurb(tool),
+                        step = step,
+                    )
                 }
-                Text("Page ${state.previewPage + 1} of ${state.previewPages}", style = MaterialTheme.typography.bodyMedium)
-                IconButton(onClick = { onPage(state.previewPage + 1) }, enabled = state.previewPage < state.previewPages - 1) {
-                    Icon(EzIcons.ChevronRight, "Next page")
-                }
+                toolSections(
+                    state = state,
+                    viewModel = viewModel,
+                    launch = launch,
+                    text = text,
+                    position = position,
+                    password = password,
+                )
+                state.error?.let { message -> item("error") { ErrorLine(message) } }
+                output?.let { result -> item("result") { ConvertResultCard(result) } }
             }
         }
     }
 }
 
-/** Template, alignment and font for Text to PDF. Picking a template resets the overrides to its own. */
-@Composable
-private fun TextStyleSection(style: TextPdfStyle, enabled: Boolean, onChange: (TextPdfStyle) -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().glassCard().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        EzSectionPill("Template", compact = true)
-        ChipRow {
-            TextPdfTemplate.entries.forEach { template ->
-                EzChip(template.label, template == style.template, { if (enabled) onChange(TextPdfStyle.of(template, style.paper)) })
-            }
+/** The sections for the tool on screen, in its own order. */
+private fun LazyListScope.toolSections(
+    state: ConvertState,
+    viewModel: ConvertViewModel,
+    launch: ConvertLaunch,
+    text: TextFieldState,
+    position: TextFieldState,
+    password: TextFieldState,
+) {
+    when (state.tool) {
+        ConvertTool.PicturesToPdf, ConvertTool.ScanToPdf, ConvertTool.PictureToText -> {
+            pictureSections(state, viewModel, launch)
         }
-        EzSectionPill("Alignment", compact = true)
-        ChipRow {
-            TextPdfAlignment.entries.forEach { alignment ->
-                EzChip(alignment.label, alignment == style.alignment, { if (enabled) onChange(style.copy(alignment = alignment)) })
-            }
+        ConvertTool.AddPictures -> {
+            pdfSourceSection(state, viewModel, launch, password)
+            pictureSections(state, viewModel, launch)
+            item("position") { PositionField(position, enabled = !state.busy) }
         }
-        EzSectionPill("Font", compact = true)
-        ChipRow {
-            TextPdfFont.entries.forEach { font ->
-                EzChip(font.label, font == style.font, { if (enabled) onChange(style.copy(font = font)) })
-            }
+        ConvertTool.TextToPdf -> textSections(state, viewModel, text)
+        ConvertTool.PdfToPictures, ConvertTool.PdfToText, ConvertTool.PdfToZip -> {
+            pdfSourceSection(state, viewModel, launch, password)
+            pdfOutputSections(state, viewModel)
         }
     }
 }
+
+/** The bottom bar: the job's name, or the save of a finished result. Disabled until the tool has what it needs. */
+@Composable
+private fun ConvertBottomBar(
+    state: ConvertState,
+    typed: String,
+    position: String,
+    password: String,
+    onRun: () -> Unit,
+    onSave: (ConvertOutput) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val output = state.output
+    val pages = state.pictures.size
+    val label = when {
+        output is ConvertOutput.Pdf -> "Save PDF · ${output.pdf.pages} ${if (output.pdf.pages == 1) "page" else "pages"}"
+        output is ConvertOutput.Text -> "Save text"
+        else -> when (state.tool) {
+            ConvertTool.PicturesToPdf, ConvertTool.ScanToPdf -> if (pages == 0) "Add pictures" else "Make PDF · $pages ${if (pages == 1) "page" else "pages"}"
+            ConvertTool.TextToPdf -> "Make PDF"
+            ConvertTool.PictureToText -> "Read text"
+            ConvertTool.AddPictures -> "Add $pages ${if (pages == 1) "picture" else "pictures"} to PDF"
+            ConvertTool.PdfToPictures -> "Export pictures"
+            ConvertTool.PdfToText -> "Extract text"
+            ConvertTool.PdfToZip -> "Create ZIP"
+        }
+    }
+    val ready = isReady(state, typed)
+    Column(Modifier.fillMaxWidth()) {
+        if (state.busy) EzTextButton(text = "Cancel", onClick = onCancel, modifier = Modifier.fillMaxWidth())
+        ToolActionBar(
+            label = label,
+            enabled = !state.busy && (output != null || ready),
+            onClick = { if (output != null) onSave(output) else onRun() },
+            icon = toolIcon(state.tool),
+            running = state.busy,
+            progress = convertProgress(state.progress),
+        )
+    }
+}
+
+/** Whether the tool has its input: pictures, a PDF, or typed text. */
+internal fun isReady(state: ConvertState, typed: String): Boolean = when (state.tool.input) {
+    ToolInput.Pictures, ToolInput.Camera, ToolInput.Picture -> state.pictures.isNotEmpty()
+    ToolInput.Pdf -> state.pdf != null
+    ToolInput.PdfAndPictures -> state.pdf != null && state.pictures.isNotEmpty()
+    ToolInput.Typing -> typed.isNotBlank()
+}
+
+/** The result of a finished PDF or text, shown before it is saved. */
+@Composable
+private fun ConvertResultCard(output: ConvertOutput) {
+    when (output) {
+        is ConvertOutput.Pdf -> ReadyCard(
+            title = "Ready to save · ${output.pdf.pages} ${if (output.pdf.pages == 1) "page" else "pages"}",
+            notes = listOfNotNull(output.notice),
+        )
+        is ConvertOutput.Text -> SelectionContainer {
+            Text(
+                output.text.take(4000),
+                Modifier.fillMaxWidth().glassCard().padding(14.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = EzColors.Text,
+            )
+        }
+        is ConvertOutput.Done -> Unit
+    }
+}
+
+private fun toolIcon(tool: ConvertTool): ImageVector = when (tool) {
+    ConvertTool.PicturesToPdf, ConvertTool.AddPictures, ConvertTool.PdfToPictures -> EzIcons.Image
+    ConvertTool.ScanToPdf -> EzIcons.Camera
+    ConvertTool.TextToPdf, ConvertTool.PdfToText -> EzIcons.TextT
+    ConvertTool.PictureToText -> EzIcons.Search
+    ConvertTool.PdfToZip -> EzIcons.Archive
+}
+
+private fun toolTint(tool: ConvertTool): Color = when (tool) {
+    ConvertTool.PicturesToPdf -> Color(0xFF7A4A2E)
+    ConvertTool.ScanToPdf -> Color(0xFF373C47)
+    ConvertTool.TextToPdf -> Color(0xFF6832C1)
+    ConvertTool.PictureToText -> Color(0xFF2F3BB5)
+    ConvertTool.AddPictures -> Color(0xFF8E5BD9)
+    ConvertTool.PdfToPictures -> Color(0xFF2E9E6B)
+    ConvertTool.PdfToText -> Color(0xFF2F3BB5)
+    ConvertTool.PdfToZip -> Color(0xFFB0124F)
+}
+
+private fun toolBlurb(tool: ConvertTool): String = when (tool) {
+    ConvertTool.PicturesToPdf -> "Put pictures in order and make one PDF. Nothing leaves this phone."
+    ConvertTool.ScanToPdf -> "Scan paper pages with the camera, straighten them and make a PDF."
+    ConvertTool.TextToPdf -> "Type or paste text, pick a look, and see each page before you make the PDF."
+    ConvertTool.PictureToText -> "Read the words in a picture on this phone."
+    ConvertTool.AddPictures -> "Add pictures as pages to a PDF, before a page you name."
+    ConvertTool.PdfToPictures -> "Save every page of a PDF as a picture, in the folder you choose."
+    ConvertTool.PdfToText -> "Pull the text out of a PDF and save it as a text file."
+    ConvertTool.PdfToZip -> "Put a PDF's pages into a ZIP archive."
+}
+
+/** Progress as a fraction, or null while the job cannot tell yet. */
+internal fun convertProgress(progress: Float?): Float? = progress?.coerceIn(0f, 1f)

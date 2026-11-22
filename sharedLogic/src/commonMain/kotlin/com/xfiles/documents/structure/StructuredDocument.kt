@@ -2,6 +2,11 @@ package com.xfiles.documents.structure
 
 import com.xfiles.documents.book.BookManifest
 
+/** Reads one part of an open document by its container path. Each call reopens the file, so it may run after the reader closes. */
+fun interface DocumentParts {
+    suspend fun read(path: String): ByteArray
+}
+
 data class StructuredDocument(
     val info: DocumentInfo,
     val blocks: List<ContentBlock>,
@@ -9,6 +14,8 @@ data class StructuredDocument(
     val truncated: Boolean,
     /** An EPUB's contents, chapters and footnotes; null for every other format. */
     val book: BookManifest? = null,
+    /** Reads a part of the file on demand (large embedded media, full-size pictures); null when unavailable. */
+    val parts: DocumentParts? = null,
 ) {
     fun plainText(limit: Int = 32_000): String = buildString {
         fun addLine(value: String) {

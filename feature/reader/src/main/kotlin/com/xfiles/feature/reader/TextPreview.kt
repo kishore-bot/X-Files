@@ -43,16 +43,18 @@ internal fun TextPreview(
     preview: FilePreview.Text,
     showSearch: Boolean,
     onSearchClose: () -> Unit,
-    reading: ReadingTheme = ReadingTheme.Standard,
 ) {
     val content = preview.content
-    val palette = reading.palette() ?: if (LocalOriginalView.current) ORIGINAL_PALETTE else null
+    val palette = LocalPageStyle.current.colors()
+    val scale = LocalTextScale.current
+    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = MaterialTheme.typography.bodyLarge.fontSize * scale)
     val sections = remember(content) { textSections(content) }
     val search = rememberTextFieldState()
     val query = if (showSearch) search.text.toString() else ""
     val matches = remember(content, query) { textMatches(content, query) }
     var current by remember(content, query) { mutableIntStateOf(0) }
     val list = rememberLazyListState()
+    RegisterViewerScroll(list) { LazyScroll(list) }
     val selected = matches.getOrNull(current)
     LaunchedEffect(selected) {
         if (selected != null) {
@@ -115,7 +117,7 @@ internal fun TextPreview(
                         }
                     }
                     SelectionContainer {
-                        Text(styled, style = MaterialTheme.typography.bodyLarge, color = palette?.text ?: Color.Unspecified)
+                        Text(styled, style = bodyStyle, color = palette?.text ?: Color.Unspecified)
                     }
                 }
             }

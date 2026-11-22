@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -116,8 +117,10 @@ internal fun JsonTreePreview(root: JsonElement, raw: String) {
 private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String) -> Unit) {
     val rows = remember(root, expanded) { jsonRows(root, expanded).take(MAX_ROWS).toList() }
     val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp)
+    val jsonList = rememberLazyListState()
+    RegisterViewerScroll(jsonList) { LazyScroll(jsonList) }
     Box(Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), state = jsonList, contentPadding = PaddingValues(12.dp)) {
             items(rows, key = { it.path }) { row ->
                 val container = row.value is JsonObject || row.value is JsonArray
                 Text(
@@ -152,6 +155,7 @@ private fun JsonText(text: String) {
     val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
+    RegisterViewerScroll(vertical) { ColumnScroll(vertical) }
     Box(
         Modifier.fillMaxSize()
             .glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)

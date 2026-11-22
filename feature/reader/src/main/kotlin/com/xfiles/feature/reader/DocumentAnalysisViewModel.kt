@@ -1,16 +1,5 @@
 package com.xfiles.feature.reader
 
-import dagger.hilt.android.lifecycle.HiltViewModel
-import javax.inject.Inject
-import com.xfiles.core.documents.DocumentRepository
-import com.xfiles.core.documents.FileBookmark
-import com.xfiles.core.documents.FileEntry
-import com.xfiles.core.documents.FilePreview
-import com.xfiles.core.documents.PdfMatchBox
-import com.xfiles.core.documents.PdfPageText
-import kotlinx.coroutines.withTimeoutOrNull
-import com.xfiles.core.documents.PdfToolsRepository
-import com.xfiles.core.documents.PreparedPdf
 import android.graphics.Bitmap
 import android.graphics.drawable.AnimatedImageDrawable
 import android.net.Uri
@@ -19,45 +8,54 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.xfiles.documents.DocumentAnalysis
+import com.xfiles.core.documents.DocumentRepository
+import com.xfiles.core.documents.DocumentSharing
+import com.xfiles.core.documents.FileBookmark
+import com.xfiles.core.documents.FileEntry
+import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PdfPageText
 import com.xfiles.documents.PdfMarkup
-import com.xfiles.documents.structure.DocumentError
-import com.xfiles.documents.structure.DocumentException
+import com.xfiles.feature.reader.domain.BookmarkPlaceUseCase
+import com.xfiles.feature.reader.domain.DocumentSummaryUseCase
+import com.xfiles.feature.reader.domain.OpenDocumentUseCase
+import com.xfiles.feature.reader.domain.PdfPagesUseCase
+import com.xfiles.feature.reader.domain.SensitiveScanUseCase
+import com.xfiles.feature.reader.domain.pdfPartner
+import com.xfiles.tidy.SensitiveFindings
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.receiveAsFlow
-import com.xfiles.core.documents.ConversionRepository
-import com.xfiles.core.documents.UnprintableDocument
-import com.xfiles.core.documents.toTidyFile
-import com.xfiles.core.documents.DocumentSharing
-import com.xfiles.documents.DocumentKind
-import com.xfiles.tidy.SensitiveCheck
-import com.xfiles.tidy.SensitiveFindings
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.transformLatest
-
 import kotlinx.coroutines.launch
 
+/**
+ * The document reader's state holder. It opens and pages files and publishes immutable state; the work sits in
+ * `domain` use cases and in the PDF controllers (markup, find, print), which this class sequences.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class DocumentAnalysisViewModel @Inject constructor(
     private val documents: DocumentRepository,
-    private val tools: PdfToolsRepository,
-    private val conversions: ConversionRepository,
-    private val sensitiveCheck: SensitiveCheck,
     private val sharing: DocumentSharing,
     private val saved: SavedStateHandle,
     private val gallery: GalleryController,
     private val structured: com.xfiles.core.documents.OfficeDocumentEditor,
+    private val openDocument: OpenDocumentUseCase,
+    private val pdfPages: PdfPagesUseCase,
+    private val sensitiveScan: SensitiveScanUseCase,
+    private val summarize: DocumentSummaryUseCase,
+    private val bookmarkPlace: BookmarkPlaceUseCase,
+    private val markupController: PdfMarkupController,
+    private val findController: PdfFindController,
+    private val printController: DocumentPrintController,
 ) : ViewModel() {
     /** The gallery of the open picture: one picture, or the sorted pictures around it to swipe through. */
     val galleryState: StateFlow<GalleryUiState> = gallery.state
@@ -101,7 +99,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     /** Share original for the open file; false (shown as an error) when no app can take it. */
     fun share() {
         val ready = state.value as? ReaderState.Ready ?: return
-        if (!sharing.share(ready.file)) mutablePrinting.value = PrintStatus.Failed("No app on this phone can take this file.", "Can't share")
+        if (!sharing.share(ready.file)) printController.fail("No app on this phone can take this file.", "Can't share")
     }
 
     private val mutableState = MutableStateFlow<ReaderState?>(null)
@@ -110,110 +108,51 @@ class DocumentAnalysisViewModel @Inject constructor(
     /** Cell and slide editing for the open spreadsheet or presentation; see [StructuredEditSession]. */
     val structuredEdits = StructuredEditSession(structured, viewModelScope, ::showEditedPreview)
 
-    /**
-     * Kinds of sensitive number in the open document, checked in the background after it settles.
-     * transformLatest cancels the check for a document that was closed or replaced.
-     */
-    val sensitive: StateFlow<SensitiveFindings?> = state
-        .map { (it as? ReaderState.Ready)?.file }
-        .distinctUntilChanged()
-        .transformLatest { file ->
-            emit(null)
-            if (file == null || file.kind !in setOf(DocumentKind.Pdf, DocumentKind.Document, DocumentKind.Text)) return@transformLatest
-            delay(1_200) // Let the document draw first; opening is never slower.
-            val found = try {
-                sensitiveCheck.check(file.toTidyFile())
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Log.w("XfilesReader", "Sensitive check failed", error)
-                null
-            }
-            emit(found)
-        }
+    /** Kinds of sensitive number in the open document, checked in the background after it settles. */
+    val sensitive: StateFlow<SensitiveFindings?> = sensitiveScan(state.map { (it as? ReaderState.Ready)?.file })
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** One-shot print hand-offs: the screen owns the Activity the system print UI needs. */
-    private val printJobs = Channel<PrintJob>(Channel.BUFFERED)
-    val printRequests = printJobs.receiveAsFlow()
-    private val mutablePrinting = MutableStateFlow<PrintStatus>(PrintStatus.Idle)
-    val printing = mutablePrinting.asStateFlow()
-    private var printJob: Job? = null
+    val printRequests = printController.requests
+    val printing = printController.status
 
     fun print() {
         val ready = state.value as? ReaderState.Ready ?: return
-        if (printJob?.isActive == true) return
-        printJob = viewModelScope.launch {
-            mutablePrinting.value = PrintStatus.Preparing
-            mutablePrinting.value = try {
-                printJobs.send(PrintJob(conversions.printable(ready.file, pdfPassword), ready.file.name))
-                PrintStatus.Idle
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: UnprintableDocument) {
-                PrintStatus.Failed(error.message.orEmpty())
-            } catch (error: IllegalArgumentException) {
-                PrintStatus.Failed(error.message ?: "This document can't be printed.")
-            } catch (error: Exception) {
-                Log.w("XfilesReader", "Print preparation failed", error)
-                PrintStatus.Failed("This document could not be prepared for printing.")
-            }
-        }
+        printController.print(viewModelScope, ready.file, pdfPassword)
     }
 
-    fun dismissPrintError() {
-        mutablePrinting.value = PrintStatus.Idle
-    }
+    fun dismissPrintError() = printController.dismiss()
 
     private var readerJob: Job? = null
     private var summaryJob: Job? = null
-    private var pdfSearchJob: Job? = null
     private var pdfPassword: String? = null
     /** Archives left by [openNested], innermost last; [popNested] returns to them. */
     private val nestedReturn = ArrayDeque<String>()
-    /** Recently shown PDF pages (current, spread partner, neighbours to prefetch). Bounded; main-thread only. */
-    private val pdfPageCache = object : LinkedHashMap<Int, FilePreview.Pdf>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, FilePreview.Pdf>?): Boolean =
-            size > PDF_CACHED_PAGES
-    }
-    private var prefetchJob: Job? = null
-    private val mutablePdfFind = MutableStateFlow(PdfFindState())
-    val pdfFind = mutablePdfFind.asStateFlow()
-    private val mutableMarkup = MutableStateFlow(PdfMarkupState())
-    val markup = mutableMarkup.asStateFlow()
-    private var markupJob: Job? = null
+    val pdfFind = findController.state
+    val markup = markupController.state
+    /** The scroll viewer on screen (HTML or spreadsheet), registered by the viewer while composed. */
+    // Main-thread only: viewers register from composition effects, the assistant reads on the main thread.
+    private val scrollViewers = ArrayList<ViewerScroll>(2)
 
     fun open(uri: Uri, page: Int = 0, password: String? = null) {
         if (markup.value.saving) return
         discardMarkup()
         clearPdfSearch()
-        clearPdfPages()
+        pdfPages.clear()
         pdfPassword = null
         saved[OPEN_URI] = uri.toString()
         saved[OPEN_PAGE] = page
         startReader(ReaderState.Loading) {
-            val file = documents.describe(uri)
-            val preview = try {
-                documents.preview(file, page, password)
-            } catch (error: DocumentException) {
-                val reason = error.error
-                mutableState.value = when (reason) {
-                    is DocumentError.PasswordRequired -> ReaderState.Password(file, page, incorrect = false)
-                    is DocumentError.WrongPassword -> ReaderState.Password(file, page, incorrect = true)
-                    is DocumentError.UnsupportedEncryption -> ReaderState.Failure("This file uses an encryption format Xfiles cannot open.")
-                    is DocumentError.LimitExceeded -> ReaderState.Failure("This file exceeds the reader's size limit.")
-                    is DocumentError.Unsupported -> ReaderState.Ready(file, FilePreview.Unsupported)
-                    else -> ReaderState.ReadError
+            val opened = openDocument(uri, page, password)
+            if (opened is ReaderState.Ready) {
+                val preview = opened.preview
+                if (preview is FilePreview.Pdf) {
+                    pdfPassword = password
+                    pdfPages.remember(preview)
                 }
-                return@startReader
+                documents.remember(opened.file)
+                (preview as? FilePreview.Structured)?.let { structuredEdits.bind(opened.file.uri, opened.file.name, it) } ?: structuredEdits.close()
             }
-            if (preview is FilePreview.Pdf) {
-                pdfPassword = password
-                pdfPageCache[preview.page] = preview
-            }
-            documents.remember(file)
-            (preview as? FilePreview.Structured)?.let { structuredEdits.bind(file.uri, file.name, it) } ?: structuredEdits.close()
-            mutableState.value = ReaderState.Ready(file, preview)
+            mutableState.value = opened
         }
     }
 
@@ -238,13 +177,12 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     fun close() {
         if (markup.value.saving) return
-        printJob?.cancel()
+        printController.cancel()
         structuredEdits.close()
-        mutablePrinting.value = PrintStatus.Idle
         discardMarkup()
         pdfPassword = null
         clearPdfSearch()
-        clearPdfPages()
+        pdfPages.clear()
         readerJob?.cancel()
         summaryJob?.cancel()
         saved.remove<String>(OPEN_URI)
@@ -258,31 +196,31 @@ class DocumentAnalysisViewModel @Inject constructor(
         val pdf = ready.preview as? FilePreview.Pdf ?: return
         if (ready.turningPage || index !in 0 until pdf.pageCount || index == pdf.page) return
         startReader(ready.copy(turningPage = true, pageError = false), onError = ready.copy(pageError = true)) {
-            val page = pdfPage(ready.file, index)
+            val page = pdfPages.page(ready.file, index, pdfPassword)
             // The spread partner is read before the turn lands, so both pages appear together.
-            val facing = if (ready.twoPage) partnerOf(index, pdf.pageCount)?.let { pdfPage(ready.file, it) } else null
+            val facing = if (ready.twoPage) pdfPartner(index, pdf.pageCount)?.let { pdfPages.page(ready.file, it, pdfPassword) } else null
             val active = mutableState.value as? ReaderState.Ready ?: return@startReader
             mutableState.value = active.copy(preview = page, facing = facing, turningPage = false, pageError = false)
             saved[OPEN_PAGE] = index
-            prefetchPdf(ready.file, index, pdf.pageCount, ready.twoPage)
+            pdfPages.prefetch(viewModelScope, ready.file, index, pdf.pageCount, ready.twoPage, pdfPassword)
         }
     }
 
-    /** Two pages side by side, as pairs (0,1), (2,3)…: turns move by a pair. */
+    /** Two pages side by side, as pairs (0,1), (2,3)...: turns move by a pair. */
     fun setTwoPage(enabled: Boolean) {
         val ready = state.value as? ReaderState.Ready ?: return
         val pdf = ready.preview as? FilePreview.Pdf ?: return
         if (ready.turningPage || ready.twoPage == enabled) return
-        val partner = if (enabled) partnerOf(pdf.page, pdf.pageCount) else null
+        val partner = if (enabled) pdfPartner(pdf.page, pdf.pageCount) else null
         mutableState.value = ready.copy(twoPage = enabled, facing = null)
         if (!enabled) {
-            prefetchPdf(ready.file, pdf.page, pdf.pageCount, false)
+            pdfPages.prefetch(viewModelScope, ready.file, pdf.page, pdf.pageCount, false, pdfPassword)
             return
         }
         viewModelScope.launch {
             val facing = partner?.let {
                 try {
-                    pdfPage(ready.file, it)
+                    pdfPages.page(ready.file, it, pdfPassword)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -295,183 +233,75 @@ class DocumentAnalysisViewModel @Inject constructor(
                 mutableState.value = current.copy(facing = facing)
             }
         }
-        prefetchPdf(ready.file, pdf.page, pdf.pageCount, true)
+        pdfPages.prefetch(viewModelScope, ready.file, pdf.page, pdf.pageCount, true, pdfPassword)
+    }
+
+    /**
+     * One page of the open PDF at reading size, through the bitmap cache, for the continuous view. Null when the
+     * open file is not a PDF or the page cannot be rendered. Neighbours warm up on page changes (see changePage).
+     */
+    suspend fun pagePreview(index: Int): FilePreview.Pdf? {
+        val ready = state.value as? ReaderState.Ready ?: return null
+        if (ready.preview !is FilePreview.Pdf) return null
+        return try {
+            pdfPages.page(ready.file, index, pdfPassword)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("XfilesReader", "PDF page could not be rendered", error)
+            null
+        }
     }
 
     /** A page for the grid: small, cached and read off the main thread. Null when none can be read. */
     suspend fun pdfThumbnail(index: Int): Bitmap? {
         val ready = state.value as? ReaderState.Ready ?: return null
         if (ready.preview !is FilePreview.Pdf) return null
-        return try {
-            documents.pageThumbnail(ready.file, index, pdfPassword, GRID_THUMBNAIL_EDGE)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            Log.w("XfilesReader", "PDF thumbnail failed", error)
-            null
-        }
-    }
-
-    /** Page bitmap from the small cache, or rendered once and kept while recent. */
-    private suspend fun pdfPage(file: FileEntry, index: Int): FilePreview.Pdf {
-        pdfPageCache[index]?.let { return it }
-        return documents.page(file, index, pdfPassword).also { pdfPageCache[index] = it }
-    }
-
-    /** Warms the neighbours of what is shown, so the next turn is already rendered. Failures are silent. */
-    private fun prefetchPdf(file: FileEntry, page: Int, count: Int, twoPage: Boolean) {
-        prefetchJob?.cancel()
-        val targets = if (twoPage) {
-            val start = page - page % 2
-            listOf(start + 2, start + 3, start - 2, start - 1)
-        } else {
-            listOf(page + 1, page - 1)
-        }
-        prefetchJob = viewModelScope.launch {
-            for (index in targets) {
-                if (index !in 0 until count || pdfPageCache.containsKey(index)) continue
-                try {
-                    pdfPage(file, index)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    Log.w("XfilesReader", "PDF prefetch skipped", error)
-                }
-            }
-        }
-    }
-
-    private fun clearPdfPages() {
-        prefetchJob?.cancel()
-        prefetchJob = null
-        pdfPageCache.clear()
-    }
-
-    fun findPdf(query: String) {
-        clearPdfSearch()
-        val active = state.value as? ReaderState.Ready ?: return
-        val pdf = active.preview as? FilePreview.Pdf ?: return
-        if (query.isBlank() || !pdf.searchable) return
-        val password = pdfPassword
-        mutablePdfFind.value = PdfFindState(loading = true)
-        pdfSearchJob = viewModelScope.launch {
-            delay(180)
-            try {
-                val result = documents.searchPdf(active.file, query, password)
-                val matches = result.pages.flatMap { page ->
-                    page.matches.map { boxes -> PdfFindMatch(page.page, boxes) }
-                }
-                mutablePdfFind.value = PdfFindState(matches = matches, truncated = result.truncated)
-                matches.firstOrNull()?.let { changePage(it.page) }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Log.w("XfilesReader", "PDF search failed", error)
-                mutablePdfFind.value = PdfFindState(error = true)
-            }
-        }
-    }
-
-    fun movePdfMatch(direction: Int) {
-        val current = mutablePdfFind.value
-        val active = state.value as? ReaderState.Ready ?: return
-        if (active.turningPage) return
-        val index = current.selected + direction
-        val match = current.matches.getOrNull(index) ?: return
-        mutablePdfFind.value = current.copy(selected = index)
-        changePage(match.page)
-    }
-
-    fun clearPdfSearch() {
-        pdfSearchJob?.cancel()
-        pdfSearchJob = null
-        mutablePdfFind.value = PdfFindState()
-    }
-
-    fun addMarkup(mark: PdfMarkup) {
-        val current = markup.value
-        if (current.working) return
-        if (current.marks.size >= 256) {
-            mutableMarkup.value = current.copy(error = "Save the current annotations before adding more.")
-            return
-        }
-        current.output?.file?.delete()
-        mutableMarkup.value = PdfMarkupState(marks = current.marks + mark)
-    }
-
-    fun undoMarkup() {
-        val current = markup.value
-        if (current.working || current.marks.isEmpty()) return
-        current.output?.file?.delete()
-        mutableMarkup.value = PdfMarkupState(marks = current.marks.dropLast(1))
-    }
-
-    fun prepareMarkup() {
-        val active = state.value as? ReaderState.Ready ?: return
-        if (active.preview !is FilePreview.Pdf) return
-        val current = markup.value
-        if (current.working || current.marks.isEmpty() || current.output != null) return
-        mutableMarkup.value = current.copy(working = true, error = null)
-        markupJob = viewModelScope.launch {
-            try {
-                val output = tools.annotate(active.file.uri, current.marks)
-                mutableMarkup.value = current.copy(output = output, error = null)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: IllegalArgumentException) {
-                mutableMarkup.value = current.copy(error = error.message ?: "These annotations could not be prepared.")
-            } catch (error: Exception) {
-                Log.w("XfilesReader", "Could not annotate PDF", error)
-                mutableMarkup.value = current.copy(error = "These annotations could not be saved to a PDF copy.")
-            } catch (error: LinkageError) {
-                Log.e("XfilesReader", "Rust PDF markup unavailable", error)
-                mutableMarkup.value = current.copy(error = "The PDF engine is unavailable on this device.")
-            }
-        }
-    }
-
-    fun saveMarkup(uri: Uri) {
-        val current = markup.value
-        val output = current.output ?: return
-        if (current.working) return
-        mutableMarkup.value = current.copy(working = true, saving = true, error = null)
-        markupJob = viewModelScope.launch {
-            try {
-                tools.save(output, uri)
-                output.file.delete()
-                mutableMarkup.value = PdfMarkupState(saved = true)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Log.w("XfilesReader", "Could not export annotated PDF", error)
-                mutableMarkup.value = current.copy(error = "The annotated PDF could not be saved here.")
-            }
-        }
-    }
-
-    private fun discardMarkup() {
-        markupJob?.cancel()
-        markup.value.output?.file?.delete()
-        mutableMarkup.value = PdfMarkupState()
-    }
-
-    override fun onCleared() {
-        markup.value.output?.file?.delete()
-        super.onCleared()
+        return pdfPages.thumbnail(ready.file, index, pdfPassword)
     }
 
     /** Character geometry of PDF page [index] of the open file, for text selection; null when it cannot be read. */
     suspend fun pdfText(index: Int): PdfPageText? {
         val ready = state.value as? ReaderState.Ready ?: return null
         if (ready.preview !is FilePreview.Pdf) return null
-        return try {
-            documents.pageText(ready.file, index, pdfPassword)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            Log.w("XfilesReader", "PDF text could not be read", error)
-            null
+        return pdfPages.text(ready.file, index, pdfPassword)
+    }
+
+    fun findPdf(query: String) {
+        val active = state.value as? ReaderState.Ready ?: run { findController.clear(); return }
+        val pdf = active.preview as? FilePreview.Pdf
+        if (pdf == null || query.isBlank() || !pdf.searchable) {
+            findController.clear()
+            return
         }
+        findController.start(viewModelScope, active.file, query, pdfPassword) { page -> changePage(page) }
+    }
+
+    fun movePdfMatch(direction: Int) {
+        val active = state.value as? ReaderState.Ready ?: return
+        if (active.turningPage) return
+        findController.move(direction) { page -> changePage(page) }
+    }
+
+    fun clearPdfSearch() = findController.clear()
+
+    fun addMarkup(mark: PdfMarkup) = markupController.add(mark)
+
+    fun undoMarkup() = markupController.undo()
+
+    fun prepareMarkup() {
+        val active = state.value as? ReaderState.Ready ?: return
+        if (active.preview !is FilePreview.Pdf) return
+        markupController.prepare(viewModelScope, active.file.uri)
+    }
+
+    fun saveMarkup(uri: Uri) = markupController.save(viewModelScope, uri)
+
+    private fun discardMarkup() = markupController.discard()
+
+    override fun onCleared() {
+        markupController.release()
+        super.onCleared()
     }
 
     fun toggleBookmark() {
@@ -480,8 +310,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         val password = pdfPassword
         viewModelScope.launch {
             // The place is best effort: a bookmark saves at once, and waits at most briefly for the page's text.
-            val place = pdf?.let { withTimeoutOrNull(BOOKMARK_PLACE_TIMEOUT_MS) { pdfText(it.page, ready, password) } }
-                ?.let(::placeOf)
+            val place = pdf?.let { bookmarkPlace(ready.file, it.page, password) }
             val bookmark = FileBookmark(ready.file, pdf?.page, place?.first, place?.second)
             val saved = documents.toggleBookmark(bookmark)
             val current = mutableState.value as? ReaderState.Ready ?: return@launch
@@ -506,8 +335,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         val password = pdfPassword
         summaryJob = viewModelScope.launch {
             val result = try {
-                val text = shown ?: documents.extractText(ready.file, 32_000, password)
-                if (text.isBlank()) SummaryState.Error else SummaryState.Ready(documents.summary(text))
+                summarize(ready.file, shown, password)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -528,6 +356,19 @@ class DocumentAnalysisViewModel @Inject constructor(
         val ready = state.value as? ReaderState.Ready ?: return
         mutableState.value = ready.copy(summary = null)
     }
+
+    /**
+     * Registers the scroll viewer on screen; the returned function unregisters it, but only while it is still the
+     * current one. The assistant reads [currentScrollViewer] when it runs a scroll command.
+     */
+    fun attachViewerScroll(scroll: ViewerScroll): () -> Unit {
+        scrollViewers.add(scroll)
+        return { scrollViewers.removeAll { it === scroll } }
+    }
+
+    /** The most recently shown scroll viewer still on screen, or null when the open file has none (pictures). */
+    val currentScrollViewer: ViewerScroll?
+        get() = scrollViewers.lastOrNull()
 
     private fun startReader(
         initial: ReaderState,
@@ -573,83 +414,6 @@ class DocumentAnalysisViewModel @Inject constructor(
     private companion object {
         const val OPEN_URI = "reader.openUri"
         const val OPEN_PAGE = "reader.openPage"
-        const val PDF_CACHED_PAGES = 6
-        const val GRID_THUMBNAIL_EDGE = 240
         const val REMEMBER_DELAY_MS = 1_000L
-        const val BOOKMARK_PLACE_TIMEOUT_MS = 1_500L
-        const val BOOKMARK_LABEL_CHARS = 40
-        const val BOOKMARK_SNIPPET_CHARS = 80
-        val WHITESPACE = Regex("\\s+")
     }
-
-    /** The text of page [index] for a bookmark, or null when it is not read in time. */
-    private suspend fun pdfText(index: Int, ready: ReaderState.Ready, password: String?): PdfPageText? =
-        try {
-            documents.pageText(ready.file, index, password)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            Log.w("XfilesReader", "Bookmark place could not be read", error)
-            null
-        }
-
-    /**
-     * A bookmark's place: the page's first line as its label, and the words after it as the snippet. The page is
-     * read in reading order, so this is its top; the page is not tracked by the visible region.
-     */
-    private fun placeOf(text: PdfPageText): Pair<String?, String?> {
-        val lines = text.text.lineSequence().map { WHITESPACE.replace(it, " ").trim() }.filter { it.isNotEmpty() }.toList()
-        val label = lines.firstOrNull()?.take(BOOKMARK_LABEL_CHARS)?.ifBlank { null }
-        val snippet = lines.drop(1).joinToString(" ").ifBlank { lines.firstOrNull().orEmpty() }
-            .take(BOOKMARK_SNIPPET_CHARS).ifBlank { null }
-        return label to snippet
-    }
-
-    /** Index of the page that shares a spread with [page] (pairs 0-1, 2-3…), or null when there is none. */
-    private fun partnerOf(page: Int, count: Int): Int? =
-        (if (page % 2 == 0) page + 1 else page - 1).takeIf { it in 0 until count }
 }
-
-sealed interface ReaderState {
-    data object Loading : ReaderState
-    data object ReadError : ReaderState
-    data object EngineUnavailable : ReaderState
-    data class Password(val file: FileEntry, val initialPage: Int, val incorrect: Boolean) : ReaderState
-    data class Failure(val message: String) : ReaderState
-
-    data class Ready(
-        val file: FileEntry,
-        val preview: FilePreview,
-        val turningPage: Boolean = false,
-        val pageError: Boolean = false,
-        val bookmarkError: Boolean = false,
-        val summary: SummaryState? = null,
-        /** Two-page view: the spread's other page (null for single view, or when there is none). */
-        val twoPage: Boolean = false,
-        val facing: FilePreview.Pdf? = null,
-    ) : ReaderState
-}
-
-sealed interface SummaryState {
-    data object Loading : SummaryState
-    data object Error : SummaryState
-    data class Ready(val analysis: DocumentAnalysis) : SummaryState
-}
-
-data class PdfFindMatch(val page: Int, val boxes: List<PdfMatchBox>)
-data class PdfFindState(
-    val matches: List<PdfFindMatch> = emptyList(),
-    val selected: Int = 0,
-    val loading: Boolean = false,
-    val truncated: Boolean = false,
-    val error: Boolean = false,
-)
-
-data class PdfMarkupState(
-    val marks: List<PdfMarkup> = emptyList(),
-    val output: PreparedPdf? = null,
-    val working: Boolean = false,
-    val saving: Boolean = false,
-    val saved: Boolean = false,
-    val error: String? = null,
-)

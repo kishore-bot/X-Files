@@ -41,6 +41,7 @@ internal fun BookScroll(
     onBlock: (Int) -> Unit,
 ) {
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initial.coerceIn(0, blocks.lastIndex))
+    RegisterViewerScroll(listState) { LazyScroll(listState) }
     LaunchedEffect(jumpTo) {
         val target = jumpTo ?: return@LaunchedEffect
         listState.scrollToItem(target.coerceIn(0, blocks.lastIndex))

@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -53,9 +54,9 @@ internal fun isSourceCode(name: String): Boolean {
  * "Collapse all" open or fold every region at once.
  */
 @Composable
-internal fun CodePreview(text: String, fileName: String, reading: ReadingTheme = ReadingTheme.Standard) {
+internal fun CodePreview(text: String, fileName: String) {
     val extension = fileName.substringAfterLast('.', "").lowercase()
-    val palette = reading.palette() ?: if (LocalOriginalView.current) ORIGINAL_PALETTE else null
+    val palette = LocalPageStyle.current.colors()
     val dark = palette?.syntaxDark ?: isSystemInDarkTheme()
     val haptics = rememberHaptics()
     val lines = remember(text) { text.split('\n') }
@@ -75,7 +76,8 @@ internal fun CodePreview(text: String, fileName: String, reading: ReadingTheme =
         }.toList()
     }
     val gutter = (lines.size.toString().length * 9 + 12).dp
-    val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
+    val scale = LocalTextScale.current
+    val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp * scale, lineHeight = 19.sp * scale)
     val pageModifier = if (palette == null) {
         Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
     } else {
@@ -100,8 +102,10 @@ internal fun CodePreview(text: String, fileName: String, reading: ReadingTheme =
                     }) { Text("Collapse all") }
                 }
             }
+            val codeList = rememberLazyListState()
+            RegisterViewerScroll(codeList) { LazyScroll(codeList) }
             SelectionContainer(Modifier.weight(1f)) {
-                LazyColumn(Modifier.horizontalScroll(rememberScrollState()), contentPadding = PaddingValues(vertical = 12.dp)) {
+                LazyColumn(state = codeList, modifier = Modifier.horizontalScroll(rememberScrollState()), contentPadding = PaddingValues(vertical = 12.dp)) {
                     items(visible, key = { it }) { index ->
                         val fold: CodeFold? = folds[index]
                         val isCollapsed = index in collapsed

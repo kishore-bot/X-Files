@@ -19,3 +19,5 @@ include(":androidApp", ":sharedLogic", ":documentEngine", ":core:designsystem", 
 include(":baselineprofile")
 // FFmpeg audio decoders for the video player (LGPL libraries built by scripts/build-ffmpeg.sh).
 include(":ffmpeg")
+// Optional local-only modules; the app builds the same without this file.
+file("private.settings.gradle.kts").takeIf { it.exists() }?.let { apply(from = it) }

@@ -17,7 +17,8 @@ use crate::zip::{EntryReader, ZipArchive};
 /// pathological single paragraph cannot grow without bound in memory.
 pub(crate) const MAX_PENDING_TEXT: usize = 256 * 1024;
 
-const MAX_PICTURE_BYTES: u64 = 16 * 1024 * 1024;
+/// High-resolution photos and scans are often well over 16 MB.
+const MAX_PICTURE_BYTES: u64 = 64 * 1024 * 1024;
 const PICTURE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 
 /// Embedded audio and video are larger than pictures; the app plays them from a temporary file.

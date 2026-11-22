@@ -1,4 +1,4 @@
-package com.xfiles.feature.reader
+﻿package com.xfiles.feature.reader
 
 import com.xfiles.design.rememberHaptics
 import androidx.compose.foundation.background
@@ -31,6 +31,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -132,9 +133,14 @@ internal fun SpreadsheetPreview(
             FilterChip(selected = freezeRow, onClick = { haptics.toggle(!freezeRow); freezeRow = !freezeRow }, label = { Text("Freeze first row") })
             FilterChip(selected = freezeColumn, onClick = { haptics.toggle(!freezeColumn); freezeColumn = !freezeColumn }, label = { Text("Freeze first column") })
         }
-        if (document.truncated) Text("Showing the rows within the preview limit.", color = EzColors.TextSecondary)
+        if (document.truncated) Text("Showing the rows within the preview limit.", color = pageSecondary(EzColors.TextSecondary))
         key(sheet) {
-            SheetGrid(sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
+            val supplied = SheetGrids.renderer
+            if (supplied != null) {
+                SuppliedSheetGrid(supplied, sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
+            } else {
+                SheetGrid(sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
+            }
         }
     }
 }
@@ -167,6 +173,12 @@ private fun ColumnScope.SheetGrid(
     val body = remember(sheet, frozenRows) { sheet.rows.drop(frozenRows) }
     var editing by remember { mutableStateOf<EditTarget?>(null) }
     LaunchedEffect(start) { horizontal.scrollTo(0) }
+    // The assistant's scroll commands move the rows of this sheet while it is on screen.
+    val registerScroll = LocalViewerScroll.current
+    DisposableEffect(vertical, registerScroll) {
+        val unregister = registerScroll(LazyScroll(vertical))
+        onDispose { unregister() }
+    }
 
     if (scrollable > COLUMNS_PER_VIEW) {
         Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -181,7 +193,7 @@ private fun ColumnScope.SheetGrid(
     }
 
     // Column letters, pinned to the top.
-    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Row(Modifier.fillMaxWidth().background(pageVariant(MaterialTheme.colorScheme.surfaceVariant))) {
         Row(Modifier.width(leftWidth)) {
             GridLabel("", LABEL_WIDTH)
             for (column in 0 until frozenColumns) GridLabel(columnName(column), CELL_WIDTH)
@@ -243,7 +255,7 @@ private fun ColumnScope.SheetGrid(
 }
 
 /** A cell chosen for editing. [row] is the 1-based sheet row shown in the grid; the editor takes 0-based. */
-private data class EditTarget(val sheet: String, val row: Int, val column: Int, val displayed: String)
+internal data class EditTarget(val sheet: String, val row: Int, val column: Int, val displayed: String)
 
 @Composable
 private fun GridRow(
@@ -260,7 +272,7 @@ private fun GridRow(
     val number = row.row ?: fallback
     val wrap = row.styles.any { palette[it]?.wrap == true }
     val height = if (wrap) 58 else 34
-    Row(Modifier.background(MaterialTheme.colorScheme.surface)) {
+    Row(Modifier.background(pageSurface(MaterialTheme.colorScheme.surface))) {
         if (showLabel) GridLabel(number.toString(), LABEL_WIDTH, height)
         for (column in columns) {
             val text = row.cells.getOrNull(column).orEmpty()
@@ -272,7 +284,7 @@ private fun GridRow(
 }
 
 @Composable
-private fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: () -> Unit, onSaved: () -> Unit) {
+internal fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: () -> Unit, onSaved: () -> Unit) {
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
     val reference = "${columnName(target.column)}${target.row}"
@@ -353,19 +365,19 @@ private fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: ()
 }
 
 @Composable
-private fun GridLabel(label: String, width: Int, height: Int = 34) {
+internal fun GridLabel(label: String, width: Int, height: Int = 34) {
     Box(
         Modifier.width(width.dp).height(height.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(pageVariant(MaterialTheme.colorScheme.surfaceVariant))
             .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
+        Text(label, color = pageSecondary(EzColors.TextSecondary), style = MaterialTheme.typography.labelMedium)
     }
 }
 
 @Composable
-private fun SpreadsheetCell(
+internal fun SpreadsheetCell(
     value: String,
     look: CellLook?,
     spans: List<TextSpan>,
@@ -380,11 +392,11 @@ private fun SpreadsheetCell(
         else -> if (value.toDoubleOrNull() != null) TextAlign.End else TextAlign.Start
     }
     val fill = look?.fill?.let(::Color)
-        ?: if (header) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
+        ?: if (header) pageVariant(MaterialTheme.colorScheme.surfaceVariant) else Color.Transparent
     val foreground = look?.color?.let(::Color) ?: if (look?.fill != null) {
         if (fill.luminance() > 0.38f) Color.Black else Color.White
     } else {
-        EzColors.Text
+        pageText(EzColors.Text)
     }
     val underline = buildList {
         if (look?.underline == true) add(TextDecoration.Underline)
@@ -414,10 +426,10 @@ private fun SpreadsheetCell(
 }
 
 private const val COLUMNS_PER_VIEW = 16
-private const val LABEL_WIDTH = 48
-private const val CELL_WIDTH = 128
+internal const val LABEL_WIDTH = 48
+internal const val CELL_WIDTH = 128
 
-private data class SheetPreview(
+internal data class SheetPreview(
     val title: String,
     val rows: List<ContentBlock.TableRow>,
     val runs: Map<Pair<Int, Int>, List<TextSpan>>,
@@ -454,7 +466,7 @@ private fun toWorkbook(blocks: List<ContentBlock>): WorkbookPreview {
     return WorkbookPreview(sheets, palette)
 }
 
-private fun columnName(index: Int): String = buildString {
+internal fun columnName(index: Int): String = buildString {
     var column = index + 1
     while (column > 0) {
         column--

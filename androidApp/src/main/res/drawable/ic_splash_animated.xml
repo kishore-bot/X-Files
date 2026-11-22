@@ -1,61 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- System splash icon: the mark draws itself in (stroke trim), then scales up with a settle. ~600 ms. -->
+<!--
+  System splash icon, under 1000 ms:
+  - 0-400 ms: Fily's aura fades in.
+  - 0-520 ms: Fily rises into place with a soft overshoot, then settles (520-1000 ms).
+  - 260-640 ms: the crimson X pops in.
+  - 300-800 ms: the wings flap twice.
+  - 720-880 ms: Fily blinks.
+-->
 <animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:drawable="@drawable/ic_splash_mark">
-    <target android:name="body">
-        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+    <target android:name="aura">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="fillAlpha" android:duration="400"
+                android:valueFrom="0" android:valueTo="1"
+                android:interpolator="@android:interpolator/fast_out_slow_in" />
+        </aapt:attr>
+    </target>
+    <target android:name="fily">
+        <aapt:attr name="android:animation">
             <set android:ordering="sequentially">
-                <objectAnimator
-                    android:propertyName="trimPathEnd"
-                    android:duration="380"
-                    android:valueFrom="0"
-                    android:valueTo="1"
+                <objectAnimator android:propertyName="translateY" android:duration="520"
+                    android:valueFrom="48" android:valueTo="-8" android:valueType="floatType"
+                    android:interpolator="@android:interpolator/overshoot" />
+                <objectAnimator android:propertyName="translateY" android:duration="480"
+                    android:valueFrom="-8" android:valueTo="0" android:valueType="floatType"
                     android:interpolator="@android:interpolator/fast_out_slow_in" />
             </set>
         </aapt:attr>
     </target>
-    <target android:name="fold">
-        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
-            <set android:ordering="sequentially">
-                <objectAnimator
-                    android:propertyName="trimPathEnd"
-                    android:duration="200"
-                    android:startOffset="300"
-                    android:valueFrom="0"
-                    android:valueTo="1"
-                    android:interpolator="@android:interpolator/linear" />
-            </set>
-        </aapt:attr>
-    </target>
-    <target android:name="cross">
-        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
-            <set android:ordering="sequentially">
-                <objectAnimator
-                    android:propertyName="trimPathEnd"
-                    android:duration="220"
-                    android:startOffset="400"
-                    android:valueFrom="0"
-                    android:valueTo="1"
-                    android:interpolator="@android:interpolator/fast_out_slow_in" />
-            </set>
-        </aapt:attr>
-    </target>
-    <target android:name="mark">
-        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+    <target android:name="xmark">
+        <aapt:attr name="android:animation">
             <set android:ordering="together">
-                <objectAnimator
-                    android:propertyName="scaleX"
-                    android:duration="600"
-                    android:valueFrom="0.8"
-                    android:valueTo="1"
+                <objectAnimator android:propertyName="scaleX" android:startOffset="260" android:duration="380"
+                    android:valueFrom="0.4" android:valueTo="1" android:valueType="floatType"
                     android:interpolator="@android:interpolator/overshoot" />
-                <objectAnimator
-                    android:propertyName="scaleY"
-                    android:duration="600"
-                    android:valueFrom="0.8"
-                    android:valueTo="1"
+                <objectAnimator android:propertyName="scaleY" android:startOffset="260" android:duration="380"
+                    android:valueFrom="0.4" android:valueTo="1" android:valueType="floatType"
                     android:interpolator="@android:interpolator/overshoot" />
             </set>
+        </aapt:attr>
+    </target>
+    <target android:name="wingLeft">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="rotation" android:startOffset="300" android:duration="250"
+                android:repeatCount="1" android:repeatMode="reverse"
+                android:valueFrom="0" android:valueTo="-16" android:valueType="floatType"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+    <target android:name="wingRight">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="rotation" android:startOffset="300" android:duration="250"
+                android:repeatCount="1" android:repeatMode="reverse"
+                android:valueFrom="0" android:valueTo="16" android:valueType="floatType"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+    <target android:name="eyes">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="scaleY" android:startOffset="720" android:duration="80"
+                android:repeatCount="1" android:repeatMode="reverse"
+                android:valueFrom="1" android:valueTo="0.1" android:valueType="floatType" />
         </aapt:attr>
     </target>
 </animated-vector>

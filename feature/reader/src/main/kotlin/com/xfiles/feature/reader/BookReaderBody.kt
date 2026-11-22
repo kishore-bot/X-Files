@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,18 +29,21 @@ import kotlin.math.roundToInt
 
 /** What the bars' buttons do. Each one opens a sheet or goes back; the screen decides how. */
 internal class BookChromeActions(
+    val onClose: () -> Unit,
     val onSearch: () -> Unit,
     val onContents: () -> Unit,
-    val onNotebook: () -> Unit,
     val onBookmark: () -> Unit,
     val onSettings: () -> Unit,
     val onBack: () -> Unit,
+    /** Opens Fily from the book's top bar; null hides the mic. */
+    val onFily: (() -> Unit)? = null,
 )
 
 /**
  * The reader's surface: the book in the chosen mode, full screen, with the bars floating over its
- * top and bottom insets. The tap zones sit here: in paged mode the left and right thirds turn the
- * page and the centre toggles the bars; in scroll mode any tap that nothing else took toggles them.
+ * top and bottom insets. With the bars away, the chapter sits above the text and the pages left
+ * below it. The tap zones sit here: in paged mode the left and right thirds turn the page and the
+ * centre toggles the bars; in scroll mode any tap that nothing else took toggles them.
  */
 @Composable
 internal fun BookReaderBody(
@@ -143,8 +146,19 @@ internal fun BookReaderBody(
         val pageText = pageInChapter?.let { info ->
             info.total?.let { "Page ${info.page} of $it in chapter" } ?: "Page ${info.page} in chapter"
         }
+        // "N pages left in chapter", as the EzFiles reader counts them; empty when the layout is not paged.
+        val leftText = pageInChapter?.let { info ->
+            val total = info.total
+            when {
+                total == null -> "Page ${info.page} in chapter"
+                info.page >= total -> "Last page in chapter"
+                total - info.page == 1 -> "1 page left in chapter"
+                else -> "${total - info.page} pages left in chapter"
+            }
+        }.orEmpty()
         val percent = (progress.fraction(current, blocks.size) * 100f).roundToInt()
         val chapterTitle = manifest?.let { it.chapterTitle(it.chapterIndexAt(current)) }?.takeIf { it.isNotBlank() } ?: title
+        val faint = palette.text.copy(alpha = 0.55f)
 
         AnimatedVisibility(
             visible = state.chromeVisible,
@@ -155,14 +169,16 @@ internal fun BookReaderBody(
             BookTopBar(
                 title = title,
                 bookmarked = bookmarked,
-                tint = palette.text,
+                onClose = chrome.onClose,
                 onSearch = chrome.onSearch,
                 onContents = chrome.onContents,
-                onNotebook = chrome.onNotebook,
-                onBookmark = chrome.onBookmark,
                 onSettings = chrome.onSettings,
+                onBookmark = chrome.onBookmark,
+                onHide = { vm.onEvent(BookEvent.ToggleChrome) },
+                onFily = chrome.onFily,
             )
         }
+        if (!state.chromeVisible) BookChapterLine(chapterTitle, faint, Modifier.align(Alignment.TopCenter))
         AnimatedVisibility(
             visible = state.chromeVisible,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -174,7 +190,6 @@ internal fun BookReaderBody(
                 fraction = progress.fraction(current, blocks.size),
                 ticks = ticks,
                 footer = bookFooter(pageText, percent),
-                tint = palette.text,
                 onScrub = { fraction ->
                     haptics.segment()
                     onJump(progress.blockAt(fraction, blocks.size))
@@ -183,13 +198,16 @@ internal fun BookReaderBody(
                 onNext = if (paged) ({ nav.step(1) }) else null,
             )
         }
+        if (!state.chromeVisible) {
+            BookPageFooter(leftText, "$percent%", faint, Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+        }
         AnimatedVisibility(
             visible = state.backStack.isNotEmpty(),
-            modifier = Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = BookInsetTop + 8.dp),
+            modifier = Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = BookInsetTop),
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-            BookBackPill(tint = palette.text, onBack = chrome.onBack)
+            BookBackPill(onBack = chrome.onBack)
         }
         SelectionLayer(actions.selection, blocks, palette, vm, haptics)
     }

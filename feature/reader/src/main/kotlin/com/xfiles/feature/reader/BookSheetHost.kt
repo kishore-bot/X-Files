@@ -2,16 +2,17 @@ package com.xfiles.feature.reader
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalUriHandler
+import com.xfiles.design.Haptics
 import com.xfiles.documents.book.BookAnnotations
 import com.xfiles.documents.book.BookManifest
+import com.xfiles.documents.book.NotebookEntry
 import com.xfiles.documents.book.NotebookKind
 import com.xfiles.documents.book.ReadingSettings
-import com.xfiles.design.Haptics
 import com.xfiles.documents.structure.ContentBlock
 
 /**
  * Shows whichever sheet is open. Each sheet is stateless: it gets the book's data and the
- * ViewModel's actions, and reports what the reader chose.
+ * ViewModel's actions, and reports what the reader chose. Contents and Notebook share one sheet.
  */
 @Composable
 internal fun BookSheetHost(
@@ -21,15 +22,31 @@ internal fun BookSheetHost(
     annotations: BookAnnotations,
     manifest: BookManifest?,
     blocks: List<ContentBlock>,
+    current: Int,
     haptics: Haptics,
     onJump: (Int) -> Unit,
     onMode: (BookReadingMode) -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
     val settings: ReadingSettings = state.settings
+    val remove: (NotebookEntry) -> Unit = { entry ->
+        when (entry.kind) {
+            NotebookKind.Bookmark -> vm.removeBookmark(entry.id)
+            NotebookKind.Highlight -> vm.removeHighlight(entry.id)
+            NotebookKind.Note -> vm.removeNote(entry.id)
+        }
+    }
     when (sheet) {
         BookSheet.None -> Unit
-        BookSheet.Contents -> BookContentsSheet(manifest, onJump = onJump, onDismiss = vm::dismissSheet)
+        BookSheet.Contents, BookSheet.Notebook -> BookContentsSheet(
+            manifest = manifest,
+            entries = annotations.notebook(),
+            notebook = sheet == BookSheet.Notebook,
+            current = current,
+            onJump = onJump,
+            onDelete = remove,
+            onDismiss = vm::dismissSheet,
+        )
         BookSheet.Settings -> BookSettingsSheet(
             settings = settings,
             ownSettings = state.usesOwnSettings,
@@ -38,18 +55,6 @@ internal fun BookSheetHost(
             onChange = vm::setSettings,
             onOwnSettings = vm::setBookSettings,
             onReset = vm::resetSettings,
-            onDismiss = vm::dismissSheet,
-        )
-        BookSheet.Notebook -> BookNotebookSheet(
-            entries = annotations.notebook(),
-            onJump = onJump,
-            onDelete = { entry ->
-                when (entry.kind) {
-                    NotebookKind.Bookmark -> vm.removeBookmark(entry.id)
-                    NotebookKind.Highlight -> vm.removeHighlight(entry.id)
-                    NotebookKind.Note -> vm.removeNote(entry.id)
-                }
-            },
             onDismiss = vm::dismissSheet,
         )
         BookSheet.Search -> BookSearchSheet(
