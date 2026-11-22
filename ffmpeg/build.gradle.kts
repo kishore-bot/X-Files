@@ -83,6 +83,6 @@ tasks.matching { it.name == "preBuild" || (it.name.startsWith("merge") && it.nam
 dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.decoder)
-    compileOnly("androidx.annotation:annotation:1.9.1")
+    compileOnly("androidx.annotation:annotation:1.11.0")
     compileOnly("org.checkerframework:checker-qual:3.49.0")
 }
