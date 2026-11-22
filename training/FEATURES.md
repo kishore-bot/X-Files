@@ -1,4 +1,4 @@
-# EzFiles — App features
+# Xfiles — App features
 
 Updated: 14 November 2026. This is the single feature and setup document for the current working tree, including uncommitted changes. “Implemented” describes source behavior; it does not mean every device, format or external service has passed acceptance testing. Historical decisions and validation records remain in [NOTES.md](../NOTES.md).
 
@@ -34,7 +34,7 @@ Updated: 14 November 2026. This is the single feature and setup document for the
 
 ## Library and search
 
-- Open individual files with the Android picker, Open with or Share to EzFiles. Add chosen folders and their subfolders to Library without broad storage/media permissions.
+- Open individual files with the Android picker, Open with or Share to Xfiles. Add chosen folders and their subfolders to Library without broad storage/media permissions.
 - Navigate Library, Recent, Bookmarks and Tools. Filter by All, PDF, Docs, Slides, Sheets, Books, Images, Media, Text, Code, Data and Archives.
 - Search filenames, including typo-tolerant ranking, and supported document contents. Content results show a matching passage and open a PDF at its matching page when available.
 - Restore the cached folder list/index promptly while background refresh runs. Recent prioritizes frequently and recently opened files. Removing a library folder releases its persisted grants.
@@ -163,7 +163,7 @@ Editing supports UTF-8 and UTF-16 with BOM where required. Mixed line endings/un
 
 - About has a default-off Assistant access switch. Turning it off blocks document queries, execution and foreground handoffs. A separate default-off text-sharing switch gates excerpts/text matches and is cleared when master access changes.
 - Android AppFunctions use local tools and authorized library references; no Gemini API key, Genkit server or remote MCP endpoint is required. Android 16/API 36+ enables the service; older devices retain ordinary app functionality.
-- Android function identifiers use `com.ezfiles.android.assistant.EzFilesFunctions#` plus the function name.
+- Android function identifiers use the `com.xfiles.android.appfunctions` service (`XfilesAppFunctionService`) plus the function name.
 
 | Group | Functions | Observable result |
 |---|---|---|
@@ -185,7 +185,7 @@ Editing supports UTF-8 and UTF-16 with BOM where required. Mixed line endings/un
 
 ## Appearance, motion and haptics
 
-- EzFiles glass surfaces, existing colors, typography and icons; compact floating reading controls that preserve document legibility.
+- Xfiles glass surfaces, existing colors, typography and icons; compact floating reading controls that preserve document legibility.
 - System/light/dark appearance, touch-feedback controls, reduced-motion handling and action-specific haptic feedback for supported interactions.
 - Dedicated landscape arrangements use window width and height: compact library navigation, combined title/search, full-width short-height PDF reading, and larger-window supporting panes.
 - Safe-area and keyboard handling in normal/fullscreen views. Larger fonts retain usable targets; compact controls retain 48 dp touch allocations where implemented.
@@ -230,9 +230,9 @@ The standard Share APK path is `androidApp/build/outputs/apk/share/androidApp-sh
 
 ### Firebase Android setup
 
-1. In [Firebase Console](https://console.firebase.google.com/), create/select a project and register an Android app using **com.ezfiles**. An optional nickname is EzFiles Android; no iOS registration is required for this scope.
+1. In [Firebase Console](https://console.firebase.google.com/), create/select a project and register an Android app using **com.xfiles**. An optional nickname is Xfiles Android; no iOS registration is required for this scope.
 2. Put the downloaded client file at `androidApp/google-services.json`. The supplied file was validated and copied there; it is Git-ignored. Do not put a service-account private key in the mobile app.
-3. Build/install the optional diagnostics APK. In About, enable Share crash diagnostics and accept the disclosure. Activation requires a new process: use Android Settings → Apps → EzFiles → Force stop, then reopen for a deterministic manual check.
+3. Build/install the optional diagnostics APK. In About, enable Share crash diagnostics and accept the disclosure. Activation requires a new process: use Android Settings → Apps → Xfiles → Force stop, then reopen for a deterministic manual check.
 4. Verify opt-out/restart, queued-report refusal and a synthetic report's actual receipt in the intended project. No report was sent by the coding agent during setup.
 5. Preserve/upload the exact corresponding R8 mapping through an approved release step for readable obfuscated stacks. Local build mapping/symbol upload tasks are disabled.
 
@@ -248,14 +248,14 @@ The integration pins Firebase BoM 35.1.0, Google services plugin 4.5.0 and Crash
 
 ## About and team
 
-About includes supported-file information, Why EzFiles, appearance/haptic settings, assistant permissions, optional crash-diagnostics consent, privacy, feedback and component licenses.
+About includes supported-file information, Why Xfiles, appearance/haptic settings, assistant permissions, optional crash-diagnostics consent, privacy, feedback and component licenses.
 
 | Team member | Contact |
 |---|---|
-| KISHORE K | [kishoreabhi333@gmail.com](mailto:kishoreabhi333@gmail.com) |
+| Kishore K | [kishoreabhi333@gmail.com](mailto:kishoreabhi333@gmail.com) |
 | Robin Isac | [robinisacsharon@gmail.com](mailto:robinisacsharon@gmail.com) |
 
-Manual crash sharing/feedback targets Kishore's address. No roles or biographies were invented. Branding source: [EzFiles logo](brand/EzFiles_Logo_Glass.svg). Bundled font license texts remain in the app assets.
+Manual crash sharing/feedback targets Kishore's address. No roles or biographies were invented. Branding source: [Xfiles logo](../docs/assets/xfiles-logo.svg). Bundled font license texts remain in the app assets.
 
 ## Known gaps and validation
 
