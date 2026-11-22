@@ -1,6 +1,8 @@
 package com.xfiles.android
 
+import android.app.UiModeManager
 import android.content.Context
+import android.os.Build
 import com.xfiles.settings.ThemePreference
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -28,6 +30,22 @@ internal class AppearanceStore @Inject constructor(@ApplicationContext private v
         // Keeps the launcher icon in step with the saved theme, even after an update or a restored backup.
         val saved = mutableTheme.value
         launcherScope.launch { LauncherIcons.apply(context, saved) }
+        applySystemNightMode(saved)
+    }
+
+    /**
+     * Tells Android the app's own light/dark choice (Android 12+), so the system splash screen on the next launch
+     * matches the app instead of the phone's setting. The manifest handles uiMode changes, so nothing restarts.
+     */
+    private fun applySystemNightMode(theme: ThemePreference) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val manager = context.getSystemService(UiModeManager::class.java) ?: return
+        val mode = when (theme) {
+            ThemePreference.System -> UiModeManager.MODE_NIGHT_AUTO
+            ThemePreference.Light -> UiModeManager.MODE_NIGHT_NO
+            ThemePreference.Dark -> UiModeManager.MODE_NIGHT_YES
+        }
+        manager.setApplicationNightMode(mode)
     }
 
     /**
@@ -45,6 +63,7 @@ internal class AppearanceStore @Inject constructor(@ApplicationContext private v
     fun applyPendingLauncherIcon() {
         val theme = pendingLauncherTheme ?: return
         pendingLauncherTheme = null
+        applySystemNightMode(theme)
         launcherScope.launch { LauncherIcons.apply(context, theme) }
     }
 

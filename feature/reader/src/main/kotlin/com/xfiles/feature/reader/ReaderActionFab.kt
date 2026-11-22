@@ -144,7 +144,19 @@ internal fun Modifier.chromeGestures(onScrollDown: () -> Unit, onScrollUp: () ->
                         pending = 0f
                     }
                 }
-                if (travel < TAP_SLOP_PX) onTap()
+                if (travel >= TAP_SLOP_PX) continue
+                // A double tap belongs to the content (zoom on pictures and pages), so it must not toggle the
+                // button twice: wait briefly for a second press and, if one comes, let it pass without a toggle.
+                val second = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                }
+                if (second == null) {
+                    onTap()
+                } else {
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                    } while (event.changes.any { it.id == second.id && it.pressed })
+                }
             }
         }
     }

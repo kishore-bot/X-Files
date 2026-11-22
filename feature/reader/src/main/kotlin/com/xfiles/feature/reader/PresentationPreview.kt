@@ -1,5 +1,8 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
@@ -442,6 +445,11 @@ private fun Presenter(
         }
     }
 
+    // The gesture handlers below live across recompositions, so they must call the latest next/previous:
+    // a captured first version would always move relative to the first slide (bouncing between two slides).
+    val latestNext by rememberUpdatedState<() -> Unit> { next() }
+    val latestPrevious by rememberUpdatedState<() -> Unit> { previous() }
+
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     Dialog(
@@ -482,7 +490,7 @@ private fun Presenter(
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val up = waitForUpOrCancellation()
                         if (up != null && !up.isConsumed && (up.position - down.position).getDistance() < viewConfiguration.touchSlop) {
-                            if (up.position.x > size.width / 3f) next() else previous()
+                            if (up.position.x > size.width / 3f) latestNext() else latestPrevious()
                         }
                     }
                 }
@@ -490,7 +498,7 @@ private fun Presenter(
                     var drag = 0f
                     detectHorizontalDragGestures(
                         onDragStart = { drag = 0f },
-                        onDragEnd = { if (drag < -60f) next() else if (drag > 60f) previous() },
+                        onDragEnd = { if (drag < -60f) latestNext() else if (drag > 60f) latestPrevious() },
                     ) { change, amount ->
                         change.consume()
                         drag += amount
@@ -547,10 +555,40 @@ private fun BoxScope.PresenterChrome(index: Int, count: Int, onClose: () -> Unit
             Icon(EzIcons.Close, "Exit presentation", tint = EzColors.OnScrim)
         }
     }
-    // Progress through the deck.
-    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.12f))) {
-        Box(Modifier.fillMaxWidth((index + 1f) / count.coerceAtLeast(1)).height(3.dp).background(PrimaryGradient))
+    // Time since the presentation started, for pacing a talk.
+    var elapsed by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        val start = System.currentTimeMillis()
+        while (true) {
+            elapsed = (System.currentTimeMillis() - start) / 1000
+            delay(1000 - (System.currentTimeMillis() - start) % 1000)
+        }
     }
+    ChromePill(
+        "⏱ %d:%02d".format(elapsed / 60, elapsed % 60),
+        Modifier.align(Alignment.TopStart).padding(16.dp),
+    )
+    // How much of the deck is left, instead of a bar.
+    val left = (count - 1 - index).coerceAtLeast(0)
+    ChromePill(
+        when (left) {
+            0 -> "Last slide"
+            1 -> "1 slide left"
+            else -> "$left slides left"
+        },
+        Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+    )
+}
+
+@Composable
+private fun ChromePill(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        color = EzColors.OnScrim.copy(alpha = 0.9f),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = modifier.clip(EzShapes.Pill).background(EzColors.Scrim).padding(horizontal = 12.dp, vertical = 5.dp),
+    )
 }
 
 /**
