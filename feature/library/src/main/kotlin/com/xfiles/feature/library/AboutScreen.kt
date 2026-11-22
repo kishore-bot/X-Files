@@ -394,13 +394,13 @@ private val Team = listOf(
         name = "Robin Isac",
         role = "Developer",
         linkedIn = "https://www.linkedin.com/in/robin-isac-07ba01329",
-        email = null,
+        email = "robinisacsharon@gmail.com",
     ),
     TeamMember(
         name = "Abhijith H M",
         role = "Market Analyst",
         linkedIn = "https://www.linkedin.com/in/abhijith-hm-34789025b",
-        email = null,
+        email = "hmabhijith@gmail.com",
     ),
 )
 
