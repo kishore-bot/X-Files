@@ -17,7 +17,7 @@ use document_core::{
 use document_parsers::{
     PdfAnnotation, PdfDropped, PdfInkStyle, PdfPagePick, PdfToolInfo, PdfToolObserver, PdfToolOp, PdfToolReport,
     PdfToolSource, append_annotations, inspect_for_tools, inspect_pdf, run_pdf_tool, verify_appended,
-    verify_pdf_tool_output,
+    verify_pdf_tool_output, read_signatures,
 };
 use zeroize::Zeroizing;
 
@@ -1094,4 +1094,48 @@ mod tests {
         assert!(matches!(error(ErrorKind::WrongPassword), ReadError::WrongPassword { .. }));
         assert!(matches!(error(ErrorKind::UnsupportedEncryption), ReadError::UnsupportedEncryption { .. }));
     }
+}
+
+/// One digital signature as the PDF declares it. The engine does not check the
+/// cryptography; [covers_whole_file] says whether bytes were added after signing.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NativePdfSignature {
+    pub field: String,
+    pub signer: Option<String>,
+    pub signed_at: Option<String>,
+    pub reason: Option<String>,
+    pub location: Option<String>,
+    pub contact: Option<String>,
+    pub format: Option<String>,
+    pub byte_range_ok: bool,
+    pub covers_whole_file: bool,
+}
+
+fn signatures_of(file: File) -> Result<Vec<NativePdfSignature>, ReadError> {
+    Ok(read_signatures(file)?
+        .into_iter()
+        .map(|s| NativePdfSignature {
+            field: s.field,
+            signer: s.signer,
+            signed_at: s.signed_at,
+            reason: s.reason,
+            location: s.location,
+            contact: s.contact,
+            format: s.format,
+            byte_range_ok: s.byte_range_ok,
+            covers_whole_file: s.covers_whole_file,
+        })
+        .collect())
+}
+
+/// The signatures in the PDF at d; empty when it has none. Takes ownership of d.
+#[uniffi::export]
+pub fn pdf_signatures_fd(fd: i32) -> Result<Vec<NativePdfSignature>, ReadError> {
+    signatures_of(file_from_fd(fd)?)
+}
+
+/// As [pdf_signatures_fd], by path. Used by host tests.
+#[uniffi::export]
+pub fn pdf_signatures_path(path: String) -> Result<Vec<NativePdfSignature>, ReadError> {
+    signatures_of(open_for_read(&path)?)
 }

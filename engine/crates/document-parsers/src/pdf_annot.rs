@@ -501,7 +501,7 @@ fn text_string(text: &str) -> Vec<u8> {
     bytes
 }
 
-fn read_text_string(bytes: &[u8]) -> String {
+pub(crate) fn read_text_string(bytes: &[u8]) -> String {
     if let Some(utf16) = bytes.strip_prefix(&[0xFE, 0xFF]) {
         let units: Vec<u16> = utf16.chunks_exact(2).map(|pair| u16::from_be_bytes([pair[0], pair[1]])).collect();
         String::from_utf16_lossy(&units)

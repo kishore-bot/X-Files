@@ -475,7 +475,7 @@ fun ReaderScreen(
                                 animating = true,
                             )
                         }
-                        is FilePreview.Pdf -> {
+                        is FilePreview.Pdf -> Box(Modifier.fillMaxSize()) {
                             if (editingMarkup) {
                                 PdfMarkupCanvas(
                                     preview.bitmap,
@@ -517,6 +517,9 @@ fun ReaderScreen(
                                         onSwipePage = { delta -> onPage((preview.page + delta).coerceIn(0, preview.pageCount - 1)) },
                                     )
                                 }
+                            }
+                            if (!editingMarkup) {
+                                PdfSignatureBadge(state.file.uri, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
                             }
                         }
                         is FilePreview.Media -> MediaScreen(state.file, preview.video, closeReader)

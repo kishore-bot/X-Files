@@ -41,6 +41,7 @@ mod pdf_tools_overlay;
 mod pdf_text_layer;
 mod pdf_text;
 mod pdf_tools_split;
+mod pdf_signatures;
 #[cfg(test)]
 mod pdf_tools_ops_tests;
 mod pptx;
@@ -79,6 +80,7 @@ pub use pdf_tools_overlay::{
 };
 pub use pdf_text_layer::{TextLine, add_text_layer, verify_text_layer};
 pub use pdf_text::{DocumentText, PageText, TextLimits, extract_text};
+pub use pdf_signatures::{PdfSignatureInfo, read_signatures};
 pub use pdf_tools_split::{MAX_SPLIT_PARTS, PdfPageRange, plan_split};
 pub use text::TextParser;
 
