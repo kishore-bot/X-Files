@@ -22,7 +22,8 @@ concurrency:
 env:
   NDK_VERSION: "29.0.14206865"
   CMAKE_VERSION: "3.22.1"
-  ANDROID_PLATFORM: "platforms;android-37.2"
+  # Not ANDROID_PLATFORM: llama.cpp's build script reads that name as an API level.
+  SDK_PLATFORM_PACKAGE: "platforms;android-37.2"
 
 jobs:
   apk:
@@ -50,8 +51,17 @@ jobs:
           sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -x "$sdk" ] || sdk=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
           yes | "$sdk" --licenses > /dev/null || true
-          "$sdk" --install "$ANDROID_PLATFORM" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
+          "$sdk" --install "$SDK_PLATFORM_PACKAGE" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
           ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/ndk"
+          # The image presets its default NDK in these variables; point every one at the pinned NDK.
+          ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
+          {
+            echo "ANDROID_NDK_HOME=$ndk"
+            echo "ANDROID_NDK_ROOT=$ndk"
+            echo "ANDROID_NDK=$ndk"
+            echo "ANDROID_NDK_LATEST_HOME=$ndk"
+            echo "NDK_HOME=$ndk"
+          } >> "$GITHUB_ENV"
 
       # rust-toolchain.toml pins the toolchain and the Android targets; rustup installs them here.
       - name: Rust toolchain
