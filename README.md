@@ -29,7 +29,7 @@ PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that
 
 ---
 
-## 💎 Why Xfiles
+## 💎 Highlights
 
 | ⚡ **Fast** | 🔒 **Private** | 🎨 **Premium** | 🤖 **Smart** |
 |:---:|:---:|:---:|:---:|
@@ -196,22 +196,6 @@ Contributions are welcome! 💜 Read **[CONTRIBUTING.md](CONTRIBUTING.md)** firs
 - **the current stack.**
 
 Please follow the [code of conduct](CODE_OF_CONDUCT.md), and report security issues privately as described in [SECURITY.md](SECURITY.md).
-
----
-
-## 👥 Team
-
-| | Name | Role |
-|---|---|---|
-| 👨‍💻 | **Kishore K** | Developer |
-| 👨‍💻 | **Robin Isac** | Developer |
-| 📈 | **Abhijith H M** | Market Analyst |
-
-<div align="center">
-
-**Built with ❤️ by SAHAPRAXIS** · *Free doesn't mean cheap.*
-
-</div>
 
 ---
 

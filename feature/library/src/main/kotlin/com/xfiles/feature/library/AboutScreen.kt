@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,16 +16,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,13 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xfiles.crash.CloudCrashReporting
@@ -61,7 +53,6 @@ import com.xfiles.design.EzSwitch
 import com.xfiles.design.EzSectionHeader
 import com.xfiles.design.EzListItem
 import androidx.compose.runtime.LaunchedEffect
-import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
 import com.xfiles.design.glossyPrimary
 import com.xfiles.fily.AssistantModel
@@ -70,7 +61,7 @@ import kotlinx.coroutines.launch
 
 /**
  * The About screen: the app, its theme and touch feedback, Fily, the privacy promises, the supported
- * files, the team, and the feedback and licence pages. [onClearSearchIndex] deletes the search index.
+ * files, and the feedback and licence pages. [onClearSearchIndex] deletes the search index.
  */
 @Composable
 fun AboutScreen(
@@ -83,41 +74,35 @@ fun AboutScreen(
     fily: FilyAbout? = null,
     onClearSearchIndex: (suspend () -> Unit)? = null,
 ) {
-    var vision by rememberSaveable { mutableStateOf(false) }
     var showingFormats by rememberSaveable { mutableStateOf(false) }
     var showingLicences by rememberSaveable { mutableStateOf(false) }
     var showingFeedback by rememberSaveable { mutableStateOf(false) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val back: () -> Unit = { if (vision) vision = false else onBack() }
-    BackHandler(onBack = back)
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     val (versionName, versionCode) = remember(context) { packageVersion(context) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         EzTopBar(
-            title = if (vision) "Why Xfiles" else "About Xfiles",
-            onBack = back,
-            backLabel = if (vision) "Back to About" else "Back to library",
+            title = "About Xfiles",
+            onBack = onBack,
+            backLabel = "Back to library",
             gutter = 0.dp,
         )
-        if (!vision) {
-            PrimaryTabRow(
-                selectedTabIndex = tab,
-                containerColor = Color.Transparent,
-                modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth().align(Alignment.CenterHorizontally),
-            ) {
-                listOf("About", "Upcoming").forEachIndexed { index, label ->
-                    Tab(
-                        selected = tab == index,
-                        onClick = { tab = index },
-                        text = { Text(label, style = MaterialTheme.typography.titleSmall) },
-                    )
-                }
+        PrimaryTabRow(
+            selectedTabIndex = tab,
+            containerColor = Color.Transparent,
+            modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth().align(Alignment.CenterHorizontally),
+        ) {
+            listOf("About", "Upcoming").forEachIndexed { index, label ->
+                Tab(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    text = { Text(label, style = MaterialTheme.typography.titleSmall) },
+                )
             }
         }
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
-            if (vision) {
-                VisionScreen()
-            } else if (tab == 1) {
+            if (tab == 1) {
                 UpcomingScreen()
             } else {
                 LazyColumn(
@@ -138,19 +123,10 @@ fun AboutScreen(
                             if (versionName.isNotEmpty()) {
                                 Text("Version $versionName ($versionCode)", style = MaterialTheme.typography.bodyMedium, color = EzColors.TextSecondary)
                             }
-                            Text(
-                                "Built for people. Shared with everyone.",
-                                fontStyle = FontStyle.Italic,
-                                color = EzColors.Accent,
-                                textAlign = TextAlign.Center,
-                            )
                         }
                     }
                     item("appearance") { AppearanceCard(theme, onTheme, haptics, onHaptics) }
                     fily?.let { item("fily") { FilyCard(it) } }
-                    item("why") {
-                        NavigationCard(EzIcons.Lightbulb, "Why Xfiles", "The idea behind the app") { vision = true }
-                    }
                     item("formats") {
                         NavigationCard(EzIcons.Document, "Supported files", "${SupportedFiles.size} kinds of file, from PDF to e-books") {
                             showingFormats = true
@@ -158,11 +134,9 @@ fun AboutScreen(
                     }
                     item("privacy") { PrivacyCard(onClearSearchIndex) }
                     item("crash") { CloudCrashReportingCard(cloudCrash) }
-                    item("team-heading") { SectionHeading("The team") }
-                    item("maker") { MakerCard() }
                     item("more-heading") { SectionHeading("More") }
                     item("feedback") {
-                        NavigationCard(EzIcons.Feedback, "Send feedback", "Tell the team about a bug or an idea") { showingFeedback = true }
+                        NavigationCard(EzIcons.Feedback, "Send feedback", "Report a bug or suggest an idea") { showingFeedback = true }
                     }
                     item("licences") {
                         NavigationCard(EzIcons.Code, "Open-source licences", "The libraries and models Xfiles is built with") {
@@ -344,112 +318,5 @@ private fun NavigationCard(icon: androidx.compose.ui.graphics.vector.ImageVector
             trailing = { Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary, modifier = Modifier.size(22.dp)) },
             onClick = onClick,
         )
-    }
-}
-
-/** The company behind Xfiles: its name, meaning, motto and philosophy. */
-@Composable
-private fun MakerCard() {
-    Column(
-        Modifier.fillMaxWidth().glassCard().padding(20.dp).semantics(mergeDescendants = true) {},
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text("Made by", style = MaterialTheme.typography.labelLarge, color = EzColors.TextSecondary)
-        Text(
-            "SAHAPRAXIS",
-            style = MaterialTheme.typography.headlineSmall.copy(letterSpacing = 3.sp, fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text("A group that came together on its own.", color = EzColors.TextSecondary, textAlign = TextAlign.Center)
-        Text(
-            "“Free doesn’t mean cheap.”",
-            Modifier.padding(top = 6.dp),
-            fontStyle = FontStyle.Italic,
-            color = EzColors.Accent,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Text(
-            "Create · Share · Grow",
-            style = MaterialTheme.typography.titleSmall.copy(letterSpacing = 1.5.sp),
-            color = EzColors.Text,
-        )
-        Text("Xfiles is our first project.", Modifier.padding(top = 4.dp), color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
-        HorizontalDivider(Modifier.padding(vertical = 10.dp))
-        Text("Team", style = MaterialTheme.typography.labelLarge, color = EzColors.TextSecondary)
-        Team.forEach { TeamMemberRow(it) }
-    }
-}
-
-private data class TeamMember(val name: String, val role: String, val linkedIn: String?, val email: String?)
-
-private val Team = listOf(
-    TeamMember(
-        name = "Kishore K",
-        role = "Developer",
-        linkedIn = "https://www.linkedin.com/in/kishorek1",
-        email = "kishoreabhi333@gmail.com",
-    ),
-    TeamMember(
-        name = "Robin Isac",
-        role = "Developer",
-        linkedIn = "https://www.linkedin.com/in/robin-isac-07ba01329",
-        email = "robinisacsharon@gmail.com",
-    ),
-    TeamMember(
-        name = "Abhijith H M",
-        role = "Market Analyst",
-        linkedIn = "https://www.linkedin.com/in/abhijith-hm-34789025b",
-        email = "hmabhijith@gmail.com",
-    ),
-)
-
-@Composable
-private fun TeamMemberRow(member: TeamMember) {
-    val links = LocalUriHandler.current
-    fun open(uri: String) = try {
-        links.openUri(uri)
-    } catch (_: Exception) {
-        Unit // No browser or mail app; nothing to open.
-    }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(member.name, style = MaterialTheme.typography.titleSmall, color = EzColors.Text)
-            Text(member.role, style = MaterialTheme.typography.bodySmall, color = EzColors.TextSecondary)
-        }
-        member.linkedIn?.let { url -> TextButton(onClick = { open(url) }) { Text("LinkedIn") } }
-        member.email?.let { address -> TextButton(onClick = { open("mailto:$address") }) { Text("Email") } }
-    }
-}
-
-@Composable
-private fun VisionScreen() {
-    LazyColumn(
-        Modifier.widthIn(max = 620.dp).fillMaxWidth(),
-        contentPadding = PaddingValues(vertical = 24.dp, horizontal = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        items(VisionText) { block ->
-            when (block) {
-                is VisionBlock.Title -> Text(block.text, style = MaterialTheme.typography.headlineMedium)
-                is VisionBlock.Paragraph -> Text(
-                    block.text,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, lineHeight = 27.sp),
-                )
-                is VisionBlock.PullQuote -> Text(
-                    block.text,
-                    modifier = Modifier.fillMaxWidth().glassCard().padding(16.dp),
-                    color = EzColors.Accent,
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                is VisionBlock.Beliefs -> Column(
-                    Modifier.fillMaxWidth().glassCard().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    block.items.forEach { Text("• $it", style = MaterialTheme.typography.bodyLarge) }
-                }
-                is VisionBlock.SignOff -> Text(block.text, fontStyle = FontStyle.Italic, style = MaterialTheme.typography.titleMedium)
-            }
-        }
     }
 }

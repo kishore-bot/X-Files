@@ -19,7 +19,7 @@ Updated: 14 November 2026. This is the single feature and setup document for the
 - [Privacy and crash reports](#privacy-and-crash-reports)
 - [Android build and Firebase setup](#android-build-and-firebase-setup)
 - [Performance and resource limits](#performance-and-resource-limits)
-- [About and team](#about-and-team)
+- [About](#about)
 - [Known gaps and validation](#known-gaps-and-validation)
 
 ## Platform and status
@@ -246,16 +246,11 @@ The integration pins Firebase BoM 35.1.0, Google services plugin 4.5.0 and Crash
 - Recent offline and Firebase APKs compiled and passed lint. Static manifest/DEX checks verified profile boundaries; earlier benchmarks belong only to their recorded revisions/devices in NOTES.md.
 - Physical low-memory/high-refresh devices, large folders/files, provider delays, repeated viewer entry/exit and animation/haptic tuning remain acceptance work.
 
-## About and team
+## About
 
-About includes supported-file information, Why Xfiles, appearance/haptic settings, assistant permissions, optional crash-diagnostics consent, privacy, feedback and component licenses.
+About includes supported-file information, appearance/haptic settings, assistant permissions, optional crash-diagnostics consent, privacy, feedback and component licenses.
 
-| Team member | Contact |
-|---|---|
-| Kishore K | [kishoreabhi333@gmail.com](mailto:kishoreabhi333@gmail.com) |
-| Robin Isac | [robinisacsharon@gmail.com](mailto:robinisacsharon@gmail.com) |
-
-Manual crash sharing/feedback targets Kishore's address. No roles or biographies were invented. Branding source: [Xfiles logo](../docs/assets/xfiles-logo.svg). Bundled font license texts remain in the app assets.
+Branding source: [Xfiles logo](../docs/assets/xfiles-logo.svg). Bundled font license texts remain in the app assets.
 
 ## Known gaps and validation
 

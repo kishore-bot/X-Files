@@ -2,7 +2,7 @@
 
 ## Product principle
 
-**Performance is part of what makes Xfiles feel premium.** The original About → Why Xfiles page opens with “Free doesn't mean cheap.” Its commitments to high-quality free software, privacy, and accessibility guide this rebuild. Preserve the author's `VisionText`, sign-off, styling, and back behavior when porting About. The reference copy is in EzFiles `shared/src/commonMain/kotlin/com/ezfiles/reader/presentation/about/AboutContent.kt` and the layout is in `AboutScreens.kt`.
+The rebuild prioritizes responsive performance, privacy, and accessibility.
 
 - Keep startup, search, file opening, and page turns responsive while preserving the original typography, glass surfaces, motion, haptics, and dark mode. Defer parsing, indexing, and assistant warm-up until the library or first page is ready unless the current action needs that work. Use bounded cache and worker budgets to keep frame time and memory predictable.
 - Evaluate premium effects against the same screen with its original reduced-motion or lower-cost rendering path. Preserve the design and use the less expensive implementation when the visual and interaction checks agree.

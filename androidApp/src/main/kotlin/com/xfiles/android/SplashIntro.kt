@@ -1,7 +1,5 @@
 package com.xfiles.android
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -116,20 +114,5 @@ fun SplashIntro(modifier: Modifier = Modifier, onFinished: () -> Unit) {
                 letterSpacing = 0.2.sp,
             )
         }
-        // The studio signature: small, widely tracked and deliberately low-contrast at the bottom.
-        Text(
-            "SAHAPRAXIS",
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 28.dp)
-                .alpha(tagAlpha.value * SIGNATURE_ALPHA),
-            color = EzColors.Text,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 5.sp,
-        )
     }
 }
-
-private const val SIGNATURE_ALPHA = 0.24f
