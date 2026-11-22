@@ -10,6 +10,33 @@ plugins {
 // Opt-in Firebase Crashlytics. Off unless -Pxfiles.firebaseCrashReports=true (needs androidApp/google-services.json).
 // The default build has no Firebase code, no google-services plugin and no network permission beyond the app's own.
 val firebaseReports = providers.gradleProperty("xfiles.firebaseCrashReports").map { it.toBoolean() }.getOrElse(false)
+
+/**
+ * The app version, SemVer with an optional pre-release label: 1.0.0-alpha.03, 1.0.0-beta.01, 1.0.0-rc.02, 1.0.0.
+ * gradle.properties holds the current one; the release workflow passes the tag's (-Pxfiles.version=…).
+ */
+val appVersion: String = providers.gradleProperty("xfiles.version").getOrElse("1.0.0-beta.01")
+
+/**
+ * A monotonically increasing versionCode from [appVersion]: MAJOR·1,000,000 + MINOR·10,000 + PATCH·100 + stage,
+ * where the stage is alpha.N → N, beta.N → 30+N, rc.N → 60+N and the final release → 99 (N up to 29).
+ * So 1.0.0-beta.01 = 1000031 < 1.0.0-rc.01 = 1000061 < 1.0.0 = 1000099 < 1.0.1-alpha.01 = 1000101.
+ */
+val appVersionCode: Int = run {
+    val match = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$""").matchEntire(appVersion)
+        ?: error("xfiles.version must look like 1.2.3 or 1.2.3-beta.01, not '$appVersion'")
+    val (major, minor, patch, stage, number) = match.destructured
+    val n = number.toIntOrNull() ?: 0
+    require(stage.isEmpty() || n in 1..29) { "pre-release number must be 1..29 in '$appVersion'" }
+    require(minor.toInt() < 100 && patch.toInt() < 100) { "minor and patch must be below 100 in '$appVersion'" }
+    val step = when (stage) {
+        "alpha" -> n
+        "beta" -> 30 + n
+        "rc" -> 60 + n
+        else -> 99
+    }
+    major.toInt() * 1_000_000 + minor.toInt() * 10_000 + patch.toInt() * 100 + step
+}
 if (firebaseReports) {
     check(file("google-services.json").isFile) { "Firebase diagnostics requires androidApp/google-services.json" }
     apply(plugin = "com.google.gms.google-services")
@@ -29,8 +56,18 @@ android {
         minSdk = libs.versions.min.sdk.get().toInt()
         ndk.abiFilters += setOf("arm64-v8a", "x86_64")
         targetSdk = libs.versions.target.sdk.get().toInt()
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersion
+    }
+    // Release signing comes from the environment (CI secrets or a local shell); without it, release stays unsigned.
+    val keystore = System.getenv("XFILES_KEYSTORE")?.takeIf { it.isNotBlank() && file(it).exists() }
+    if (keystore != null) {
+        signingConfigs.create("release") {
+            storeFile = file(keystore)
+            storePassword = System.getenv("XFILES_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("XFILES_KEY_ALIAS")
+            keyPassword = System.getenv("XFILES_KEY_PASSWORD")
+        }
     }
     // dev: day-to-day builds, installable next to prod. prod: what users get.
     flavorDimensions += "env"
@@ -51,6 +88,7 @@ android {
             optimization {
                 enable = true
             }
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
         // Release code with the debug key, for measuring startup and frame times locally.
         // Never distribute this variant.
