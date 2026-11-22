@@ -1,178 +1,222 @@
+<div align="center">
+
+<img src="docs/assets/xfiles-logo.svg" alt="Xfiles logo: Fily above a glass document with a crimson X" width="160" />
+
 # Xfiles
 
-**Premium feel, faster app.** Xfiles is an offline-first Android file reader and toolkit: PDFs, Office and OpenDocument files, EPUB books, archives, pictures and video, all handled on the phone. It includes **Fily**, an on-device AI assistant you talk to. No document ever leaves the device.
+### ✨ Premium feel. Faster app. ✨
 
-Xfiles is a Kotlin + Rust rewrite of EzFiles. Parsing, PDF tools, search and the assistant's inference all run in a native Rust engine. The UI is Jetpack Compose.
+**Every file, beautifully handled, all on your phone.**
+PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that lives on your device.
 
----
+<p>
+  <a href="https://github.com/kishore-bot/X-Files/releases"><img alt="Release: beta" src="https://img.shields.io/badge/release-1.0.0--beta-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-6366F1?style=for-the-badge" /></a>
+  <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
+</p>
+<p>
+  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" />
+  <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" />
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-engine-B7410E?style=flat-square&logo=rust&logoColor=white" />
+  <img alt="llama.cpp" src="https://img.shields.io/badge/llama.cpp-on--device%20AI-38BDF8?style=flat-square" />
+  <img alt="Offline first" src="https://img.shields.io/badge/offline-first-10B981?style=flat-square" />
+  <img alt="Privacy" src="https://img.shields.io/badge/your%20files-never%20leave%20the%20phone-F472B6?style=flat-square" />
+</p>
 
-## Features
+[⬇️ Download](#get-it) · [🌟 Features](#features) · [🤖 Fily](#fily) · [🏗️ Architecture](#architecture) · [🛠️ Build](#build) · [🤝 Contribute](#contributing)
 
-**Reading**
-- **PDF**
-  - Smooth zoom, plus single-page, two-page and grid views.
-  - Go to page, find, password-protected files, printing, and annotations (pen, highlight, notes, signatures).
-  - **Text selection** with drag handles, for copy, highlight, search or share. It works on scanned pages through on-device OCR.
-- **Office and OpenDocument:** DOCX, XLSX, PPTX, ODT, ODS and ODP, plus legacy DOC, XLS and PPT.
-  - Find & replace across text runs.
-  - Spreadsheet cell editing with frozen rows and columns.
-  - Reorder, duplicate or delete slides, with a presenter view.
-- **EPUB:** page-by-page reading, contents, highlights and notes, footnotes, and per-book reading settings with light and dark themes.
-- **Text and code:** Markdown, JSON, YAML, CSV and more, in an editor with undo/redo, find & replace and encoding control.
-- **Pictures:** a swipeable gallery of the folder, sharp tiled zoom, animated images, and EXIF data.
-- **Video and audio**
-  - Picture-in-picture, gestures, speed control, orientation lock and resume.
-  - Subtitles (SRT, VTT, ASS) with styling and automatic contrast.
-  - Frame-accurate scrubbing with a live preview.
-  - AC3, E-AC3, DTS and TrueHD audio through FFmpeg.
-- **ZIP archives:** browse, extract, and open ZipCrypto or AES-encrypted entries.
-- **At a glance:** a summary of any document, with tappable dates (add to calendar), amounts, phone numbers, emails and links.
-
-**Tools**
-- **PDF**
-  - Merge, split (ranges, every N pages, one file per page), reorder, rotate and compress.
-  - Watermark, sign, and protect or unlock with AES-256.
-- **Conversions**
-  - Images to PDF, with a compression choice.
-  - PDF to pictures as JPEG or PNG at 72, 150 or 300 DPI.
-  - Text to PDF, with templates, font and alignment.
-- **Scanner:** manual corner adjustment, grayscale, and searchable (OCR) PDFs.
-- **Tidy up:** find duplicate and unneeded files and clean up storage.
-
-**Library**
-- Folders, recents ranked by **frecency** (how often and how recently), bookmarks with page snippets, and 12 file-type filters.
-- **Typo-tolerant** file-name search, plus full-text search inside documents.
-- A per-file menu (open, share, print, remove from recents), multi-select, a home-screen widget, app shortcuts, and "Open with" / "Share to" for 40+ file types.
+</div>
 
 ---
 
-## Fily: the on-device assistant
+## 💎 Why Xfiles
 
-Fily is a voice assistant that runs a **350M-parameter language model locally** through llama.cpp, on the GPU (OpenCL) when that is safe and on the CPU otherwise. It answers questions about your files and drives the app through 45 tools: opening documents, running PDF tools, navigating the reader, tidying storage and more. It speaks its answers back with on-device text-to-speech.
+| ⚡ **Fast** | 🔒 **Private** | 🎨 **Premium** | 🤖 **Smart** |
+|:---:|:---:|:---:|:---:|
+| A native Rust engine parses, searches and edits | Offline-first: documents never leave the device | Glass UI, motion and haptics, Material 3 | Fily answers and acts, fully on-device |
 
-Each technique below is used only where it solves a real constraint of a small model on a phone:
+---
 
-| Technique | Why it's there | How it works |
+<a name="get-it"></a>
+
+## ⬇️ Get it
+
+Grab the latest signed APK from **[Releases](https://github.com/kishore-bot/X-Files/releases)**. Each release has an `Xfiles-<version>.apk` and its `.sha256` checksum.
+
+> 🧪 Xfiles is in **beta** (`1.0.0-beta.xx`). Releases are built, tested and signed automatically by GitHub Actions.
+
+---
+
+<a name="features"></a>
+
+## 🌟 Features
+
+### 📖 Reading
+
+| | Format | Highlights |
 |---|---|---|
-| **RAG (retrieval-augmented generation)** | The model's 4K-token context can't hold a long PDF. | Text is split into ~250-token passages (never across PDF pages) and indexed with **BM25** in Rust. The best passages for the question are deduplicated with MMR, merged with neighbours, and packed into a character budget with `[page N]` labels, so Fily can cite pages. Indexes live in an LRU cache (8 documents / 64 MB) and are invalidated when the file's modified time or size changes. Benchmark on a desktop x86-64 machine (not the phone): 1 MB of text indexes in 28 ms, and a query takes about 0.3 ms. |
-| **CAG / KV-cache reuse** | The system prompt and tool catalog are long, and re-reading them on every step wastes seconds on a phone. | The llama.cpp context stays alive between calls. Each request computes the common token prefix with what is already in the KV cache, trims the rest, and decodes only the new suffix. It falls back safely on hybrid or recurrent layers. Every generation logs prefill and reused token counts. |
-| **GPU crash guard** | Some mobile GPU drivers crash in native code while loading the model. | A persisted state machine (untested → trying → proven/bad) is written before each GPU load. A crash mid-load means the next launch uses the CPU. GPU load and first reply each time out after 30 s. The state resets when the app or the model file changes. |
-| **Prompt contract test** | A retrained model must get exactly the prompt format it was trained on. | A test compares the app's tool catalog and system prompt with fixtures exported from the training data. |
+| 📕 | **PDF** | Continuous scrolling, thumbnails, zoom, single, two-up and grid views; find; annotations (pen, highlight, notes, signatures); text selection, also on scans through OCR; **digital signature details** |
+| 📘 | **Word · Excel · PowerPoint** | DOCX, XLSX and PPTX (plus ODF and legacy DOC/XLS/PPT); tables as one grid; find & replace; cell editing with frozen panes; slides with **links, audio and video**; presenter |
+| 📗 | **EPUB** | **Paged or scroll** reading; contents and notebook; highlights and notes; footnotes; working links; themes (White, Sepia, Green, Dark, Black), fonts and justified text |
+| 📝 | **Text · Code · JSON · HTML · SVG** | Syntax highlighting with expand/collapse all; JSON tree and pretty print; working web links; SVG preview and source; text size |
+| 🖼️ | **Pictures** | Swipeable folder gallery, sharp tiled zoom, animated images, EXIF |
+| 🎬 | **Video · Audio** | Picture-in-picture; gestures; speed control; audio-track switching; subtitles (SRT, VTT, ASS) with styling; AC3, DTS and TrueHD through FFmpeg |
+| 🗜️ | **ZIP** | Browse, extract, compress, and open ZipCrypto or AES-encrypted entries |
 
-A knowledge graph (KAG) was considered and left out: it adds nothing for a file app with a small model.
+🎨 **Page style** shows any document in **Original**, **Standard**, **Dark** or **Sepia**.
 
-Xfiles also exposes its actions to the system assistant through **Android AppFunctions**.
+💡 **At a glance** summarises any file and makes its dates, amounts, phone numbers and links tappable.
+
+### 🧰 Tools
+
+- 📄 **PDF:** merge, split, reorder, rotate, compress, watermark, sign, and password protect or unlock (AES-256).
+- 🔁 **Convert:** pictures ⇄ PDF, PDF → text, PDF → ZIP, and text → PDF with templates.
+- 📷 **Scanner:** corner adjustment, filters, and searchable (OCR) PDFs.
+- 🗜️ **Zip tools:** compress to ZIP and extract, with progress.
+- 🧹 **Tidy up:** finds duplicate and unneeded files.
+
+Every tool follows the same visual flow: **Pick → Adjust → Save**, with live previews.
+
+### 📚 Library
+
+- Recent files ranked by **frecency**, plus bookmarks, 12 type filters and typo-tolerant search with full-text search inside documents.
+- Multi-select, a home-screen widget, app shortcuts, **Open with** / **Share to** for 40+ types, and **Save to Downloads** for files opened from other apps.
 
 ---
 
-## MCP server: the engine as AI tools
+<a name="fily"></a>
 
-[`engine/crates/xfiles-mcp`](engine/crates/xfiles-mcp) is a standalone **Model Context Protocol** server, built on the official Rust SDK `rmcp`. It gives desktop AI clients such as Claude Desktop and Claude Code the same document engine the app uses. It has 13 tools:
+## 🤖 Fily: the on-device assistant
 
-- **Reading:** `read_document`, `search_document`, `glance` (including PDF text extraction with page numbers).
-- **PDF:** `pdf_merge`, `pdf_split`, `pdf_compress`, `pdf_reorder`, `pdf_rotate`, `pdf_watermark`, `pdf_protect`.
-- **Office:** `office_find_replace` (preview, then apply to a new file).
-- **ZIP:** `list_archive`, `extract_archive_entry`.
+<img align="right" src="docs/assets/xfiles-logo.svg" width="96" alt="" />
 
-Safety:
-- Access is sandboxed to the `--root` directories you pass (paths are canonicalised, including symlinks).
-- Inputs are never modified, and outputs are written atomically.
-- Each operation has a timeout and a size cap, and there is no network access.
+Fily is a voice assistant running a **350M-parameter model locally** through llama.cpp. It answers questions about your files, with page citations, and drives the app through 45 tools: open documents, run PDF tools, scroll and turn pages, tidy storage and more. It speaks its answers back on-device.
+
+| 🧠 Technique | 🎯 Why | ⚙️ How |
+|---|---|---|
+| **RAG** | A long PDF won't fit a 4K-token context | Passages of about 250 tokens, indexed with **BM25** in Rust, de-duplicated with MMR and labelled `[page N]` |
+| **KV-cache reuse** | Re-reading the long system prompt costs seconds | The context stays alive, and only the new suffix is decoded |
+| **GPU crash guard** | Some GPU drivers crash while loading models | A persisted state machine falls back to the CPU |
+| **Quick commands** | Instant screen control, no model round-trip | "Scroll down the page" or "next slide" act at once |
+| **Prompt contract test** | A retrained model must see the prompt it was trained on | The app's prompt is tested against training fixtures |
+
+The model downloads once, on request, from this repository's `models-v1` release. Training scripts are in [`training/`](training/README.md).
+
+<details>
+<summary>🔌 <b>MCP server: the engine as AI tools</b></summary>
+
+[`engine/crates/xfiles-mcp`](engine/crates/xfiles-mcp) is a **Model Context Protocol** server, built on the official Rust SDK `rmcp`. It gives desktop AI clients such as Claude Desktop and Claude Code the same document engine the app uses, with 13 tools for reading, PDF, Office find & replace and ZIP. Access is sandboxed to the `--root` directories you pass, inputs are never modified, outputs are written atomically, and there's no network access.
 
 ```bash
 cargo build --release --manifest-path engine/Cargo.toml -p xfiles-mcp
 claude mcp add xfiles -- /path/to/xfiles-mcp --root ~/Documents
 ```
-
-See the crate README for the Claude Desktop configuration.
-
----
-
-## Architecture
-
-```
-androidApp ─ Hilt wiring, navigation, flavors (dev/prod), widget, AppFunctions, Firebase (prod)
-feature/*  ─ library · reader · tools · editor · assistant · tidy      (Compose, MVVM, StateFlow)
-core/*     ─ designsystem (glass UI, motion, haptics) · documents (repositories, PDF/OCR, printing)
-sharedLogic ─ Kotlin Multiplatform domain: Fily session, prompt and tools, book layout, feedback, models
-documentEngine ─ Kotlin facade over the Rust engine (UniFFI bindings)
-engine/    ─ Rust workspace
-   document-parsers   PDF tools and text, DOCX/XLSX/PPTX/ODF/EPUB/legacy Office, ZIP, edits
-   document-search    BM25 passage index, LRU, typo-tolerant name index
-   document-glance    summaries and actionable items
-   document-imaging / document-tidy / document-core
-   fily-inference     llama.cpp runtime with KV-cache reuse
-   document-ffi       UniFFI surface for Android
-   xfiles-mcp         MCP server (host only)
-ffmpeg/    ─ Media3 FFmpeg audio extension with a Rust JNI bridge (FFmpeg itself is LGPL, linked dynamically)
-```
-
-**Main technologies**
-- Kotlin 2.4 and Compose BOM 2026.11, using frame-rate hints and the highest display refresh rate.
-- Hilt, Coroutines/Flow, Navigation 3, Media3, CameraX, ML Kit OCR, WorkManager, Glance.
-- Rust with UniFFI, llama.cpp and FFmpeg 7.1.
-- Builds with AGP 9.5 and R8 full mode, with baseline profiles.
+</details>
 
 ---
 
-## Privacy
+<a name="architecture"></a>
 
-- **Offline-first:** documents, file names and Fily conversations never leave the phone.
-- **Internet is used only for:**
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    A["📱 androidApp<br/>Hilt · navigation · splash · widget"]:::app
+    F["🧩 feature/*<br/>library · reader · tools · editor · assistant · tidy<br/><i>MVVM · UiState / UiEvent · use cases</i>"]:::feature
+    D["🎨 core/designsystem<br/>glass UI · motion · haptics"]:::core
+    C["📂 core/documents<br/>repositories · PDF render · archives"]:::core
+    S["🧠 sharedLogic (KMP)<br/>Fily · search · models · settings"]:::shared
+    E["🔗 documentEngine<br/>UniFFI bindings"]:::bridge
+    R["🦀 Rust engine<br/>parsers · PDF tools · BM25 search · llama.cpp"]:::rust
+    A --> F --> D
+    F --> C --> E
+    F --> S
+    S --> E --> R
+    classDef app fill:#E11D48,color:#fff,stroke:#BE123C
+    classDef feature fill:#7F52FF,color:#fff,stroke:#5B3BD1
+    classDef core fill:#0EA5E9,color:#fff,stroke:#0369A1
+    classDef shared fill:#10B981,color:#fff,stroke:#047857
+    classDef bridge fill:#F59E0B,color:#fff,stroke:#B45309
+    classDef rust fill:#B7410E,color:#fff,stroke:#7C2D12
+```
+
+**Stack:**
+- **Kotlin 2.4**, Compose BOM 2026.11 with Material 3, Hilt, Coroutines/Flow, Navigation 3, Media3, CameraX, ML Kit and WorkManager.
+- **Rust** with UniFFI, llama.cpp and FFmpeg 7.1.
+- **AGP 9.5** with R8 full mode and baseline profiles.
+
+---
+
+## 🔒 Privacy
+
+- 📴 **Offline-first:** documents, file names and Fily conversations never leave the phone.
+- 🌐 **Internet is used only for:**
   - the one-time Fily model download, when you ask for it;
-  - opt-in crash reports (prod builds);
+  - opt-in crash reports;
   - feedback you choose to send.
-- **Feedback:** About → Send feedback goes to Cloud Firestore in prod builds that have Firebase. Nothing is sent automatically. You see exactly what is attached (message, optional app version and device model, optional reply email). Builds without Firebase use the share sheet instead.
-- **Uninstall:** backups are disabled, so uninstalling removes all app data.
+- 🗑️ **No backups:** uninstalling removes all app data.
 
 ---
 
-## Building
+<a name="build"></a>
 
-Builds are run on Linux or WSL with:
-- JDK 17
-- Android SDK with compile SDK 37
-- NDK `29.0.14206865`
-- Rust (version in `rust-toolchain.toml`)
-- CMake
+## 🛠️ Build from source
+
+**Requirements:** Linux or WSL, JDK 17, Android SDK (compile SDK 37), NDK `29.0.14206865`, Rust (see `rust-toolchain.toml`) and CMake.
 
 ```bash
-# 1. FFmpeg audio decoders (once; LGPL-only configuration, verified checksum)
-ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh
-
-# 2. App
-./gradlew :androidApp:assembleDevDebug          # dev flavor (com.xfiles.dev), no Firebase
-./gradlew :androidApp:assembleProdRelease       # prod, R8-minified
-
-# Prod with Crashlytics and Firestore feedback (needs androidApp/google-services.json, not committed)
-./gradlew -Pxfiles.firebaseCrashReports=true :androidApp:assembleProdRelease
+ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh   # optional: FFmpeg audio decoders (LGPL)
+./gradlew :androidApp:assembleDevDebug                     # dev build (com.xfiles.dev)
+./gradlew :androidApp:assembleProdRelease                  # release build, R8-minified
 ```
 
-Without step 1 the app still builds; AC3, DTS and similar audio then falls back to the phone's own decoders.
-
-To set up Firestore for feedback, see [`firebase/README.md`](firebase/README.md). The security rules only allow creating schema-checked feedback documents.
-
-### Tests
+### 🧪 Tests
 
 ```bash
-./gradlew :sharedLogic:testAndroidHostTest           # Kotlin domain tests
-cargo test --manifest-path engine/Cargo.toml --workspace   # Rust engine and MCP server
+./gradlew :sharedLogic:testAndroidHostTest                # Kotlin domain tests
+cargo test --manifest-path engine/Cargo.toml --workspace  # Rust engine and MCP server
 ```
+
+### 🚀 Releasing
+
+1. Bump `xfiles.version` in `gradle.properties` (for example `1.0.0-beta.03`) and commit.
+2. Push the matching tag: `git tag v1.0.0-beta.03 && git push origin v1.0.0-beta.03`.
+
+GitHub Actions then builds, tests, signs and publishes the APK.
 
 ---
 
-## Team
+<a name="contributing"></a>
 
-- **Kishore K** – Developer
-- **Robin Isac** – Developer
-- **Abhijith H M** – Market Analyst
+## 🤝 Contributing
 
-Built by SAHAPRAXIS. *Free doesn't mean cheap.*
+Contributions are welcome! 💜 Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first. It covers:
+- **architecture:** MVVM with unidirectional data flow, use cases, and the Rust engine;
+- **performance rules;**
+- **the current stack.**
 
-## Contributing
+Please follow the [code of conduct](CODE_OF_CONDUCT.md), and report security issues privately as described in [SECURITY.md](SECURITY.md).
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: it covers the architecture (MVVM with unidirectional data flow, use cases, and the Rust engine), the performance rules and how to test. Please follow the [code of conduct](CODE_OF_CONDUCT.md). Report security issues privately, as described in [SECURITY.md](SECURITY.md).
+---
 
-## Licence
+## 👥 Team
 
-Xfiles is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for third-party components. FFmpeg is used under the LGPL 2.1+, as separate replaceable shared libraries. The Fily model is downloaded separately and is governed by its base model's licence. Third-party licences are also listed in the app under About → Open-source licences.
+| | Name | Role |
+|---|---|---|
+| 👨‍💻 | **Kishore K** | Developer |
+| 👨‍💻 | **Robin Isac** | Developer |
+| 📈 | **Abhijith H M** | Market Analyst |
+
+<div align="center">
+
+**Built with ❤️ by SAHAPRAXIS** · *Free doesn't mean cheap.*
+
+</div>
+
+---
+
+## 📜 Licence
+
+Xfiles is licensed under the **[Apache License 2.0](LICENSE)**. See [NOTICE](NOTICE) for third-party components:
+- **FFmpeg** is used under the LGPL 2.1+, as separate replaceable shared libraries.
+- **The Fily model** is downloaded separately and governed by its base model's licence.
