@@ -209,7 +209,7 @@ Editing supports UTF-8 and UTF-16 with BOM where required. Mixed line endings/un
 
 ### Build profiles
 
-Android package/application ID: **`com.ezfiles`**. `com.ezfiles.android` is the source namespace, not the Firebase registration package.
+Android package/application ID: **`com.xfiles`**. `com.xfiles.android` is the source namespace, not the Firebase registration package.
 
 Prerequisites: JDK 17, Android SDK platform 37, NDK 29.0.14206865 and Rust stable 1.85+. Current pins include AGP 9.5.1, Gradle 9.7.1, Kotlin 2.4.20 and Compose Multiplatform 1.11.1. The [version catalog](../gradle/libs.versions.toml) and [Gradle properties](../gradle.properties) are authoritative; retain the current Gobley compatibility flags until a verified migration.
 
