@@ -21,8 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
+import com.xfiles.design.rememberHaptics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -45,7 +44,7 @@ internal fun LandscapeLibraryRail(
     onAbout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberHaptics()
     val hapticsEnabled = LocalHapticsEnabled.current
     Box(modifier.fillMaxHeight().width(112.dp).padding(4.dp), contentAlignment = Alignment.Center) {
         Column(
@@ -65,7 +64,7 @@ internal fun LandscapeLibraryRail(
                             .clip(EzShapes.Medium)
                             .then(if (item.selected) Modifier.background(EzColors.Selected, EzShapes.Medium) else Modifier)
                             .clickable(interaction, indication = null, role = Role.Tab) {
-                                if (hapticsEnabled && !item.selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                if (hapticsEnabled && !item.selected) haptics.segment() 
                                 item.onClick()
                             }
                             .semantics { selected = item.selected }

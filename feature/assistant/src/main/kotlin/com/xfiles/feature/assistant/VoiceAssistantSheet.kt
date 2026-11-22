@@ -195,6 +195,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
         }
     }
     BackHandler(onBack = close)
+    val haptics = com.xfiles.design.rememberHaptics()
 
     fun tapRobot() {
         when {
@@ -349,7 +350,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                     }
                     .clip(CircleShape)
                     .semantics { contentDescription = "Fily voice assistant" }
-                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }, enabled = enabled, onClick = ::tapRobot),
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }, enabled = enabled, onClick = { haptics.contextClick(); tapRobot() }),
             )
         }
 

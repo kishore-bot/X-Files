@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import com.xfiles.design.rememberHaptics
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -99,34 +100,35 @@ internal fun PdfPageBar(
 ) {
     val previous = pdfStepTarget(page, -1, twoPage, pageCount)
     val next = pdfStepTarget(page, 1, twoPage, pageCount)
+    val haptics = rememberHaptics()
     Column(Modifier.fillMaxWidth().glassBar()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = { previous?.let(onPage) }, enabled = !busy && previous != null) {
+            IconButton(onClick = { haptics.tick(); previous?.let(onPage) }, enabled = !busy && previous != null) {
                 Icon(EzIcons.ChevronLeft, "Previous page")
             }
             Box(
                 Modifier
                     .defaultMinSize(minWidth = 72.dp, minHeight = 48.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable(role = Role.Button, onClickLabel = "Go to page", onClick = onJump)
+                    .clickable(role = Role.Button, onClickLabel = "Go to page") { haptics.tick(); onJump() }
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("${page + 1} / $pageCount")
             }
-            IconButton(onClick = { next?.let(onPage) }, enabled = !busy && next != null) {
+            IconButton(onClick = { haptics.tick(); next?.let(onPage) }, enabled = !busy && next != null) {
                 Icon(EzIcons.ChevronRight, "Next page")
             }
             if (twoPage) {
-                FilledTonalIconButton(onClick = { onTwoPage(false) }, enabled = !busy && canSpread) {
+                FilledTonalIconButton(onClick = { haptics.toggle(false); onTwoPage(false) }, enabled = !busy && canSpread) {
                     Icon(EzIcons.TwoPages, "Single page")
                 }
             } else {
-                IconButton(onClick = { onTwoPage(true) }, enabled = !busy && canSpread) {
+                IconButton(onClick = { haptics.toggle(true); onTwoPage(true) }, enabled = !busy && canSpread) {
                     Icon(EzIcons.TwoPages, "Two pages")
                 }
             }
-            IconButton(onClick = onGrid, enabled = !busy && canSpread) {
+            IconButton(onClick = { haptics.tick(); onGrid() }, enabled = !busy && canSpread) {
                 Icon(EzIcons.Grid, "Page grid")
             }
         }

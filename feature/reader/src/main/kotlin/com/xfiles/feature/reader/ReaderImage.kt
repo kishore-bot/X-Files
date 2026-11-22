@@ -6,7 +6,11 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +41,9 @@ import kotlinx.coroutines.launch
 /** Past this zoom the picture's visible tiles are decoded at full resolution (only when [regions] is given). */
 private const val SHARP_ZOOM = 1.3f
 
+/** How far a one-finger drag must travel vertically, at fit, before it turns the page. */
+private const val SWIPE_PAGE_PX = 160f
+
 /**
  * A picture that zooms and pans, rotated in quarter turns. The base bitmap is drawn at fit; past [SHARP_ZOOM] the
  * tile layer ([SharpTiles]) draws full-resolution tiles over it in the same transform. [regions] enables that
@@ -55,6 +62,11 @@ internal fun ReaderImage(
     modifier: Modifier = Modifier.fillMaxSize(),
     /** Reports whether the picture is zoomed in past fit; the gallery pager uses it to hold paging. */
     onZoomChanged: (Boolean) -> Unit = {},
+    /**
+     * A vertical swipe while the page is at fit (not zoomed) turns the page: +1 for the next page, -1 for the previous.
+     * Zoomed in, the same drag pans the page instead.
+     */
+    onSwipePage: (Int) -> Unit = {},
     regions: PictureRegions? = null,
     animated: AnimatedImageDrawable? = null,
     animating: Boolean = false,
@@ -100,17 +112,42 @@ internal fun ReaderImage(
     Box(
         modifier.clipToBounds().onSizeChanged { viewport = it }
             .pointerInput(bitmap, rotation, viewport) {
-                detectTransformGestures(panZoomLock = true) { centroid, pan, change, _ ->
-                    // A text selection owns the drag: the page holds still while a word or a handle is moved.
-                    if (selection.dragging) return@detectTransformGestures
-                    val previous = zoom
-                    val updated = (previous * change).coerceIn(1f, 5f)
-                    val center = Offset(viewport.width / 2f, viewport.height / 2f)
-                    val focus = centroid - center
-                    val nextOffset = focus + (offset - focus) * (updated / previous) + pan
-                    zoom = updated
-                    onZoomChanged(updated > 1.001f)
-                    offset = clamp(nextOffset, updated)
+                // One gesture loop for pinch, pan and page swipes. A one-finger drag at fit is a swipe (page turn),
+                // so it no longer gets swallowed as a zero-size pan; zoomed in, the same drag pans the page.
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var swipeX = 0f
+                    var swipeY = 0f
+                    var swiped = false
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.count { it.pressed }
+                        // A text selection owns the drag: the page holds still while a word or a handle is moved.
+                        if (selection.dragging) continue
+                        val zoomChange = event.calculateZoom()
+                        val pan = event.calculatePan()
+                        val pinching = pressed > 1 && zoomChange != 1f
+                        if (pinching || zoom > 1.001f || pressed > 1) {
+                            val previous = zoom
+                            val updated = (previous * zoomChange).coerceIn(1f, 5f)
+                            val centroid = event.calculateCentroid(useCurrent = true)
+                            val center = Offset(viewport.width / 2f, viewport.height / 2f)
+                            val focus = centroid - center
+                            val nextOffset = focus + (offset - focus) * (updated / previous) + pan
+                            zoom = updated
+                            onZoomChanged(updated > 1.001f)
+                            offset = clamp(nextOffset, updated)
+                            event.changes.forEach { it.consume() }
+                        } else if (pressed == 1 && !swiped) {
+                            swipeX += pan.x
+                            swipeY += pan.y
+                            if (kotlin.math.abs(swipeY) > SWIPE_PAGE_PX && kotlin.math.abs(swipeY) > kotlin.math.abs(swipeX) * 1.5f) {
+                                swiped = true
+                                onSwipePage(if (swipeY < 0f) 1 else -1)
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
                 }
             }
             .pointerInput(bitmap, rotation, viewport) {

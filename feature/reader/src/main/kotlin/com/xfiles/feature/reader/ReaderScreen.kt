@@ -1,26 +1,18 @@
 package com.xfiles.feature.reader
 
 import androidx.compose.material3.TextButton
-import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.drawable.AnimatedImageDrawable
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -29,7 +21,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.CancellationException
@@ -62,6 +53,14 @@ import androidx.compose.foundation.layout.size
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import com.xfiles.tidy.SensitiveFindings
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.xfiles.design.rememberHaptics
+import com.xfiles.feature.reader.domain.isInDeviceStorage
+import kotlinx.coroutines.launch
 
 @Composable
 fun ReaderScreen(
@@ -140,6 +139,26 @@ fun ReaderScreen(
     var showJump by rememberSaveable(documentKey) { mutableStateOf(false) }
     var showOffice by rememberSaveable(documentKey) { mutableStateOf(false) }
     var showGrid by rememberSaveable(documentKey) { mutableStateOf(false) }
+    // Original view is remembered per file type; the menu toggle writes the choice back.
+    var original by rememberSaveable(documentKey) {
+        mutableStateOf(readOriginalView(context, originalViewKey(ready?.file?.name.orEmpty())))
+    }
+    val haptics = rememberHaptics()
+    val saveVm: SaveToDownloadsViewModel = hiltViewModel()
+    val saveState by saveVm.state.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val snackScope = rememberCoroutineScope()
+    val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        saveVm.onEvent(if (granted) SaveUiEvent.PermissionGranted else SaveUiEvent.PermissionDenied)
+    }
+    LaunchedEffect(saveState.needsPermission) {
+        if (saveState.needsPermission) storagePermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    }
+    LaunchedEffect(saveState.message) {
+        val text = saveState.message ?: return@LaunchedEffect
+        saveVm.onEvent(SaveUiEvent.Consumed)
+        snackScope.launch { snackbar.showSnackbar(text) }
+    }
     val structuredUi by (structuredEdits?.state ?: kotlinx.coroutines.flow.emptyFlow<StructuredEditState>()).collectAsState(StructuredEditState())
     val saveEdited = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(structuredMimeType(ready?.file?.name.orEmpty()))) { uri ->
         if (uri != null) structuredEdits?.saveCopy(uri)
@@ -156,6 +175,12 @@ fun ReaderScreen(
     BackHandler(enabled = showGrid, onBack = { showGrid = false })
     // Picture-in-Picture shows only the picture: no bars, hints or panels, and no margins.
     val inPip by LocalMediaPip.current.isInPictureInPicture.collectAsStateWithLifecycle()
+    // Video and audio take the whole screen, with their own close button, as in EzFiles.
+    val media = ready?.preview as? FilePreview.Media
+    if (ready != null && media != null) {
+        MediaScreen(ready.file, media.video, onClose = closeReader)
+        return
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = if (inPip) 0.dp else 12.dp, vertical = if (inPip) 0.dp else 8.dp)) {
         if (!inPip) Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
             BarIconButton(EzIcons.Back, "Back to library", closeReader, enabled = !markup.saving)
@@ -190,7 +215,10 @@ fun ReaderScreen(
                 }
             }
             if (ready != null && ready.preview != FilePreview.Unsupported) {
-                IconButton(onClick = onBookmark) {
+                IconButton(onClick = {
+                    haptics.toggle(!bookmarked)
+                    onBookmark()
+                }) {
                     Icon(
                         if (bookmarked) EzIcons.Bookmark else EzIcons.BookmarkOutline,
                         if (bookmarked) "Remove bookmark" else "Add bookmark",
@@ -198,7 +226,10 @@ fun ReaderScreen(
                 }
             }
             if (!editingMarkup && (ready?.preview is FilePreview.Picture || ready?.preview is FilePreview.Pdf)) {
-                IconButton(onClick = { documentKey?.let(onRotate) }) {
+                IconButton(onClick = {
+                    haptics.tick()
+                    documentKey?.let(onRotate)
+                }) {
                     Icon(EzIcons.Rotate, "Rotate clockwise")
                 }
             }
@@ -238,7 +269,16 @@ fun ReaderScreen(
                     showSearch = false
                     showSource = !showSource
                 }) {
-                    Icon(if (showSource) EzIcons.Eye else EzIcons.Code, if (showSource) "Show formatted" else "Show plain text")
+                    val svg = ready?.file?.name?.let(::isSvgName) == true
+                    Icon(
+                        if (showSource) EzIcons.Eye else EzIcons.Code,
+                        when {
+                            svg && showSource -> "Show preview"
+                            svg -> "Show source"
+                            showSource -> "Show formatted"
+                            else -> "Show plain text"
+                        },
+                    )
                 }
             }
             if (ready != null && text != null && ready.file.kind == DocumentKind.Text && !text.truncated) {
@@ -285,6 +325,26 @@ fun ReaderScreen(
                             text = { Text("Page: ${reading.name} reading") },
                             leadingIcon = { Icon(EzIcons.Eye, null) },
                             onClick = { menu = false; reading = reading.next() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (original) "Original view: on" else "Original view: off") },
+                            leadingIcon = { Icon(EzIcons.Eye, null) },
+                            onClick = {
+                                menu = false
+                                original = !original
+                                haptics.toggle(original)
+                                writeOriginalView(context, originalViewKey(ready.file.name), original)
+                            },
+                        )
+                        if (ready != null && !isInDeviceStorage(ready.file.uri)) DropdownMenuItem(
+                            text = { Text("Save to Downloads") },
+                            leadingIcon = { Icon(EzIcons.Share, null) },
+                            enabled = !saveState.saving,
+                            onClick = {
+                                menu = false
+                                haptics.tick()
+                                saveVm.onEvent(SaveUiEvent.Save(ready.file.uri, ready.file.name))
+                            },
                         )
                         if (structuredUi.edited) DropdownMenuItem(
                             text = { Text("Save edited copy") },
@@ -349,7 +409,7 @@ fun ReaderScreen(
                 }
                 is ReaderState.Failure -> Text(state.message)
                 // A gallery keeps one key across page turns, so the pager is not recreated when the file changes.
-                is ReaderState.Ready -> key(paged?.id ?: state.file.uri) {
+                is ReaderState.Ready -> CompositionLocalProvider(LocalOriginalView provides original) { key(paged?.id ?: state.file.uri) {
                     when (val preview = state.preview) {
                         is FilePreview.Text -> {
                             val plain = showSearch || showSource
@@ -357,14 +417,18 @@ fun ReaderScreen(
                                 if (state.file.name.endsWith(".json", ignoreCase = true)) parseJsonOrNull(preview.content) else null
                             }
                             when {
-                                !plain && json != null -> JsonTreePreview(json)
+                                // SVG: the drawn picture by default, its highlighted markup under "Source".
+                                isSvgName(state.file.name) && !showSearch && !showSource -> HtmlPreview(svgAsHtml(preview.content), reading)
+                                isSvgName(state.file.name) && !showSearch -> CodePreview(preview.content, state.file.name, reading)
+                                !plain && json != null -> JsonTreePreview(json, preview.content)
                                 !plain && isSourceCode(state.file.name) -> CodePreview(preview.content, state.file.name, reading)
                                 else -> TextPreview(preview, showSearch, onSearchClose = { showSearch = false }, reading = reading)
                             }
                         }
                         is FilePreview.Html ->
                             if (showSearch || showSource) TextPreview(preview.text, showSearch, onSearchClose = { showSearch = false }, reading = reading)
-                            else HtmlPreview(preview.html, reading)
+                            // Relative links open the sibling file through the same nested-open path as archive entries.
+                            else HtmlPreview(preview.html, reading, baseUri = state.file.uri, onOpenSibling = onOpenArchiveEntry)
                         is FilePreview.Structured -> if (isZipName(state.file.name)) {
                             ArchiveBrowser(archive = state.file.uri, onOpenFile = onOpenArchiveEntry)
                         } else {
@@ -450,14 +514,15 @@ fun ReaderScreen(
                                         highlights(preview.page),
                                         text = textSource(preview.page),
                                         marks = marksOn(preview.page),
+                                        onSwipePage = { delta -> onPage((preview.page + delta).coerceIn(0, preview.pageCount - 1)) },
                                     )
                                 }
                             }
                         }
-                        is FilePreview.Media -> MediaScreen(state.file, preview.video)
+                        is FilePreview.Media -> MediaScreen(state.file, preview.video, closeReader)
                         FilePreview.Unsupported -> ExternalOpen(state.file)
                     }
-                }
+                } }
             }
         }
         if (ready?.bookmarkError == true) {
@@ -482,6 +547,12 @@ fun ReaderScreen(
                 PdfJumpDialog(pdf.page, pdf.pageCount, onJump = onPage, onDismiss = { showJump = false })
             }
         }
+        if (saveState.saving) {
+            saveState.progress?.let { fraction ->
+                LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+            } ?: LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        SnackbarHost(snackbar, Modifier.align(Alignment.CenterHorizontally))
     }
     val summaryState = ready?.summary
     if (ready != null && summaryState != null) {
@@ -508,81 +579,4 @@ fun ReaderScreen(
             confirmButton = { TextButton(onClick = onBack) { Text("Discard") } },
         )
     }
-}
-
-@Composable
-private fun DocumentPasswordDialog(state: ReaderState.Password, onUnlock: (String) -> Unit, onDismiss: () -> Unit) {
-    val password = remember(state.file.uri, state.incorrect) { TextFieldState() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Unlock document") },
-        text = {
-            OutlinedSecureTextField(
-                state = password,
-                label = { Text("Password") },
-                isError = state.incorrect,
-                supportingText = if (state.incorrect) ({ Text("That password did not unlock the file.") }) else null,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onUnlock(password.text.toString()) }, enabled = password.text.isNotEmpty()) {
-                Text("Unlock")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-internal fun ExternalOpen(file: FileEntry, message: String = "An in-app preview is unavailable for this file.") {
-    val context = LocalContext.current
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(message)
-        TextButton(onClick = {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(file.uri, context.contentResolver.getType(file.uri) ?: "application/octet-stream")
-                clipData = ClipData.newRawUri(file.name, file.uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            try {
-                context.startActivity(Intent.createChooser(intent, "Open with"))
-            } catch (_: ActivityNotFoundException) {
-                Toast.makeText(context, "No app can open this file.", Toast.LENGTH_SHORT).show()
-            }
-        }) { Text("Open with") }
-    }
-}
-
-@Composable
-private fun SummaryDialog(
-    state: SummaryState,
-    documentName: String,
-    onReference: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("At a glance") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                when (state) {
-                    SummaryState.Loading -> LinearProgressIndicator(Modifier.fillMaxWidth())
-                    SummaryState.Error -> Text("This document could not be summarized.")
-                    is SummaryState.Ready -> {
-                        val summary = state.analysis
-                        if (summary.wordCount > 0u) {
-                            Text("${summary.wordCount} words \u00B7 ${summary.readingMinutes} min read")
-                        }
-                        if (summary.items.isNotEmpty()) GlanceItemGroups(summary.items, documentName, onReference)
-                        if (summary.keySentences.isEmpty() && summary.keywords.isEmpty() && summary.items.isEmpty()) {
-                            Text("No summary is available for this text.")
-                        }
-                        summary.keySentences.forEach { Text(it) }
-                        if (summary.keywords.isNotEmpty()) Text(summary.keywords.joinToString(", "))
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-    )
 }

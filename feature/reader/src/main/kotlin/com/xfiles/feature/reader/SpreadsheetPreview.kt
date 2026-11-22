@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import com.xfiles.design.rememberHaptics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -113,6 +114,7 @@ internal fun SpreadsheetPreview(
     val columns = sheet.columnCount()
     val frozenColumns = (if (freezeColumn) maxOf(fromFile.columns, 1) else fromFile.columns).coerceIn(0, columns)
 
+    val haptics = rememberHaptics()
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (workbook.sheets.size > 1) {
             val index = workbook.sheets.indexOf(sheet).coerceAtLeast(0)
@@ -120,15 +122,15 @@ internal fun SpreadsheetPreview(
                 workbook.sheets.forEachIndexed { tab, candidate ->
                     Tab(
                         selected = tab == index,
-                        onClick = { selected = tab },
+                        onClick = { haptics.segment(); selected = tab },
                         text = { Text(candidate.title, overflow = TextOverflow.Ellipsis, maxLines = 1) },
                     )
                 }
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = freezeRow, onClick = { freezeRow = !freezeRow }, label = { Text("Freeze first row") })
-            FilterChip(selected = freezeColumn, onClick = { freezeColumn = !freezeColumn }, label = { Text("Freeze first column") })
+            FilterChip(selected = freezeRow, onClick = { haptics.toggle(!freezeRow); freezeRow = !freezeRow }, label = { Text("Freeze first row") })
+            FilterChip(selected = freezeColumn, onClick = { haptics.toggle(!freezeColumn); freezeColumn = !freezeColumn }, label = { Text("Freeze first column") })
         }
         if (document.truncated) Text("Showing the rows within the preview limit.", color = EzColors.TextSecondary)
         key(sheet) {
@@ -156,6 +158,7 @@ private fun ColumnScope.SheetGrid(
     val scrollable = (columns - frozenColumns).coerceAtLeast(0)
     val start = (frozenColumns + firstColumn.coerceIn(0, maxOf(scrollable - 1, 0)))
     val end = (start + COLUMNS_PER_VIEW).coerceAtMost(columns)
+    val haptics = rememberHaptics()
     val horizontal = rememberScrollState()
     val vertical = rememberLazyListState()
     val leftWidth = (LABEL_WIDTH + CELL_WIDTH * frozenColumns).dp
@@ -167,11 +170,11 @@ private fun ColumnScope.SheetGrid(
 
     if (scrollable > COLUMNS_PER_VIEW) {
         Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = { firstColumn = (firstColumn - COLUMNS_PER_VIEW).coerceAtLeast(0) }, enabled = start > frozenColumns) {
+            IconButton(onClick = { haptics.tick(); firstColumn = (firstColumn - COLUMNS_PER_VIEW).coerceAtLeast(0) }, enabled = start > frozenColumns) {
                 Icon(EzIcons.ChevronLeft, "Previous columns")
             }
             Text("${columnName(start)}–${columnName(end - 1)}")
-            IconButton(onClick = { firstColumn += COLUMNS_PER_VIEW }, enabled = end < columns) {
+            IconButton(onClick = { haptics.tick(); firstColumn += COLUMNS_PER_VIEW }, enabled = end < columns) {
                 Icon(EzIcons.ChevronRight, "Next columns")
             }
         }
@@ -252,6 +255,7 @@ private fun GridRow(
     palette: Map<Int, CellLook>,
     onOpen: (number: Int, column: Int, text: String) -> Unit,
 ) {
+    val haptics = rememberHaptics()
     // The height comes from the whole row, so the pinned and scrolling panes always line up.
     val number = row.row ?: fallback
     val wrap = row.styles.any { palette[it]?.wrap == true }
@@ -262,13 +266,14 @@ private fun GridRow(
             val text = row.cells.getOrNull(column).orEmpty()
             val look = row.styles.getOrNull(column)?.let(palette::get)
             val spans = sheet.runs[number to column].orEmpty()
-            SpreadsheetCell(text, look, spans, row.header, height, onClick = { onOpen(number, column, text) })
+            SpreadsheetCell(text, look, spans, row.header, height, onClick = { haptics.tick(); onOpen(number, column, text) })
         }
     }
 }
 
 @Composable
 private fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: () -> Unit, onSaved: () -> Unit) {
+    val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
     val reference = "${columnName(target.column)}${target.row}"
     var loading by remember(target) { mutableStateOf(true) }
@@ -341,7 +346,7 @@ private fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: ()
             }
         },
         confirmButton = {
-            if (!readOnly) TextButton(onClick = ::save, enabled = !loading && !busy) { Text("Save") }
+            if (!readOnly) TextButton(onClick = { haptics.confirm(); save() }, enabled = !loading && !busy) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(if (readOnly) "Close" else "Cancel") } },
     )

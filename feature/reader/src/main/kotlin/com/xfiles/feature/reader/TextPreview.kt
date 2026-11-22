@@ -46,7 +46,7 @@ internal fun TextPreview(
     reading: ReadingTheme = ReadingTheme.Standard,
 ) {
     val content = preview.content
-    val palette = reading.palette()
+    val palette = reading.palette() ?: if (LocalOriginalView.current) ORIGINAL_PALETTE else null
     val sections = remember(content) { textSections(content) }
     val search = rememberTextFieldState()
     val query = if (showSearch) search.text.toString() else ""

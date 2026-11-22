@@ -41,11 +41,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
+import com.xfiles.design.rememberHaptics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -95,7 +94,7 @@ internal fun ScanReview(
     var quad by remember(photo) { mutableStateOf(initial ?: InsetPage) }
     var grabbed by remember(photo) { mutableStateOf(-1) }
     var boxPx by remember { mutableStateOf(IntSize.Zero) }
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberHaptics()
     val reach = with(LocalDensity.current) { 48.dp.toPx() }
     val picture = loaded?.getOrNull()
     val image = remember(picture) { picture?.asImageBitmap() }
@@ -171,7 +170,7 @@ internal fun ScanReview(
                                             grabbed = corner
                                             travel = Offset.Zero
                                             anchor = quad.corners[corner].let { Offset(it.x, it.y) }
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                             haptics.longPress() 
                                         }
                                     },
                                     onDrag = { change, drag ->
@@ -188,7 +187,7 @@ internal fun ScanReview(
                                         if (corner >= 0) {
                                             corner = -1
                                             grabbed = -1
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                             haptics.gestureStart() 
                                         }
                                     },
                                     onDragCancel = {

@@ -83,7 +83,14 @@ internal fun StructuredPreview(document: StructuredDocument, editing: Structured
 
 @Composable
 private fun DocumentBlocks(document: StructuredDocument) {
-    Box(Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp), contentAlignment = Alignment.TopCenter) {
+    // Consecutive table rows form one table item, so a table scrolls and aligns as a single unit.
+    val items = remember(document) { documentItems(document.blocks) }
+    val page = if (LocalOriginalView.current) {
+        Modifier.fillMaxSize().background(Color.White, RoundedCornerShape(16.dp))
+    } else {
+        Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
+    }
+    Box(page, contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier.widthIn(max = 760.dp).fillMaxWidth(),
             contentPadding = PaddingValues(16.dp),
@@ -91,8 +98,11 @@ private fun DocumentBlocks(document: StructuredDocument) {
         ) {
             if (document.truncated) item { Text("Showing the beginning of this file.", color = EzColors.TextSecondary) }
             if (document.blocks.isEmpty()) item { Text("This file has no readable content.") }
-            itemsIndexed(document.blocks, key = { index, _ -> index }) { _, block ->
-                DocumentBlock(block)
+            itemsIndexed(items, key = { index, _ -> index }) { _, item ->
+                when (item) {
+                    is DocumentItem.Single -> DocumentBlock(item.block)
+                    is DocumentItem.Table -> DocumentTable(item.rows)
+                }
             }
         }
     }
@@ -149,22 +159,8 @@ internal fun DocumentBlock(block: ContentBlock) {
                 )
             }
         }
-        is ContentBlock.TableRow -> {
-            val dark = themeIsDark()
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                block.cells.forEachIndexed { column, cell ->
-                    val spans = block.cellSpans.getOrNull(column).orEmpty()
-                    val styled = remember(cell, spans, dark) { richText(cell, spans, dark) }
-                    Box(
-                        Modifier.width(140.dp).border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
-                            .then(if (block.header) Modifier.background(MaterialTheme.colorScheme.surfaceVariant) else Modifier)
-                            .padding(8.dp),
-                    ) {
-                        Text(styled, fontWeight = if (block.header) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        }
+        // A lone row (outside DocumentBlocks grouping) draws as a one-row table.
+        is ContentBlock.TableRow -> DocumentTable(listOf(block))
         is ContentBlock.Section -> Text(block.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
         is ContentBlock.Entry -> {
             val context = LocalContext.current

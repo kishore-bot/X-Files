@@ -40,8 +40,13 @@ class PdfToolsViewModel @Inject constructor(
     private val mutableOpen = MutableStateFlow<OpenTool?>(null)
     val open: StateFlow<OpenTool?> = mutableOpen.asStateFlow()
 
-    fun open(tool: OpenTool?) {
+    /** True when the open tool was picked in the PDF tools grid: back returns there. Otherwise back leaves Tools. */
+    var openedFromHub = false
+        private set
+
+    fun open(tool: OpenTool?, fromHub: Boolean = false) {
         if (tool is OpenTool.Pdf) selectAction(tool.action)
+        openedFromHub = fromHub
         mutableOpen.value = tool
     }
 
@@ -50,6 +55,7 @@ class PdfToolsViewModel @Inject constructor(
         if (mutableState.value.busy) return
         mutableState.value.output?.file?.delete()
         mutableState.value = PdfToolsState(action = action)
+        openedFromHub = false
         mutableOpen.value = OpenTool.Pdf(action)
         pick(uris)
     }

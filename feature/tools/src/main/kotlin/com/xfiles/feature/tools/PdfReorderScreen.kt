@@ -40,10 +40,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalHapticFeedback
+import com.xfiles.design.rememberHaptics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -137,7 +136,7 @@ private fun PdfReorderGrid(
     modifier: Modifier = Modifier,
 ) {
     val gridState = rememberLazyGridState()
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberHaptics()
     val currentSlots by rememberUpdatedState(slots)
     val currentMove by rememberUpdatedState(onMove)
     var dragging by remember { mutableStateOf<Int?>(null) }
@@ -169,7 +168,7 @@ private fun PdfReorderGrid(
                             onDragStart = {
                                 dragging = slot.id
                                 dragOffset = Offset.Zero
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                 haptics.longPress() 
                             },
                             onDragEnd = {
                                 dragging = null
@@ -195,7 +194,7 @@ private fun PdfReorderGrid(
                                             dragOffset.y + dragged.offset.y - target.offset.y,
                                         )
                                         currentMove(from, target.index)
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        haptics.gestureStart()
                                     }
                                 }
                             },

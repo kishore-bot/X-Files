@@ -2,8 +2,12 @@ package com.xfiles.feature.reader
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,13 +30,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -46,11 +55,16 @@ import com.xfiles.documents.book.spanInBlock
 import com.xfiles.documents.structure.ContentBlock
 import com.xfiles.documents.structure.TextSpan
 
-/** What a block reports back: a footnote tapped, a link into the book, a highlight or note tapped. */
+/**
+ * What a block reports back: a footnote tapped, a link into the book or out of it, a highlight or
+ * note tapped, and a picture tapped.
+ */
 internal class BookBlockActions(
     val onNoteLink: (href: String) -> Unit,
     val onInternalLink: (href: String) -> Unit,
+    val onExternalLink: (url: String) -> Unit,
     val onMark: (block: Int, mark: TextMark) -> Unit,
+    val onPicture: (ContentBlock.Image) -> Unit,
     val selection: BookSelectionController,
 )
 
@@ -60,8 +74,8 @@ internal val BookCellWidth = 140.dp
 /**
  * One block of the book. Text blocks take part in selection: a long press selects the word under
  * the finger, and a drag, which may cross into other text blocks on the page, extends it. A tap on
- * a footnote or a link, or on a marked range, reports it. Table cells report their links too.
- * Other blocks (pictures) are drawn by the shared document blocks.
+ * a footnote or a link, or on a marked range, is handled here; any other tap goes on to the page,
+ * where the tap zones turn pages or toggle the bars. Table cells report their links too.
  */
 @Composable
 internal fun BookBlockView(
@@ -101,6 +115,9 @@ internal fun BookBlockView(
         )
         ContentBlock.Divider -> HorizontalDivider(color = palette.secondaryText.copy(alpha = 0.3f))
         is ContentBlock.TableRow -> BookTableRow(block, typography, palette, actions)
+        is ContentBlock.Image -> Box(Modifier.fillMaxWidth().clickable { actions.onPicture(block) }) {
+            CompositionLocalProvider(LocalContentColor provides palette.text) { DocumentBlock(block) }
+        }
         else -> CompositionLocalProvider(LocalContentColor provides palette.text) {
             DocumentBlock(block)
         }
@@ -142,7 +159,7 @@ private fun BookText(
     val live = actions.selection.selection
     val selected = live?.let { spanInBlock(it.start, it.end, index, text.length) }
     val annotated = remember(text, spans, marks, selected, palette) {
-        val base = richText(text, spans, palette.onDark)
+        val base = bookRichText(text, spans, palette.onDark, palette.link)
         buildAnnotatedString {
             append(base)
             for (segment in marks.segments()) {
@@ -169,20 +186,26 @@ private fun BookText(
             .fillMaxWidth()
             .onGloballyPositioned { coords = it }
             .pointerInput(text, spans) {
-                detectTapGestures { position ->
-                    // The first tap after a selection only clears it.
+                // Only a tap this block acts on is consumed; a plain tap passes on to the page's tap zones.
+                fun handle(position: Offset): Boolean {
                     if (currentActions.selection.selection != null) {
                         currentActions.selection.clear()
-                        return@detectTapGestures
+                        return true
                     }
-                    val result = layout ?: return@detectTapGestures
+                    val result = layout ?: return false
                     val offset = result.getOffsetForPosition(position)
-                    val link = linkAt(spans, offset)
-                    if (link != null) {
-                        currentActions.follow(link)
-                        return@detectTapGestures
+                    linkAt(spans, offset)?.let {
+                        currentActions.follow(it)
+                        return true
                     }
-                    currentMarks.at(offset).lastOrNull()?.let { currentActions.onMark(index, it) }
+                    val mark = currentMarks.at(offset).lastOrNull() ?: return false
+                    currentActions.onMark(index, mark)
+                    return true
+                }
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val up = waitForUpOrCancellation() ?: return@awaitEachGesture
+                    if (handle(up.position)) up.consume()
                 }
             }
             .pointerInput(text, index) {
@@ -233,7 +256,7 @@ private fun BookCell(
 ) {
     val currentActions by rememberUpdatedState(actions)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val styled = remember(text, spans, palette) { richText(text, spans, palette.onDark) }
+    val styled = remember(text, spans, palette) { bookRichText(text, spans, palette.onDark, palette.link) }
     Box(
         Modifier
             .width(BookCellWidth)
@@ -261,16 +284,46 @@ private fun BookCell(
     }
 }
 
-/** The link under [offset] in a block's spans: a footnote wins over a link into the book. Null when there is none. */
+/**
+ * The text with its links styled as links: the primary colour and an underline, each a
+ * [LinkAnnotation] so the link is part of the annotated string. Taps are handled by the block.
+ */
+internal fun bookRichText(text: String, spans: List<TextSpan>, onDark: Boolean, linkColor: Color): AnnotatedString {
+    val base = richText(text, spans, onDark)
+    return buildAnnotatedString {
+        append(base)
+        val styles = TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))
+        for (span in spans) {
+            val link = span.link ?: continue
+            val start = span.start.coerceIn(0, text.length)
+            val end = span.end.coerceIn(start, text.length)
+            if (start == end) continue
+            addLink(LinkAnnotation.Clickable(tag = link, styles = styles, linkInteractionListener = null), start, end)
+        }
+    }
+}
+
+/** Whether [link] goes outside the book: a web address or an email. */
+internal fun isExternalLink(link: String): Boolean =
+    link.startsWith("https://", ignoreCase = true) ||
+        link.startsWith("http://", ignoreCase = true) ||
+        link.startsWith("mailto:", ignoreCase = true)
+
+/**
+ * The link under [offset] in a block's spans. A footnote wins over a link into the book, which wins
+ * over one outside it. Null when there is none.
+ */
 internal fun linkAt(spans: List<TextSpan>, offset: Int): TextSpan? {
     var book: TextSpan? = null
+    var external: TextSpan? = null
     for (span in spans) {
         if (offset < span.start || offset >= span.end) continue
         val link = span.link ?: continue
         if (link.startsWith(BookManifest.NOTE_PREFIX)) return span
         if (book == null && link.startsWith(BookManifest.LINK_PREFIX)) book = span
+        if (external == null && isExternalLink(link)) external = span
     }
-    return book
+    return book ?: external
 }
 
 /** Reports a tapped link span to the handler for its kind. */
@@ -279,5 +332,6 @@ private fun BookBlockActions.follow(span: TextSpan) {
     when {
         link.startsWith(BookManifest.NOTE_PREFIX) -> onNoteLink(link)
         link.startsWith(BookManifest.LINK_PREFIX) -> onInternalLink(link.removePrefix(BookManifest.LINK_PREFIX))
+        isExternalLink(link) -> onExternalLink(link)
     }
 }

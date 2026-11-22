@@ -52,18 +52,3 @@ fun rememberEzHaptics(): EzHaptics {
     return remember(feedback, enabled) { EzHaptics(feedback, enabled) }
 }
 
-/**
- * Plays [feedback] when [value] changes to something new, such as a result appearing or an error being set. The
- * value present on first composition (or restored after a rotation) is not replayed.
- */
-@Composable
-fun <T> HapticOnChange(value: T, feedback: EzHaptics.(T) -> Unit) {
-    val haptics = rememberEzHaptics()
-    var seen by remember { mutableStateOf(value) }
-    LaunchedEffect(value) {
-        if (value != seen) {
-            seen = value
-            haptics.feedback(value)
-        }
-    }
-}

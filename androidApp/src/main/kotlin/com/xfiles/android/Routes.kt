@@ -15,4 +15,6 @@ sealed interface Route : NavKey {
     @Serializable data object Tools : Route
     @Serializable data object About : Route
     @Serializable data object Tidy : Route
+    @Serializable data object CompressZip : Route
+    @Serializable data object ExtractArchive : Route
 }

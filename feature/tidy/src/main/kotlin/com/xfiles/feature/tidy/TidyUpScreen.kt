@@ -50,7 +50,7 @@ import com.xfiles.design.EzShapes
 import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
-import com.xfiles.design.rememberEzHaptics
+import com.xfiles.design.rememberHaptics
 import com.xfiles.tidy.IdenticalGroup
 import com.xfiles.tidy.SimilarGroup
 import com.xfiles.tidy.TidyCollection
@@ -75,7 +75,7 @@ private enum class TidySection(val label: String) {
 fun TidyUpScreen(viewModel: TidyViewModel, onBack: () -> Unit, onOpen: (TidyFile) -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<TidyFile?>(null) }
-    val haptics = rememberEzHaptics()
+    val haptics = rememberHaptics()
     HapticOnChange(state.report) { if (it != null) confirm() }
     HapticOnChange(state.failure) { if (it != null) reject() }
     BackHandler(onBack = onBack)

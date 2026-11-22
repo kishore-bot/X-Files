@@ -8,6 +8,9 @@ import com.xfiles.documents.book.Highlight
 import com.xfiles.documents.book.HighlightColor
 import com.xfiles.documents.book.LruCache
 import com.xfiles.documents.book.ReadingSettings
+import com.xfiles.documents.structure.ContentBlock
+import com.xfiles.feature.reader.domain.BookSearchHit
+import com.xfiles.feature.reader.domain.BookSearchUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
 import javax.inject.Inject
@@ -21,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Which bottom sheet of the reader is open. Each carries only what the sheet needs. */
 sealed interface BookSheet {
@@ -42,10 +46,40 @@ sealed interface BookSheet {
 
     /** The text of the note [noteId] being edited. */
     data class EditNote(val noteId: String, val quote: String, val text: String) : BookSheet
+
+    /** A link out of the book, shown for confirmation before it opens. */
+    data class ExternalLink(val url: String) : BookSheet
+
+    /** Find text in the book. The query and hits live in [BookUiState.search]. */
+    data object Search : BookSheet
+
+    /** A picture of the book, opened full screen from a tap on it. */
+    data class Picture(val image: ContentBlock.Image) : BookSheet
 }
 
 /** The part of a highlight in one block: the range of its text and the text itself. */
 data class HighlightPiece(val block: Int, val range: IntRange, val quote: String)
+
+/** The find-in-book state: the text asked for, and where it was found so far. */
+data class BookSearchState(
+    val query: String = "",
+    val hits: List<BookSearchHit> = emptyList(),
+    val searching: Boolean = false,
+)
+
+/** What the reader's screen can ask of its ViewModel. The newer features go through here. */
+sealed interface BookEvent {
+    data class SetMode(val mode: BookReadingMode) : BookEvent
+
+    /** Shows the chrome (bars) when hidden, hides it when shown. */
+    data object ToggleChrome : BookEvent
+
+    data class Search(val blocks: List<ContentBlock>, val query: String) : BookEvent
+
+    data object ClearSearch : BookEvent
+
+    data class OpenExternal(val url: String) : BookEvent
+}
 
 /**
  * Immutable UI state of the reader. [key] is null until the book's annotations are loaded.
@@ -58,6 +92,11 @@ data class BookUiState(
     val sheet: BookSheet = BookSheet.None,
     /** Blocks the reader left by an internal link, most recent last; system back returns to them. */
     val backStack: List<Int> = emptyList(),
+    /** Paged or scroll; global to every book. */
+    val mode: BookReadingMode = BookReadingMode.Default,
+    /** Whether the top and bottom bars are shown. A centre tap toggles them. */
+    val chromeVisible: Boolean = true,
+    val search: BookSearchState = BookSearchState(),
 ) {
     val loaded: Boolean
         get() = key != null
@@ -72,12 +111,15 @@ data class BookUiState(
 }
 
 /**
- * Holds one open book's annotations, settings and sheet. Every change is applied to the state at
+ * Holds one open book's annotations, settings, mode and sheet. Every change is applied to the state at
  * once, and written to disk after a short quiet period, so a burst of edits or scrolling costs one
  * write. The pagination cache lives here so a settings change and back costs no re-measuring.
  */
 @HiltViewModel
-class BookViewModel @Inject constructor(private val store: BookStore) : ViewModel() {
+class BookViewModel @Inject constructor(
+    private val store: BookStore,
+    private val finder: BookSearchUseCase,
+) : ViewModel() {
     private val mutableState = MutableStateFlow(BookUiState())
     val state: StateFlow<BookUiState> = mutableState.asStateFlow()
 
@@ -89,18 +131,40 @@ class BookViewModel @Inject constructor(private val store: BookStore) : ViewMode
 
     private var saveJob: Job? = null
     private var settingsJob: Job? = null
+    private var searchJob: Job? = null
 
     /** Writes still pending when the ViewModel goes away, run outside its scope so they finish. */
     private val leftover = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Loads [key]'s annotations and the global reading settings. Calling it again for the open book does nothing. */
+    /** Loads [key]'s annotations, the global settings and the reading mode. Calling it again for the open book does nothing. */
     fun open(key: String) {
         if (mutableState.value.key == key) return
         viewModelScope.launch {
             val defaults = store.loadSettings()
             val annotations = store.loadAnnotations(key)
-            mutableState.update { BookUiState(key = key, defaults = defaults, annotations = annotations, sheet = it.sheet) }
+            val mode = store.loadReadingMode()
+            mutableState.update {
+                BookUiState(key = key, defaults = defaults, annotations = annotations, sheet = it.sheet, mode = mode)
+            }
         }
+    }
+
+    /** Handles a request from the reader screen. */
+    fun onEvent(event: BookEvent) {
+        when (event) {
+            is BookEvent.SetMode -> setMode(event.mode)
+            BookEvent.ToggleChrome -> mutableState.update { it.copy(chromeVisible = !it.chromeVisible) }
+            is BookEvent.Search -> search(event.blocks, event.query)
+            BookEvent.ClearSearch -> clearSearch()
+            is BookEvent.OpenExternal -> showSheet(BookSheet.ExternalLink(event.url))
+        }
+    }
+
+    /** Changes the reading mode for every book, and writes it to the store. */
+    fun setMode(mode: BookReadingMode) {
+        if (mutableState.value.mode == mode) return
+        mutableState.update { it.copy(mode = mode) }
+        viewModelScope.launch { store.saveReadingMode(mode) }
     }
 
     /**
@@ -138,6 +202,28 @@ class BookViewModel @Inject constructor(private val store: BookStore) : ViewMode
     }
 
     fun dismissSheet() = showSheet(BookSheet.None)
+
+    /**
+     * Finds [query] in [blocks]. The search waits a moment for typing to settle, then runs off the
+     * main thread; a stale result for an older query is dropped.
+     */
+    fun search(blocks: List<ContentBlock>, query: String) {
+        searchJob?.cancel()
+        mutableState.update { it.copy(search = BookSearchState(query = query, searching = query.isNotBlank())) }
+        if (query.isBlank()) return
+        searchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            val hits = withContext(Dispatchers.Default) { finder(blocks, query) }
+            mutableState.update {
+                if (it.search.query == query) it.copy(search = BookSearchState(query, hits, searching = false)) else it
+            }
+        }
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        mutableState.update { it.copy(search = BookSearchState()) }
+    }
 
     /** Remembers the block the reader is at. Frequent, so written after a longer pause. */
     fun savePosition(block: Int) {
@@ -244,5 +330,6 @@ class BookViewModel @Inject constructor(private val store: BookStore) : ViewMode
         const val EDIT_SAVE_DELAY_MS = 120L
         const val POSITION_SAVE_DELAY_MS = 800L
         const val SETTINGS_SAVE_DELAY_MS = 300L
+        const val SEARCH_DEBOUNCE_MS = 180L
     }
 }

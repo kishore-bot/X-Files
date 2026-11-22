@@ -24,7 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +53,7 @@ import com.xfiles.design.EzIcons
 import com.xfiles.design.EzOptionMenu
 import com.xfiles.design.EzTopBar
 import com.xfiles.design.EzShapes
+import com.xfiles.design.EzSwitch
 import androidx.compose.runtime.LaunchedEffect
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
@@ -299,7 +299,7 @@ private fun SwitchRow(title: String, body: String, checked: Boolean, onCheckedCh
             Text(title, style = MaterialTheme.typography.bodyLarge, color = EzColors.Text)
             Text(body, style = MaterialTheme.typography.bodySmall, color = EzColors.TextSecondary)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        EzSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

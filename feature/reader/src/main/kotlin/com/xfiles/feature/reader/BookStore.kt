@@ -33,6 +33,12 @@ class BookStore @Inject constructor(@ApplicationContext context: Context) {
         write(SETTINGS_FILE, ReadingSettings.encode(settings))
     }
 
+    suspend fun loadReadingMode(): BookReadingMode = BookReadingMode.fromStored(read(MODE_FILE))
+
+    suspend fun saveReadingMode(mode: BookReadingMode) {
+        write(MODE_FILE, mode.name)
+    }
+
     private suspend fun read(name: String): String? = withContext(lane) {
         val file = File(dir, name)
         if (!file.isFile || file.length() > MAX_FILE_BYTES) return@withContext null
@@ -55,6 +61,7 @@ class BookStore @Inject constructor(@ApplicationContext context: Context) {
 
     private companion object {
         const val SETTINGS_FILE = "reading-settings.json"
+        const val MODE_FILE = "reading-mode.txt"
         const val MAX_FILE_BYTES = 8L * 1024 * 1024
     }
 }

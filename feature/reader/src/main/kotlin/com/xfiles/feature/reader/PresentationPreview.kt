@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import com.xfiles.design.rememberHaptics
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -93,6 +94,7 @@ interface SlideEditor {
 
 @Composable
 internal fun PresentationPreview(document: StructuredDocument, slideEditor: SlideEditor? = null, onEdited: () -> Unit = {}) {
+    val haptics = rememberHaptics()
     val slides = remember(document.blocks) { groupSlides(document.blocks) }
     var current by rememberSaveable { mutableIntStateOf(0) }
     var notesVisible by rememberSaveable { mutableStateOf(false) }
@@ -133,7 +135,7 @@ internal fun PresentationPreview(document: StructuredDocument, slideEditor: Slid
         }
         if (document.truncated) Text("Showing the available slides within the preview limit.", color = EzColors.TextSecondary)
         Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { current = position - 1 }, enabled = position > 0) {
+            IconButton(onClick = { haptics.tick(); current = position - 1 }, enabled = position > 0) {
                 Icon(EzIcons.ChevronLeft, "Previous slide")
             }
             Column(Modifier.weight(1f)) {
@@ -144,8 +146,8 @@ internal fun PresentationPreview(document: StructuredDocument, slideEditor: Slid
                 Text(if (notesVisible) "Hide notes" else "Notes")
             }
             if (slideEditor != null) IconButton(onClick = { sorting = true }) { Icon(EzIcons.Grid, "Arrange slides") }
-            IconButton(onClick = { presenting = true }) { Icon(EzIcons.Fullscreen, "Present") }
-            IconButton(onClick = { current = position + 1 }, enabled = position < slides.lastIndex) {
+            IconButton(onClick = { haptics.confirm(); presenting = true }) { Icon(EzIcons.Fullscreen, "Present") }
+            IconButton(onClick = { haptics.tick(); current = position + 1 }, enabled = position < slides.lastIndex) {
                 Icon(EzIcons.ChevronRight, "Next slide")
             }
         }

@@ -7,6 +7,7 @@
       opt-in crash reports. Nothing else opens a connection; documents, search and Fily run on the device.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
@@ -16,7 +17,7 @@
         </intent>
     </queries>
     <application android:name=".XfilesApplication" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:hasFragileUserData="false" android:hardwareAccelerated="true" android:icon="@mipmap/ic_launcher" android:label="@string/app_name" android:theme="@style/Theme.Xfiles">
-        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:supportsPictureInPicture="true" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|layoutDirection">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/Theme.Xfiles.Starting" android:supportsPictureInPicture="true" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|layoutDirection">
             <!--
               Open with / Share to Xfiles from messaging, mail and browsers. Lists only what the engine reads, so
               legacy Office, JSON, YAML and the like are offered too. The three filters share one list: update all.

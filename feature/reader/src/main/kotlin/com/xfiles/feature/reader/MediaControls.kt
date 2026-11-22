@@ -1,31 +1,22 @@
 package com.xfiles.feature.reader
 
-import android.content.pm.ActivityInfo
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import com.xfiles.design.EzIcons
 
-/** The screen orientation the player asks for. [Auto] follows the system's rotation setting. */
-internal enum class MediaOrientation(val label: String, val requested: Int) {
-    Auto("Auto", ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED),
-    Landscape("Landscape", ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE),
-    Portrait("Portrait", ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT),
-}
-
-/** Playback speeds the player cycles through. */
+/** Playback speeds offered in Playback settings. */
 internal val MediaSpeedSteps: List<Float> = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 
 /** Index of 1x in [MediaSpeedSteps]. */
@@ -34,28 +25,53 @@ internal const val MediaSpeedDefault = 2
 internal fun speedLabel(speed: Float): String =
     (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "x"
 
-/** Speed, orientation and Picture-in-Picture buttons, shown over the top-right of the picture. */
+/** How the picture fills the screen, cycled from the menu. */
+internal enum class VideoScale(val label: String, val scale: ContentScale) {
+    Fit("Fit", ContentScale.Fit),
+    Fill("Fill (crop)", ContentScale.Crop),
+    Stretch("Stretch", ContentScale.FillBounds),
+    ;
+    fun next(): VideoScale = entries[(ordinal + 1) % entries.size]
+}
+
+/**
+ * A round player button: white and large for play/pause, translucent otherwise. [toggleOn] makes a switch
+ * (repeat) give the toggle cue; without it the button gives the ordinary tick.
+ */
 @Composable
-internal fun VideoOverlayControls(
-    speed: Float,
-    orientation: MediaOrientation,
-    onSpeed: () -> Unit,
-    onOrientation: () -> Unit,
-    onPictureInPicture: () -> Unit,
-    modifier: Modifier = Modifier,
+internal fun RoundButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    large: Boolean = false,
+    enabled: Boolean = true,
+    toggleOn: Boolean? = null,
 ) {
-    val textColors = ButtonDefaults.textButtonColors(contentColor = Color.White)
-    Row(
-        modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.Black.copy(alpha = 0.5f))
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val haptics = rememberMediaHaptics()
+    Box(
+        Modifier
+            .size(if (large) 56.dp else 48.dp)
+            .clip(CircleShape)
+            .background(if (large) Color.White else Color.White.copy(alpha = 0.16f))
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label) {
+                if (toggleOn != null) haptics.toggle(toggleOn) else haptics.tick()
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        TextButton(onClick = onSpeed, colors = textColors) { Text(speedLabel(speed)) }
-        TextButton(onClick = onOrientation, colors = textColors) { Text(orientation.label) }
-        IconButton(onClick = onPictureInPicture) {
-            Icon(EzIcons.PictureInPicture, "Picture-in-picture", tint = Color.White)
-        }
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = (if (large) Color.Black else Color.White).copy(alpha = if (enabled) 1f else 0.4f),
+            modifier = Modifier.size(if (large) 30.dp else 22.dp),
+        )
     }
+}
+
+/** "1:23" or "1:02:03". */
+internal fun formatTime(millis: Long): String {
+    val seconds = millis / 1000
+    val minutes = seconds / 60
+    val remainder = (seconds % 60).toString().padStart(2, '0')
+    return if (minutes < 60) "$minutes:$remainder" else "${minutes / 60}:${(minutes % 60).toString().padStart(2, '0')}:$remainder"
 }

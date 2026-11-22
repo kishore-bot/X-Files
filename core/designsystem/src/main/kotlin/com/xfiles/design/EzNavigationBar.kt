@@ -31,8 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -47,8 +45,7 @@ class EzNavItem(val label: String, val icon: ImageVector, val selected: Boolean,
 
 @Composable
 fun EzNavigationBar(items: List<EzNavItem>, modifier: Modifier = Modifier) {
-    val haptics = LocalHapticFeedback.current
-    val hapticsEnabled = LocalHapticsEnabled.current
+    val haptics = rememberHaptics()
     val reduced = LocalReducedMotion.current
     val selectedIndex = items.indexOfFirst { it.selected }
     BoxWithConstraints(modifier.fillMaxWidth().floatingGlass(EzShapes.Bar).padding(6.dp)) {
@@ -77,7 +74,7 @@ fun EzNavigationBar(items: List<EzNavItem>, modifier: Modifier = Modifier) {
                     Modifier.weight(1f).heightIn(min = 56.dp).pressScale(interaction, 0.92f)
                         .clip(EzShapes.Large)
                         .clickable(interaction, indication = null, role = Role.Tab) {
-                            if (hapticsEnabled && !item.selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                            if (!item.selected) haptics.segment()
                             item.onClick()
                         }
                         .semantics { selected = item.selected }
@@ -103,13 +100,12 @@ fun EzNavigationBar(items: List<EzNavItem>, modifier: Modifier = Modifier) {
 @Composable
 fun EzFloatingAction(text: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val interaction = remember { MutableInteractionSource() }
-    val haptics = LocalHapticFeedback.current
-    val hapticsEnabled = LocalHapticsEnabled.current
+    val haptics = rememberHaptics()
     Row(
         modifier.heightIn(min = 56.dp)
             .pressScale(interaction, 0.94f).floatingGlass(EzShapes.Pill, 0.65f)
             .clickable(interaction, indication = null, role = Role.Button) {
-                if (hapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                haptics.confirm()
                 onClick()
             }
             .padding(start = 10.dp, end = 20.dp, top = 10.dp, bottom = 10.dp),

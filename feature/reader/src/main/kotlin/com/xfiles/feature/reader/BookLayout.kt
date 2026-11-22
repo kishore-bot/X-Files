@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xfiles.design.EzColors
 import com.xfiles.documents.book.HighlightColor
 import com.xfiles.documents.book.PageIndex
 import com.xfiles.documents.book.ReadingLayout
@@ -32,6 +33,8 @@ internal class BookPalette(
     val onDark: Boolean,
     val selection: Color,
     val codeFill: Color,
+    /** Colour of links, so they read as links on every theme. */
+    val link: Color = EzColors.Primary,
 )
 
 internal fun bookPalette(theme: ReadingTheme): BookPalette = when (theme) {

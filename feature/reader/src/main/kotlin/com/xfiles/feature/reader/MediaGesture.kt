@@ -1,31 +1,18 @@
 package com.xfiles.feature.reader
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.Player
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /** The one-finger gesture that owns the current drag. */
 internal enum class MediaDrag { Seek, Brightness, Volume }
@@ -81,80 +68,131 @@ internal object MediaGestures {
     fun hitsBound(before: Float, after: Float): Boolean = before != after && (after == 0f || after == 1f)
 }
 
-/** Brightness / volume pill on one side of the picture: icon, level bar and percentage. */
+/**
+ * Taps on the picture: a tap shows or hides the controls, a double tap on a side skips 10 seconds, and a long
+ * press runs at double speed until the finger lifts.
+ */
 @Composable
-internal fun GestureLevelPill(kind: MediaDrag, level: Float, modifier: Modifier = Modifier) {
-    val label = if (kind == MediaDrag.Volume) "Volume" else "Brightness"
-    Column(
-        modifier
-            .width(48.dp)
-            .height(190.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.Black.copy(alpha = 0.6f))
-            .padding(vertical = 14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            if (kind == MediaDrag.Volume) MediaIcons.Volume else MediaIcons.Brightness,
-            label,
-            Modifier.size(20.dp),
-            tint = Color.White,
+internal fun Modifier.mediaTapGestures(
+    player: Player,
+    haptics: MediaHaptics,
+    onToggleControls: () -> Unit,
+    onSkip: (forward: Boolean) -> Unit,
+    onBoost: (on: Boolean) -> Unit,
+): Modifier {
+    val toggle by rememberUpdatedState(onToggleControls)
+    val skip by rememberUpdatedState(onSkip)
+    val boost by rememberUpdatedState(onBoost)
+    return this.pointerInput(player) {
+        var boosted = false
+        detectTapGestures(
+            onTap = { toggle() },
+            onDoubleTap = { offset ->
+                if (player.isCurrentMediaItemSeekable) {
+                    skip(offset.x >= size.width / 2f)
+                    haptics.segment()
+                }
+            },
+            onLongPress = {
+                haptics.longPress()
+                boosted = true
+                boost(true)
+            },
+            onPress = {
+                tryAwaitRelease()
+                if (boosted) {
+                    boosted = false
+                    boost(false)
+                }
+            },
         )
-        Spacer(Modifier.height(10.dp))
-        Box(
-            Modifier.width(4.dp).weight(1f).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.25f)),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Box(Modifier.width(4.dp).fillMaxHeight(level.coerceIn(0f, 1f)).background(Color.White))
-        }
-        Spacer(Modifier.height(10.dp))
-        Text("${(level.coerceIn(0f, 1f) * 100).roundToInt()}%", color = Color.White, style = MaterialTheme.typography.labelSmall)
     }
 }
 
 /**
- * What the current drag shows over the picture. Reads [drag] itself, so a finger moving does not
- * recompose the whole player, only this layer.
+ * One finger over the picture: a horizontal drag seeks, a vertical one on the left sets brightness, on the right
+ * volume. The gesture reports each step through [onDrag] (null when it ends) and seeks once, on release, through
+ * [onSeek]. Touches that start at the screen edge belong to the system and are ignored.
  */
 @Composable
-internal fun BoxScope.GestureOverlay(drag: State<MediaDragState?>, total: Long, position: Long) {
-    val gesture = drag.value ?: return
-    when (gesture.kind) {
-        MediaDrag.Brightness -> GestureLevelPill(gesture.kind, gesture.level, Modifier.align(Alignment.CenterStart).padding(start = 16.dp))
-        MediaDrag.Volume -> GestureLevelPill(gesture.kind, gesture.level, Modifier.align(Alignment.CenterEnd).padding(end = 16.dp))
-        MediaDrag.Seek -> if (total > 0L) ScrubBubble(gesture.positionMs, total, position)
-    }
-}
-
-/** "1:23 / 4:56" with the change from the current position, shown while seeking. */
-@Composable
-internal fun ScrubBubble(target: Long, total: Long, position: Long) {
-    val delta = (target - position) / 1000
-    Column(
-        Modifier.background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(14.dp)).padding(horizontal = 18.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("${formatTime(target)} / ${formatTime(total)}", color = Color.White, style = MaterialTheme.typography.titleMedium)
-        if (delta != 0L) {
-            Text(
-                (if (delta > 0) "+" else "−") + formatTime(abs(delta) * 1000),
-                color = Color.White.copy(alpha = 0.75f),
-                style = MaterialTheme.typography.bodySmall,
-            )
+internal fun Modifier.mediaDragGestures(
+    player: Player,
+    device: MediaDevice,
+    haptics: MediaHaptics,
+    enabled: Boolean,
+    onDrag: (MediaDragState?) -> Unit,
+    onSeek: (Long) -> Unit,
+): Modifier {
+    val density = LocalDensity.current
+    val slopPx = with(density) { MediaGestures.SLOP_DP.dp.toPx() }
+    val edgePx = with(density) { MediaGestures.EDGE_GUARD_DP.dp.toPx() }
+    val drag by rememberUpdatedState(onDrag)
+    val seek by rememberUpdatedState(onSeek)
+    return this.pointerInput(player, device, enabled) {
+        if (!enabled) return@pointerInput
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val width = size.width.toFloat()
+            val height = size.height.toFloat()
+            if (MediaGestures.inEdgeGuard(down.position.x, down.position.y, width, height, edgePx)) {
+                return@awaitEachGesture
+            }
+            var moved = Offset.Zero
+            var current: MediaDragState? = null
+            var released = false
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed) {
+                    released = true
+                    break
+                }
+                if (event.changes.count { it.pressed } > 1) break
+                moved += change.position - change.previousPosition
+                if (current == null) {
+                    if (moved.getDistance() < slopPx) continue
+                    current = when (MediaGestures.kindFor(moved.x, moved.y, down.position.x, width)) {
+                        MediaDrag.Seek -> MediaDragState(
+                            MediaDrag.Seek,
+                            startMs = player.currentPosition,
+                            positionMs = player.currentPosition,
+                        )
+                        MediaDrag.Brightness -> device.brightness().let {
+                            MediaDragState(MediaDrag.Brightness, startLevel = it, level = it)
+                        }
+                        MediaDrag.Volume -> device.volume().let {
+                            MediaDragState(MediaDrag.Volume, startLevel = it, level = it)
+                        }
+                    }
+                    haptics.gestureStart()
+                }
+                val state: MediaDragState = current ?: continue
+                change.consume()
+                val next = when (state.kind) {
+                    MediaDrag.Seek -> state.copy(
+                        positionMs = MediaGestures.seekFor(state.startMs, moved.x, width, player.duration),
+                    )
+                    MediaDrag.Brightness, MediaDrag.Volume -> state.copy(
+                        level = MediaGestures.levelFor(state.startLevel, moved.y, height),
+                    )
+                }
+                when (next.kind) {
+                    MediaDrag.Brightness -> device.setBrightness(next.level)
+                    MediaDrag.Volume -> device.setVolume(next.level)
+                    MediaDrag.Seek -> Unit
+                }
+                if (next.kind != MediaDrag.Seek && MediaGestures.hitsBound(state.level, next.level)) {
+                    haptics.segment()
+                }
+                current = next
+                drag(next)
+            }
+            // Seeking applies once, on release; a cancelled touch seeks nowhere.
+            current?.let {
+                haptics.gestureEnd()
+                if (released && it.kind == MediaDrag.Seek) seek(it.positionMs)
+            }
+            drag(null)
         }
     }
 }
-
-internal object MediaIcons {
-    val Brightness: ImageVector = mediaIcon(
-        "M20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm0-10c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z",
-    )
-    val Volume: ImageVector = mediaIcon(
-        "M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06A9 9 0 0 0 14 3.23z",
-    )
-}
-
-private fun mediaIcon(path: String): ImageVector =
-    ImageVector.Builder(name = "MediaIcon", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
-        .addPath(pathData = addPathNodes(path), fill = SolidColor(Color.Black))
-        .build()

@@ -30,8 +30,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -63,15 +61,14 @@ fun GlassIconButton(
     enabled: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val haptics = LocalHapticFeedback.current
-    val hapticsOn = LocalHapticsEnabled.current
+    val haptics = rememberHaptics()
     Box(
         modifier = modifier
             .size(size)
             .pressScale(interaction, 0.9f)
             .floatingGlass(CircleShape)
             .clickable(interaction, indication = null, enabled = enabled, role = Role.Button) {
-                if (hapticsOn) haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                haptics.tick()
                 onClick()
             }
             .semantics { this.contentDescription = contentDescription },
@@ -91,12 +88,16 @@ fun BarIconButton(
     tint: Color = EzColors.Text,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val haptics = rememberHaptics()
     Box(
         modifier = Modifier
             .size(40.dp)
             .pressScale(interaction, 0.85f)
             .clip(CircleShape)
-            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button) {
+                haptics.tick()
+                onClick()
+            }
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
@@ -115,8 +116,7 @@ fun EzChip(
     iconTint: Color = EzColors.Text,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val haptics = LocalHapticFeedback.current
-    val hapticsOn = LocalHapticsEnabled.current
+    val haptics = rememberHaptics()
     val base = modifier
         .heightIn(min = 40.dp)
         .pressScale(interaction)
@@ -125,7 +125,7 @@ fun EzChip(
     Row(
         modifier = surface
             .clickable(interaction, indication = null, role = Role.Tab) {
-                if (hapticsOn && !selected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                if (!selected) haptics.segment()
                 onClick()
             }
             .semantics { this.selected = selected }
@@ -156,12 +156,16 @@ fun EzTextButton(
     color: Color = EzColors.Accent,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val haptics = rememberHaptics()
     Box(
         modifier
             .heightIn(min = EzSpacing.Touch)
             .pressScale(interaction, 0.94f)
             .clip(EzShapes.Pill)
-            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button) {
+                haptics.tick()
+                onClick()
+            }
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -187,12 +191,16 @@ fun PrimaryActionButton(
     val interaction = remember { MutableInteractionSource() }
     val surface = if (enabled) Modifier.glossyPrimary(EzShapes.Pill, 14.dp) else Modifier.glass(EzShapes.Pill, 0.6f)
     val content = if (enabled) EzColors.OnPrimary else EzColors.TextSecondary.copy(alpha = 0.6f)
+    val haptics = rememberHaptics()
     Row(
         modifier = modifier
             .heightIn(min = 52.dp)
             .pressScale(interaction, 0.94f)
             .then(surface)
-            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interaction, indication = null, enabled = enabled, role = Role.Button) {
+                haptics.confirm()
+                onClick()
+            }
             .padding(PaddingValues(horizontal = if (icon != null) 24.dp else 18.dp, vertical = 12.dp)),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),

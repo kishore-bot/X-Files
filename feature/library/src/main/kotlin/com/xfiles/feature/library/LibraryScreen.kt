@@ -59,11 +59,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -77,6 +75,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xfiles.core.documents.ArchiveHandoff
 import com.xfiles.core.documents.FileBookmark
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FolderLibrary
@@ -109,7 +108,7 @@ import com.xfiles.design.floatingGlass
 import com.xfiles.design.glass
 import com.xfiles.design.glassCard
 import com.xfiles.design.pressScale
-import com.xfiles.design.rememberEzHaptics
+import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.library.LibraryCategory
 import com.xfiles.documents.library.libraryCategories
@@ -154,7 +153,7 @@ fun LibraryScreen(
     onRemoveFolder: (Uri) -> Unit,
     onRefresh: () -> Unit,
     onAbout: () -> Unit,
-    onTools: () -> Unit,
+    onTools: (LibraryTool) -> Unit,
     onFily: () -> Unit,
     onListedFiles: (List<FileEntry>) -> Unit,
 ) {
@@ -183,17 +182,27 @@ fun LibraryScreen(
     DisposableEffect(Unit) { onDispose(onStopSearch) }
     val window = LocalWindowInfo.current.containerDpSize
     val landscape = window.width >= 600.dp && window.width > window.height
-    val navItems = remember(tab, onTools) {
+    var toolsOpen by rememberSaveable { mutableStateOf(false) }
+    val navItems = remember(tab, toolsOpen) {
         listOf(
             EzNavItem("Library", EzIcons.Folder, tab == HomeTab.Library) { tab = HomeTab.Library },
             EzNavItem("Recent", EzIcons.History, tab == HomeTab.Recent) { tab = HomeTab.Recent },
             EzNavItem("Bookmarks", EzIcons.BookmarkOutline, tab == HomeTab.Bookmarks) { tab = HomeTab.Bookmarks },
-            EzNavItem("Tools", EzIcons.Apps, false, onTools),
+            EzNavItem("Tools", EzIcons.Apps, toolsOpen) { toolsOpen = true },
         )
     }
-    val haptics = LocalHapticFeedback.current
+    if (toolsOpen) {
+        ToolsSheet(
+            onSelect = {
+                toolsOpen = false
+                onTools(it)
+            },
+            onDismiss = { toolsOpen = false },
+        )
+    }
+    val haptics = rememberHaptics()
     val hapticsOn = LocalHapticsEnabled.current
-    val ezHaptics = rememberEzHaptics()
+    val ezHaptics = rememberHaptics()
     fun setPicked(file: FileEntry, on: Boolean) {
         if (on) {
             if (file !in picked) picked.add(file)
@@ -207,7 +216,7 @@ fun LibraryScreen(
         ezHaptics.toggle(on)
     }
     fun longPress(file: FileEntry) {
-        if (hapticsOn) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (hapticsOn) haptics.longPress() 
         setPicked(file, file !in picked)
     }
     fun actionsFor(file: FileEntry) = FileRowActions(
@@ -216,6 +225,14 @@ fun LibraryScreen(
         onShare = { onShareFiles(listOf(file)) },
         onPrint = { onPrint(file) },
         onRemove = if (tab == HomeTab.Recent) ({ ezHaptics.confirm(); onRemoveRecent(file) }) else null,
+        onCompress = {
+            ArchiveHandoff.stageCompress(listOf(file.uri))
+            onTools(LibraryTool.CompressZip)
+        },
+        onExtract = if (file.name.endsWith(".zip", ignoreCase = true)) ({
+            ArchiveHandoff.stageExtract(file.uri, file.name)
+            onTools(LibraryTool.ExtractArchive)
+        }) else null,
     )
     fun openPicked() {
         val file = picked.single()
@@ -458,7 +475,7 @@ private fun Header(
 @Composable
 private fun MicButton(onVoice: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberHaptics()
     val hapticsOn = LocalHapticsEnabled.current
     Box(
         Modifier
@@ -466,7 +483,7 @@ private fun MicButton(onVoice: () -> Unit) {
             .pressScale(interaction, 0.9f)
             .floatingGlass(CircleShape)
             .clickable(interaction, indication = null, role = Role.Button) {
-                if (hapticsOn) haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                if (hapticsOn) haptics.confirm() 
                 onVoice()
             }
             .semantics { contentDescription = "Voice assistant" },
@@ -729,6 +746,16 @@ private fun FileRow(
                             menuOpen = false
                             actions.onPrint()
                         }
+                        FileMenuItem("Compress to ZIP", EzIcons.Archive) {
+                            menuOpen = false
+                            actions.onCompress()
+                        }
+                        actions.onExtract?.let { extract ->
+                            FileMenuItem("Extract", EzIcons.Folder) {
+                                menuOpen = false
+                                extract()
+                            }
+                        }
                         FileMenuItem(
                             if (isPicked) "Unselect" else "Select for sharing",
                             EzIcons.ListLines,
@@ -759,6 +786,9 @@ private class FileRowActions(
     val onShare: () -> Unit,
     val onPrint: () -> Unit,
     val onRemove: (() -> Unit)?,
+    val onCompress: () -> Unit,
+    /** Null unless the file is a zip. */
+    val onExtract: (() -> Unit)?,
 )
 
 @Composable

@@ -21,6 +21,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.zIndex
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,9 +67,14 @@ import com.xfiles.feature.reader.LocalMediaPip
 import com.xfiles.feature.reader.MediaPip
 import com.xfiles.feature.reader.ReaderScreen
 import com.xfiles.feature.reader.ReaderState
+import com.xfiles.feature.tools.ArchiveMode
+import com.xfiles.feature.tools.ArchiveToolScreen
 import com.xfiles.feature.tools.PdfToolsScreen
 import com.xfiles.feature.tools.PdfToolsViewModel
 import com.xfiles.feature.tools.ConvertViewModel
+import com.xfiles.feature.tools.ConvertTool
+import com.xfiles.feature.tools.OpenTool
+import com.xfiles.feature.library.LibraryTool
 import com.xfiles.android.widget.WidgetActions
 import com.xfiles.tidy.TidyService
 import com.xfiles.feature.tidy.TidyUpScreen
@@ -101,6 +108,8 @@ class MainActivity : ComponentActivity() {
     private val pendingAction = MutableStateFlow<String?>(null)
     /** A note an AppFunction drafted (title to text), opened in the editor for the user to review and save. */
     private val pendingNote = MutableStateFlow<Pair<String, String>?>(null)
+    /** Plain text or a link shared from another app (ACTION_SEND with EXTRA_TEXT). */
+    private val pendingSharedText = MutableStateFlow<String?>(null)
     /** The system's motion preference (Remove animations / animator scale), feeding LocalReducedMotion. */
     private val motion by lazy { ReducedMotionMonitor(contentResolver) }
     /** Picture-in-Picture state for the player; provided to the UI through [LocalMediaPip]. */
@@ -108,7 +117,12 @@ class MainActivity : ComponentActivity() {
     private val openPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { pendingOpen.value = it } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // System splash stays until the first library listing is ready and a minimum time has passed (StartupGate).
+        val systemSplash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        systemSplash.setKeepOnScreenCondition { StartupGate.keepSplash() }
+        // The branded intro plays on a cold start only; rotation and warm starts skip it.
+        val showIntro = savedInstanceState == null && StartupGate.claimIntro()
         enableEdgeToEdge()
         if (savedInstanceState == null) captureOpenRequest(intent)
         setContent {
@@ -125,6 +139,7 @@ class MainActivity : ComponentActivity() {
                     isAppearanceLightNavigationBars = !darkTheme
                 }
             }
+            var introVisible by rememberSaveable { mutableStateOf(showIntro) }
             val stack = rememberNavBackStack(Route.Library)
             val navigator = remember(stack) { AppNavigator(stack, analysis, editor) }
             val draft by editor.state.collectAsStateWithLifecycle()
@@ -151,7 +166,10 @@ class MainActivity : ComponentActivity() {
                     }
                     WidgetActions.FILY -> { showFily = true }
                     WidgetActions.OPEN -> openPicker.launch(arrayOf("*/*"))
-                    WidgetActions.TOOLS -> navigator.show(Route.Tools)
+                    WidgetActions.TOOLS -> {
+                        pdfTools.open(null)
+                        navigator.show(Route.Tools)
+                    }
                 }
             }
             val note by pendingNote.collectAsStateWithLifecycle()
@@ -160,33 +178,53 @@ class MainActivity : ComponentActivity() {
                 pendingNote.compareAndSet(note, null)
                 navigator.openEditor("${title.ifBlank { "Note" }.take(MAX_NOTE_NAME)}.txt", text)
             }
+            // Shared text: a link is offered in a sheet; any other text opens in the editor, prefilled, to save.
+            val sharedText by pendingSharedText.collectAsStateWithLifecycle()
+            var sharedLink by rememberSaveable { mutableStateOf<String?>(null) }
+            LaunchedEffect(sharedText) {
+                val text = sharedText ?: return@LaunchedEffect
+                pendingSharedText.compareAndSet(text, null)
+                if (isWebLink(text)) sharedLink = text.trim() else navigator.openEditor("Shared text.txt", text)
+            }
             val reducedMotion by motion.reduced.collectAsStateWithLifecycle()
 
             CompositionLocalProvider(LocalHapticsEnabled provides haptics, LocalReducedMotion provides reducedMotion, LocalMediaPip provides mediaPip) {
                 EzTheme(darkTheme = darkTheme) {
-                    val onLibrary = navigator.top in setOf(Route.Library, Route.About, Route.Tools, Route.Tidy)
+                    sharedLink?.let { link ->
+                        SharedLinkSheet(
+                            link = link,
+                            onSaveNote = { navigator.openEditor("Shared link.txt", link); sharedLink = null },
+                            onDismiss = { sharedLink = null },
+                        )
+                    }
+                    val onLibrary = navigator.top in setOf(Route.Library, Route.About, Route.Tools, Route.Tidy, Route.CompressZip, Route.ExtractArchive)
                     val background = if (onLibrary) Modifier.libraryBackground() else Modifier.readerBackground()
                     val inPip by mediaPip.isInPictureInPicture.collectAsStateWithLifecycle()
                     // Picture-in-Picture: a plain black edge-to-edge window, no glass or inset padding.
-                    val chrome = if (inPip) Modifier.background(Color.Black) else Modifier.then(background).glassScreen().safeDrawingPadding()
+                    // The media player draws edge to edge on black and keeps its controls inside the safe area itself.
+                    val readerState by analysis.state.collectAsStateWithLifecycle()
+                    val mediaOnTop = navigator.top == Route.Reader && (readerState as? ReaderState.Ready)?.preview is FilePreview.Media
+                    val chrome = if (inPip || mediaOnTop) Modifier.background(Color.Black) else Modifier.then(background).glassScreen().safeDrawingPadding()
                     // Vote for the display's top refresh rate while Xfiles is on screen (120/144 Hz panels).
                     Box(Modifier.fillMaxSize().preferredFrameRate(FrameRateCategory.High).then(chrome)) {
+                        if (introVisible) SplashIntro(Modifier.zIndex(1f)) { introVisible = false }
                         NavDisplay(
                             backStack = stack,
                             onBack = navigator::back,
                             entryProvider = entryProvider {
                                 entry<Route.Library> {
-                                    LibraryRoute(navigator, onFily = { showFily = true }, onListedFiles = { displayedFiles = it })
+                                    LibraryRoute(navigator, onFily = { showFily = true }, onListedFiles = { displayedFiles = it; StartupGate.markDataReady() })
                                 }
                                 entry<Route.Reader> { ReaderRoute(navigator, onFily = { showFily = true }) }
                                 entry<Route.Editor> { draft?.let { TextEditorScreen(it, editor) } }
                                 entry<Route.Tools> {
-                                    PdfToolsScreen(
-                                        pdfTools,
-                                        onBack = navigator::back,
-                                        onNewNote = { navigator.openEditor("Note.txt", "") },
-                                        onTidy = { navigator.show(Route.Tidy) },
-                                    )
+                                    PdfToolsScreen(pdfTools, onBack = navigator::back)
+                                }
+                                entry<Route.CompressZip> {
+                                    ArchiveToolScreen(mode = ArchiveMode.Compress, onBack = navigator::back)
+                                }
+                                entry<Route.ExtractArchive> {
+                                    ArchiveToolScreen(mode = ArchiveMode.Extract, onBack = navigator::back)
                                 }
                                 entry<Route.Tidy> {
                                     TidyUpScreen(
@@ -272,7 +310,30 @@ class MainActivity : ComponentActivity() {
             onRemoveFolder = library::removeFolder,
             onRefresh = library::refresh,
             onAbout = { navigator.show(Route.About) },
-            onTools = { navigator.show(Route.Tools) },
+            onTools = { tool ->
+                fun convertTool(target: ConvertTool) {
+                    convert.select(target)
+                    pdfTools.open(OpenTool.Convert(target))
+                    navigator.show(Route.Tools)
+                }
+                when (tool) {
+                    LibraryTool.PdfTools -> {
+                        pdfTools.open(null)
+                        navigator.show(Route.Tools)
+                    }
+                    LibraryTool.ScanToPdf -> {
+                        convert.openScanner()
+                        convertTool(ConvertTool.ScanToPdf)
+                    }
+                    LibraryTool.ImageToText -> convertTool(ConvertTool.PictureToText)
+                    LibraryTool.ImagesToPdf -> convertTool(ConvertTool.PicturesToPdf)
+                    LibraryTool.TextToPdf -> convertTool(ConvertTool.TextToPdf)
+                    LibraryTool.NewText -> navigator.openEditor("Note.txt", "")
+                    LibraryTool.TidyUp -> navigator.show(Route.Tidy)
+                    LibraryTool.CompressZip -> navigator.show(Route.CompressZip)
+                    LibraryTool.ExtractArchive -> navigator.show(Route.ExtractArchive)
+                }
+            },
             onFily = onFily,
             onListedFiles = onListedFiles,
         )
@@ -475,7 +536,11 @@ class MainActivity : ComponentActivity() {
         when (intent.action) {
             Intent.ACTION_VIEW -> pendingOpen.value = intent.data?.takeIf { it.scheme == "content" }
             // Share to Xfiles: the first file opens; the rest go to Recent so they stay one tap away.
-            Intent.ACTION_SEND -> pendingOpen.value = sharedFiles().firstOrNull()
+            Intent.ACTION_SEND -> {
+                val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() }
+                if (text != null && sharedFiles().isEmpty()) pendingSharedText.value = text
+                else pendingOpen.value = sharedFiles().firstOrNull()
+            }
             Intent.ACTION_SEND_MULTIPLE -> {
                 val files = sharedFiles()
                 pendingOpen.value = files.firstOrNull()

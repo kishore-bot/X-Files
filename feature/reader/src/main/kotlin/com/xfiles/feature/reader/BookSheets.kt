@@ -102,6 +102,8 @@ internal fun BookContentsSheet(manifest: BookManifest?, onJump: (Int) -> Unit, o
 internal fun BookSettingsSheet(
     settings: ReadingSettings,
     ownSettings: Boolean,
+    mode: BookReadingMode,
+    onMode: (BookReadingMode) -> Unit,
     onChange: (ReadingSettings) -> Unit,
     onOwnSettings: (Boolean) -> Unit,
     onReset: () -> Unit,
@@ -109,6 +111,16 @@ internal fun BookSettingsSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Reading mode", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BookReadingMode.entries.forEach { option ->
+                    FilterChip(
+                        selected = mode == option,
+                        onClick = { onMode(option) },
+                        label = { Text(option.label) },
+                    )
+                }
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Use for this book only", style = MaterialTheme.typography.bodyLarge)

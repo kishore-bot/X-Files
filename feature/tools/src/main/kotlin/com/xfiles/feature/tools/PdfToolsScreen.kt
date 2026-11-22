@@ -25,7 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import com.xfiles.design.EzSectionPill
 import com.xfiles.design.EzShapes
 import com.xfiles.design.pressScale
-import com.xfiles.design.rememberEzHaptics
+import com.xfiles.design.rememberHaptics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
@@ -100,7 +100,6 @@ private val HubSections: List<Pair<String, List<HubTile>>> = listOf(
         HubTile("PDF to pictures", EzIcons.Image, Color(0xFF2E9E6B), OpenTool.Convert(ConvertTool.PdfToPictures)),
         HubTile("PDF to text", EzIcons.TextT, Color(0xFF2F3BB5), OpenTool.Convert(ConvertTool.PdfToText)),
         HubTile("PDF to ZIP", EzIcons.Archive, Color(0xFFB0124F), OpenTool.Convert(ConvertTool.PdfToZip)),
-        HubTile("Picture to text", EzIcons.Search, Color(0xFF00796B), OpenTool.Convert(ConvertTool.PictureToText)),
     ),
     "Make a PDF" to listOf(
         HubTile("Pictures to PDF", EzIcons.Image, Color(0xFF7A4A2E), OpenTool.Convert(ConvertTool.PicturesToPdf)),
@@ -110,14 +109,11 @@ private val HubSections: List<Pair<String, List<HubTile>>> = listOf(
 )
 
 @Composable
-private fun ToolsHub(onBack: () -> Unit, onNewNote: () -> Unit, onTidy: () -> Unit, onOpen: (OpenTool) -> Unit) {
+private fun ToolsHub(onBack: () -> Unit, onOpen: (OpenTool) -> Unit) {
     BackHandler(onBack = onBack)
-    val haptics = rememberEzHaptics()
+    val haptics = rememberHaptics()
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        EzTopBar("Tools", onBack, backLabel = "Back to library", gutter = 0.dp, actions = {
-            EzTextButton("Tidy up", onTidy, color = EzColors.Text)
-            EzTextButton("New note", onNewNote, color = EzColors.Text)
-        })
+        EzTopBar("PDF tools", onBack, backLabel = "Back to library", gutter = 0.dp)
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 96.dp),
             modifier = Modifier.fillMaxSize(),
@@ -131,7 +127,7 @@ private fun ToolsHub(onBack: () -> Unit, onNewNote: () -> Unit, onTidy: () -> Un
                 }
                 items(tiles, key = { it.title }, contentType = { "tile" }) { tile ->
                     ToolCell(tile) {
-                        haptics.activate()
+                        haptics.contextClick()
                         onOpen(tile.tool)
                     }
                 }
@@ -232,23 +228,22 @@ internal fun formatBytes(bytes: Long): String = when {
 }
 
 /**
- * Tools: a hub of tiles, each opening one focused tool, as in EzFiles. Back from a tool returns to the hub; back
- * from the hub leaves Tools. Fily and the widget open a tool directly through [PdfToolsViewModel.open].
+ * PDF tools and the create tools, as in EzFiles. The library's Tools sheet opens either the PDF tools grid or one
+ * tool directly; a tool picked in the grid goes back to the grid, a tool opened directly goes back to the library.
+ * Fily and the widget open tools through [PdfToolsViewModel.open] too.
  */
 @Composable
 fun PdfToolsScreen(
     viewModel: PdfToolsViewModel,
     onBack: () -> Unit,
-    onNewNote: () -> Unit,
-    onTidy: () -> Unit = {},
     convert: ConvertViewModel = hiltViewModel(),
 ) {
     val open by viewModel.open.collectAsStateWithLifecycle()
-    val toHub = { viewModel.open(null) }
+    val toHub = { if (viewModel.openedFromHub) viewModel.open(null) else onBack() }
     when (val tool = open) {
-        null -> ToolsHub(onBack, onNewNote, onTidy) {
+        null -> ToolsHub(onBack) {
             if (it is OpenTool.Convert) convert.select(it.tool)
-            viewModel.open(it)
+            viewModel.open(it, fromHub = true)
         }
         is OpenTool.Dedicated -> {
             BackHandler(onBack = toHub)

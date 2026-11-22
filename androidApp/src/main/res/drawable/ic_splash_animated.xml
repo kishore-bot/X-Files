@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- System splash icon: the mark draws itself in (stroke trim), then scales up with a settle. ~600 ms. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_splash_mark">
+    <target android:name="body">
+        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+            <set android:ordering="sequentially">
+                <objectAnimator
+                    android:propertyName="trimPathEnd"
+                    android:duration="380"
+                    android:valueFrom="0"
+                    android:valueTo="1"
+                    android:interpolator="@android:interpolator/fast_out_slow_in" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="fold">
+        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+            <set android:ordering="sequentially">
+                <objectAnimator
+                    android:propertyName="trimPathEnd"
+                    android:duration="200"
+                    android:startOffset="300"
+                    android:valueFrom="0"
+                    android:valueTo="1"
+                    android:interpolator="@android:interpolator/linear" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="cross">
+        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+            <set android:ordering="sequentially">
+                <objectAnimator
+                    android:propertyName="trimPathEnd"
+                    android:duration="220"
+                    android:startOffset="400"
+                    android:valueFrom="0"
+                    android:valueTo="1"
+                    android:interpolator="@android:interpolator/fast_out_slow_in" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="mark">
+        <aapt:attr name="android:animation" xmlns:aapt="http://schemas.android.com/aapt">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:propertyName="scaleX"
+                    android:duration="600"
+                    android:valueFrom="0.8"
+                    android:valueTo="1"
+                    android:interpolator="@android:interpolator/overshoot" />
+                <objectAnimator
+                    android:propertyName="scaleY"
+                    android:duration="600"
+                    android:valueFrom="0.8"
+                    android:valueTo="1"
+                    android:interpolator="@android:interpolator/overshoot" />
+            </set>
+        </aapt:attr>
+    </target>
+</animated-vector>

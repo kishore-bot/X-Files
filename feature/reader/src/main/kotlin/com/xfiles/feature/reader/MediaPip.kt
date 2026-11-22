@@ -98,6 +98,10 @@ val LocalMediaPip = staticCompositionLocalOf { UnprovidedMediaPip }
 internal fun ComposeRect.toWindowHint(): Rect =
     Rect(left.roundToInt(), top.roundToInt(), right.roundToInt(), bottom.roundToInt())
 
+/** The PiP window for the current frame; auto-enter only while a video plays. */
+internal fun playerPipSpec(context: Context, aspect: Float, bounds: ComposeRect?, playing: Boolean): PipSpec =
+    PipSpec(aspect, bounds?.toWindowHint(), pipActions(context, playing), autoEnter = playing)
+
 /** Plays, or pauses while playing; an ended video starts over. */
 internal fun Player.togglePlayback() {
     if (playWhenReady && playbackState != Player.STATE_ENDED) {
