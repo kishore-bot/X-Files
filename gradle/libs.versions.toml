@@ -17,7 +17,7 @@ coroutines = "1.11.0"
 media3 = "1.11.1"
 
 serialization = "1.11.0"
-annotation = "1.9.1"
+annotation = "1.11.0"
 hilt = "2.60.1"
 androidx-hilt = "1.4.0"
 ksp = "2.3.14"
