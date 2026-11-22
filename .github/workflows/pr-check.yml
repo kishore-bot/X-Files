@@ -1,0 +1,77 @@
+name: PR check
+
+# Builds the app and runs every test on each pull request, so broken code can't be merged.
+# In the dev-deploy ruleset, require the status check "build-and-test".
+on:
+  pull_request:
+    branches: [dev-deploy]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: "29.0.14206865"
+  CMAKE_VERSION: "3.22.1"
+  # Not ANDROID_PLATFORM: llama.cpp's build script reads that name as an API level.
+  SDK_PLATFORM_PACKAGE: "platforms;android-37.2"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK packages
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdk" ] || sdk=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdk" --licenses > /dev/null || true
+          "$sdk" --install "$SDK_PLATFORM_PACKAGE" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
+          ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
+          {
+            echo "ANDROID_NDK_HOME=$ndk"
+            echo "ANDROID_NDK_ROOT=$ndk"
+            echo "ANDROID_NDK=$ndk"
+            echo "ANDROID_NDK_LATEST_HOME=$ndk"
+            echo "NDK_HOME=$ndk"
+            echo "LIBCLANG_PATH=$ndk/toolchains/llvm/prebuilt/linux-x86_64/lib"
+          } >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmake/$CMAKE_VERSION/bin" >> "$GITHUB_PATH"
+
+      # rust-toolchain.toml pins the toolchain and the Android targets; rustup installs them here.
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Rust engine tests
+        run: cargo test --manifest-path engine/Cargo.toml --locked --workspace
+
+      - name: Kotlin tests and app build
+        run: ./gradlew --no-configuration-cache :sharedLogic:testAndroidHostTest :androidApp:assembleDevDebug
+
+      - name: Test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
