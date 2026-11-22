@@ -21,6 +21,21 @@ fun documentKindFromName(name: String): DocumentKind = when (name.substringAfter
     else -> DocumentKind.Unknown
 }
 
+/** Structured text sent with an application/ MIME type; the name's extension, when present, still decides first. */
+private val TEXT_MIMES = setOf(
+    "application/json", "application/xml", "application/yaml", "application/x-yaml", "application/toml",
+    "application/sql", "application/javascript", "application/x-javascript", "application/x-sh",
+)
+
+/** Legacy binary Office (OLE/CFB compound files), macro-enabled and template types, and other packaged documents. */
+private val DOCUMENT_MIMES = setOf(
+    "application/msword", "application/x-ole-storage", "application/x-cfb", "application/cdfv2",
+    "application/x-zip-compressed", "application/xhtml+xml", "application/rtf", "application/epub+zip",
+)
+private const val OFFICE_MIME_PREFIX = "application/vnd.ms-"
+private const val OPEN_DOCUMENT_MIME_PREFIX = "application/vnd.oasis.opendocument."
+private const val OOXML_MIME_PREFIX = "application/vnd.openxmlformats-officedocument."
+
 fun documentKind(name: String, mimeType: String?): DocumentKind {
     val mime = mimeType?.substringBefore(';')?.lowercase().orEmpty()
     val namedKind = documentKindFromName(name)
@@ -30,7 +45,9 @@ fun documentKind(name: String, mimeType: String?): DocumentKind {
         mime.startsWith("audio/") -> DocumentKind.Audio
         mime.startsWith("video/") -> DocumentKind.Video
         namedKind != DocumentKind.Unknown -> namedKind
-        mime.startsWith("text/") -> DocumentKind.Text
+        mime.startsWith("text/") || mime in TEXT_MIMES -> DocumentKind.Text
+        mime in DOCUMENT_MIMES || mime.startsWith(OFFICE_MIME_PREFIX) ||
+            mime.startsWith(OPEN_DOCUMENT_MIME_PREFIX) || mime.startsWith(OOXML_MIME_PREFIX) -> DocumentKind.Document
         else -> DocumentKind.Unknown
     }
 }

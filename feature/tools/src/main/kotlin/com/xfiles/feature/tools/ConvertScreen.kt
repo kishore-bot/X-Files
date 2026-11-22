@@ -4,10 +4,15 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -15,9 +20,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -29,21 +34,34 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.core.documents.PageImageDpiChoices
+import com.xfiles.core.documents.PageImageFormat
+import com.xfiles.core.documents.PdfImageQuality
 import com.xfiles.core.documents.PdfPaper
+import com.xfiles.core.documents.TextPdfAlignment
+import com.xfiles.core.documents.TextPdfFont
+import com.xfiles.core.documents.TextPdfStyle
+import com.xfiles.core.documents.TextPdfTemplate
+import com.xfiles.design.EzChip
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzSectionPill
+import com.xfiles.design.EzShapes
 import com.xfiles.design.glassCard
+import com.xfiles.design.raised
 
 /** Create and convert tools. Stateless apart from text fields; every action goes to [ConvertViewModel]. */
 @Composable
@@ -69,6 +87,10 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
             viewModel.draftConsumed()
         }
     }
+    // The live preview follows the typed words, so the view model is told about every edit.
+    LaunchedEffect(Unit) {
+        snapshotFlow { text.text.toString() }.collect { viewModel.setTypedText(it) }
+    }
 
     val pictures = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(100)) { viewModel.addPictures(it) }
     val picture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { viewModel.addPictures(listOf(it)) } }
@@ -83,12 +105,15 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
     val saveText = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> uri?.let(viewModel::saveText) }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ChipRow {
             ConvertTool.entries.forEach { tool ->
-                FilterChip(selected = state.tool == tool, onClick = { viewModel.select(tool) }, enabled = !state.busy, label = { Text(tool.label) })
+                EzChip(tool.label, state.tool == tool, { viewModel.select(tool) })
             }
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.tool == ConvertTool.TextToPdf) {
+                item { TextPreviewCard(state, onPage = viewModel::showPreviewPage) }
+            }
             item {
                 when (state.tool.input) {
                     ToolInput.Pictures -> Button(onClick = {
@@ -118,6 +143,9 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
                         label = { Text("Text") },
                     )
                 }
+            }
+            if (state.tool == ConvertTool.TextToPdf) {
+                item { TextStyleSection(state.textStyle, enabled = !state.busy, onChange = viewModel::setTextStyle) }
             }
             if (state.tool.input in setOf(ToolInput.Pictures, ToolInput.Camera, ToolInput.Picture, ToolInput.PdfAndPictures)) {
                 items(state.pictures, key = Uri::toString) { uri ->
@@ -151,14 +179,53 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
                     item { OutlinedSecureTextField(state = password, modifier = Modifier.fillMaxWidth(), enabled = !state.busy, label = { Text("Password, if needed") }) }
                 }
             }
+            if (state.tool == ConvertTool.PdfToPictures) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        EzSectionPill("Format", compact = true)
+                        ChipRow {
+                            PageImageFormat.entries.forEach { format ->
+                                EzChip(format.label, state.pageImageFormat == format, { viewModel.setPageImageFormat(format) })
+                            }
+                        }
+                        EzSectionPill("Resolution", compact = true)
+                        ChipRow {
+                            PageImageDpiChoices.forEach { dpi ->
+                                EzChip("$dpi DPI", state.pageImageDpi == dpi, { viewModel.setPageImageDpi(dpi) })
+                            }
+                        }
+                    }
+                }
+            }
             if (state.tool in setOf(ConvertTool.PicturesToPdf, ConvertTool.ScanToPdf, ConvertTool.TextToPdf, ConvertTool.AddPictures)) {
                 item {
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChipRow {
+                        // Text takes its paper from the text style, so the chosen size is the one the preview shows.
+                        val selectedPaper = if (state.tool == ConvertTool.TextToPdf) state.textStyle.paper else state.paper
+                        val choosePaper: (PdfPaper?) -> Unit = { paper ->
+                            if (state.tool == ConvertTool.TextToPdf) {
+                                if (paper != null) viewModel.setTextStyle(state.textStyle.copy(paper = paper))
+                            } else {
+                                viewModel.setPaper(paper)
+                            }
+                        }
                         if (state.tool != ConvertTool.TextToPdf) {
-                            FilterChip(selected = state.paper == null, onClick = { viewModel.setPaper(null) }, enabled = !state.busy, label = { Text("Fit picture") })
+                            EzChip("Fit picture", selectedPaper == null, { choosePaper(null) })
                         }
                         PdfPaper.entries.forEach { size ->
-                            FilterChip(selected = state.paper == size, onClick = { viewModel.setPaper(size) }, enabled = !state.busy, label = { Text(size.label) })
+                            EzChip(size.label, selectedPaper == size, { choosePaper(size) })
+                        }
+                    }
+                }
+            }
+            if (state.tool == ConvertTool.PicturesToPdf || state.tool == ConvertTool.ScanToPdf || state.tool == ConvertTool.AddPictures) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        EzSectionPill("Compression", compact = true)
+                        ChipRow {
+                            PdfImageQuality.entries.forEach { quality ->
+                                EzChip(quality.label, state.quality == quality, { viewModel.setQuality(quality) })
+                            }
                         }
                     }
                 }
@@ -224,6 +291,83 @@ internal fun ConvertTools(viewModel: ConvertViewModel, modifier: Modifier = Modi
                         }, enabled = !state.busy) { Text(state.tool.label) }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** A row of chips that scrolls sideways when it runs out of width. */
+@Composable
+private fun ChipRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/** The first page as the export will draw it, with paging when the text runs to more than one. */
+@Composable
+private fun TextPreviewCard(state: ConvertState, onPage: (Int) -> Unit) {
+    val paper = state.textStyle.paper
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier
+                .fillMaxWidth(0.66f)
+                .aspectRatio(paper.width / paper.height)
+                .raised(EzShapes.Card)
+                .clip(EzShapes.Card),
+            contentAlignment = Alignment.Center,
+        ) {
+            val preview = state.preview
+            if (preview != null) {
+                Image(preview, "Preview of the page", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            } else {
+                Text(
+                    state.previewError ?: "Type some text to see it here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        }
+        if (state.previewPages > 1) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { onPage(state.previewPage - 1) }, enabled = state.previewPage > 0) {
+                    Icon(EzIcons.ChevronLeft, "Previous page")
+                }
+                Text("Page ${state.previewPage + 1} of ${state.previewPages}", style = MaterialTheme.typography.bodyMedium)
+                IconButton(onClick = { onPage(state.previewPage + 1) }, enabled = state.previewPage < state.previewPages - 1) {
+                    Icon(EzIcons.ChevronRight, "Next page")
+                }
+            }
+        }
+    }
+}
+
+/** Template, alignment and font for Text to PDF. Picking a template resets the overrides to its own. */
+@Composable
+private fun TextStyleSection(style: TextPdfStyle, enabled: Boolean, onChange: (TextPdfStyle) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().glassCard().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        EzSectionPill("Template", compact = true)
+        ChipRow {
+            TextPdfTemplate.entries.forEach { template ->
+                EzChip(template.label, template == style.template, { if (enabled) onChange(TextPdfStyle.of(template, style.paper)) })
+            }
+        }
+        EzSectionPill("Alignment", compact = true)
+        ChipRow {
+            TextPdfAlignment.entries.forEach { alignment ->
+                EzChip(alignment.label, alignment == style.alignment, { if (enabled) onChange(style.copy(alignment = alignment)) })
+            }
+        }
+        EzSectionPill("Font", compact = true)
+        ChipRow {
+            TextPdfFont.entries.forEach { font ->
+                EzChip(font.label, font == style.font, { if (enabled) onChange(style.copy(font = font)) })
             }
         }
     }

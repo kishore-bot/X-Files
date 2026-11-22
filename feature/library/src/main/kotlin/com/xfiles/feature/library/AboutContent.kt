@@ -8,17 +8,11 @@ import com.xfiles.design.EzIcons
  * Keep the supported formats in step with sharedLogic DocumentKind.kt and the engine's DocumentFormat.
  */
 
-/**
- * Where feedback is sent. Empty until the team sets an address: the "Send feedback" row stays hidden.
- * TODO: set a project address here (EzFiles' address is a personal one, so it is not reused).
- */
-const val FEEDBACK_EMAIL = ""
-
 /** The privacy promises, in the words that are true for Xfiles. */
 val PrivacyPromises: List<String> = listOf(
     "Documents are opened, searched and processed on this phone, without the internet. Documents never leave the phone.",
     "No ads, no accounts and no usage analytics.",
-    "The internet is used only for the Fily model download you start and for crash diagnostics you allow. " +
+    "The internet is used only for the Fily model download you start, feedback you choose to send, and crash diagnostics you allow. " +
         "Sharing and printing send a file only where you choose.",
     "Crash reports are kept on this phone until you choose to share one. Cloud diagnostics are off by default and need your consent.",
 )
@@ -58,6 +52,12 @@ val Licences: List<Licence> = listOf(
     Licence(
         "AndroidX Activity, Lifecycle, Navigation 3, CameraX, ExifInterface, WorkManager, Glance, Media3 (ExoPlayer) and ProfileInstaller",
         "Apache License 2.0",
+    ),
+    Licence("Media3 FFmpeg extension (Java sources; JNI bridge ported to Rust)", "Apache License 2.0"),
+    Licence(
+        "FFmpeg 7.1.2 audio decoders (libavcodec, libavutil, libswresample), built unmodified as separate shared libraries " +
+            "that can be replaced; source: ffmpeg.org/releases/ffmpeg-7.1.2.tar.xz, build script: scripts/build-ffmpeg.sh",
+        "GNU Lesser General Public License 2.1 or later",
     ),
     Licence("Dagger Hilt", "Apache License 2.0"),
     Licence("Material Symbols icons (path data)", "Apache License 2.0"),

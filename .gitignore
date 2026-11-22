@@ -4,11 +4,11 @@
 **/build/
 !gradle/wrapper/gradle-wrapper.jar
 captures/
-.externalNativeBuild/
 .cxx/
 
 # Rust
 engine/target/
+ffmpeg/rust/target/
 **/*.rs.bk
 
 # IDEs
@@ -50,3 +50,6 @@ output-metadata.json
 *.log
 hs_err_pid*
 replay_pid*
+
+# FFmpeg built by scripts/build-ffmpeg.sh
+.cache/

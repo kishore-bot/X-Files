@@ -43,8 +43,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
+import com.xfiles.design.rememberEzHaptics
 
 @Composable
 fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
@@ -67,6 +69,9 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) viewModel.save(uri)
     }
+    val haptics = rememberEzHaptics()
+    HapticOnChange(state.saved) { if (it) confirm() }
+    HapticOnChange(state.error) { if (it != null) reject() }
     Column(Modifier.fillMaxSize().imePadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back, enabled = !state.saving) { Icon(EzIcons.Back, "Close editor") }
@@ -114,7 +119,7 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
             TextEncoding.entries.forEach { option ->
                 FilterChip(
                     selected = state.encoding == option,
-                    onClick = { viewModel.chooseEncoding(option) },
+                    onClick = { haptics.select(); viewModel.chooseEncoding(option) },
                     label = { Text(option.label) },
                     enabled = !state.saving && state.blocked == null,
                 )
@@ -123,7 +128,7 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
             LineEnding.entries.forEach { option ->
                 FilterChip(
                     selected = state.lineEnding == option,
-                    onClick = { viewModel.chooseLineEnding(option) },
+                    onClick = { haptics.select(); viewModel.chooseLineEnding(option) },
                     label = { Text(option.label) },
                     enabled = !state.saving && state.blocked == null,
                 )

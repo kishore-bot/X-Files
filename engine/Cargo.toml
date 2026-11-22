@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/document-core", "crates/document-parsers", "crates/document-search", "crates/document-tidy", "crates/document-glance", "crates/document-imaging", "crates/document-ffi", "crates/fily-inference"]
+members = ["crates/document-core", "crates/document-parsers", "crates/document-search", "crates/document-tidy", "crates/document-glance", "crates/document-imaging", "crates/document-ffi", "crates/fily-inference", "crates/xfiles-mcp"]
+# Android builds and plain cargo build skip the host-only MCP server; build it with -p xfiles-mcp.
+default-members = ["crates/document-core", "crates/document-parsers", "crates/document-search", "crates/document-tidy", "crates/document-glance", "crates/document-imaging", "crates/document-ffi", "crates/fily-inference"]
 
 [workspace.package]
 version = "0.1.0"

@@ -7,6 +7,8 @@ import com.xfiles.core.documents.FileBookmark
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfMatchBox
+import com.xfiles.core.documents.PdfPageText
+import kotlinx.coroutines.withTimeoutOrNull
 import com.xfiles.core.documents.PdfToolsRepository
 import com.xfiles.core.documents.PreparedPdf
 import android.graphics.Bitmap
@@ -458,10 +460,29 @@ class DocumentAnalysisViewModel @Inject constructor(
         super.onCleared()
     }
 
+    /** Character geometry of PDF page [index] of the open file, for text selection; null when it cannot be read. */
+    suspend fun pdfText(index: Int): PdfPageText? {
+        val ready = state.value as? ReaderState.Ready ?: return null
+        if (ready.preview !is FilePreview.Pdf) return null
+        return try {
+            documents.pageText(ready.file, index, pdfPassword)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("XfilesReader", "PDF text could not be read", error)
+            null
+        }
+    }
+
     fun toggleBookmark() {
         val ready = state.value as? ReaderState.Ready ?: return
-        val bookmark = FileBookmark(ready.file, (ready.preview as? FilePreview.Pdf)?.page)
+        val pdf = ready.preview as? FilePreview.Pdf
+        val password = pdfPassword
         viewModelScope.launch {
+            // The place is best effort: a bookmark saves at once, and waits at most briefly for the page's text.
+            val place = pdf?.let { withTimeoutOrNull(BOOKMARK_PLACE_TIMEOUT_MS) { pdfText(it.page, ready, password) } }
+                ?.let(::placeOf)
+            val bookmark = FileBookmark(ready.file, pdf?.page, place?.first, place?.second)
             val saved = documents.toggleBookmark(bookmark)
             val current = mutableState.value as? ReaderState.Ready ?: return@launch
             if (current.file.uri == ready.file.uri) {
@@ -555,6 +576,33 @@ class DocumentAnalysisViewModel @Inject constructor(
         const val PDF_CACHED_PAGES = 6
         const val GRID_THUMBNAIL_EDGE = 240
         const val REMEMBER_DELAY_MS = 1_000L
+        const val BOOKMARK_PLACE_TIMEOUT_MS = 1_500L
+        const val BOOKMARK_LABEL_CHARS = 40
+        const val BOOKMARK_SNIPPET_CHARS = 80
+        val WHITESPACE = Regex("\\s+")
+    }
+
+    /** The text of page [index] for a bookmark, or null when it is not read in time. */
+    private suspend fun pdfText(index: Int, ready: ReaderState.Ready, password: String?): PdfPageText? =
+        try {
+            documents.pageText(ready.file, index, password)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("XfilesReader", "Bookmark place could not be read", error)
+            null
+        }
+
+    /**
+     * A bookmark's place: the page's first line as its label, and the words after it as the snippet. The page is
+     * read in reading order, so this is its top; the page is not tracked by the visible region.
+     */
+    private fun placeOf(text: PdfPageText): Pair<String?, String?> {
+        val lines = text.text.lineSequence().map { WHITESPACE.replace(it, " ").trim() }.filter { it.isNotEmpty() }.toList()
+        val label = lines.firstOrNull()?.take(BOOKMARK_LABEL_CHARS)?.ifBlank { null }
+        val snippet = lines.drop(1).joinToString(" ").ifBlank { lines.firstOrNull().orEmpty() }
+            .take(BOOKMARK_SNIPPET_CHARS).ifBlank { null }
+        return label to snippet
     }
 
     /** Index of the page that shares a spread with [page] (pairs 0-1, 2-3…), or null when there is none. */

@@ -47,8 +47,10 @@ import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzTopBar
 import com.xfiles.design.EzShapes
+import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
+import com.xfiles.design.rememberEzHaptics
 import com.xfiles.tidy.IdenticalGroup
 import com.xfiles.tidy.SimilarGroup
 import com.xfiles.tidy.TidyCollection
@@ -73,6 +75,9 @@ private enum class TidySection(val label: String) {
 fun TidyUpScreen(viewModel: TidyViewModel, onBack: () -> Unit, onOpen: (TidyFile) -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<TidyFile?>(null) }
+    val haptics = rememberEzHaptics()
+    HapticOnChange(state.report) { if (it != null) confirm() }
+    HapticOnChange(state.failure) { if (it != null) reject() }
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         EzTopBar("Tidy up", onBack, backLabel = "Back", gutter = 0.dp, actions = {
@@ -120,6 +125,7 @@ fun TidyUpScreen(viewModel: TidyViewModel, onBack: () -> Unit, onOpen: (TidyFile
             confirmButton = {
                 TextButton(onClick = {
                     pendingDelete = null
+                    haptics.confirm()
                     viewModel.delete(file)
                 }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },

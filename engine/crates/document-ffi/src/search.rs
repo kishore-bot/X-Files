@@ -6,7 +6,9 @@ use std::fs::File;
 use std::sync::{Arc, Mutex};
 
 use document_core::{Block, CancelToken, FormatId, Limits, Session};
-use document_search::{Added, Entry, NameIndex, PlainText, SearchIndex, html_to_text};
+use document_search::{
+    Added, Entry, NameIndex, PassageCache, PassageConfig, PassageIndex, PlainText, SearchIndex, Selection, html_to_text,
+};
 
 use crate::{NativeDocumentKind, NativeLimits, ReadError, duplicate_document_fd, file_from_fd, open_for_read};
 
@@ -239,9 +241,114 @@ impl NativeSearchIndex {
     }
 }
 
+/// A passage of a document for the Fily prompt.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NativePassage {
+    pub text: String,
+    /// The 1-based PDF page the passage starts on.
+    pub page: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NativePassageSelection {
+    /// In document order, within the budget the caller gave.
+    pub passages: Vec<NativePassage>,
+    /// True when some of the document was not selected or indexed.
+    pub omitted: bool,
+    /// Bytes of the document text, so the caller can see that the whole text fits its budget.
+    pub document_bytes: u64,
+}
+
+/// Passage indexes of recently used documents, for answers about a document's text.
+/// Thread-safe. Indexing is CPU work: call [`NativePassageCache::index`] off the main thread.
+#[derive(uniffi::Object)]
+pub struct NativePassageCache(PassageCache);
+
+#[uniffi::export]
+impl NativePassageCache {
+    #[uniffi::constructor]
+    pub fn new(max_documents: u32, max_bytes: u64) -> Arc<Self> {
+        Arc::new(Self(PassageCache::new(max_documents as usize, max_bytes as usize)))
+    }
+
+    /// The passages of `key` that answer `question` within `budget_chars`, or `None` when the
+    /// document is not indexed for this `mtime` and `size`.
+    pub fn select(
+        &self,
+        key: String,
+        mtime: i64,
+        size: u64,
+        question: String,
+        budget_chars: u32,
+    ) -> Option<NativePassageSelection> {
+        let index = self.0.get(&key, mtime, size)?;
+        Some(native_selection(index.select(&question, budget_chars as usize)))
+    }
+
+    /// Indexes `text` as `key`, replacing an older index. `page_starts` are where PDF pages begin,
+    /// in UTF-16 units of `text`, as the platform reports them.
+    pub fn index(&self, key: String, mtime: i64, size: u64, text: String, page_starts: Vec<u32>) {
+        let starts = utf16_to_byte_starts(&text, &page_starts);
+        let built = PassageIndex::new(&text, &starts, PassageConfig::default());
+        self.0.insert(&key, mtime, size, built);
+    }
+
+    pub fn document_count(&self) -> u32 {
+        self.0.document_count() as u32
+    }
+}
+
+fn native_selection(selection: Selection) -> NativePassageSelection {
+    NativePassageSelection {
+        passages: selection.passages.into_iter().map(|p| NativePassage { text: p.text, page: p.page }).collect(),
+        omitted: selection.omitted,
+        document_bytes: selection.document_bytes as u64,
+    }
+}
+
+/// Maps UTF-16 offsets (what the platform reports) to byte offsets, in one pass over `text`.
+fn utf16_to_byte_starts(text: &str, utf16_starts: &[u32]) -> Vec<u32> {
+    let mut wanted = utf16_starts.to_vec();
+    wanted.sort_unstable();
+    let mut wanted = wanted.into_iter().peekable();
+    let mut out = Vec::with_capacity(wanted.len());
+    let mut units = 0u32;
+    for (byte, c) in text.char_indices() {
+        while let Some(&start) = wanted.peek() {
+            if start > units {
+                break;
+            }
+            out.push(byte as u32);
+            wanted.next();
+        }
+        units = units.saturating_add(c.len_utf16() as u32);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf16_offsets_map_to_byte_offsets_across_multibyte_text() {
+        // "é" is 2 bytes and 1 UTF-16 unit; "😀" is 4 bytes and 2 units.
+        let text = "é😀 page two";
+        // "p" of "page" is at UTF-16 unit 4 (1 + 2 + the space) and byte 7.
+        let starts = utf16_to_byte_starts(text, &[0, 4]);
+        assert_eq!(starts, vec![0, 7]);
+        assert_eq!(&text[starts[1] as usize..], "page two");
+    }
+
+    #[test]
+    fn passage_cache_selects_only_for_matching_identity() {
+        let cache = NativePassageCache::new(4, 1 << 20);
+        cache.index("doc".into(), 5, 100, "Rent is due on the first day.\n\nPets need consent.".into(), vec![]);
+        let hit = cache.select("doc".into(), 5, 100, "When is rent due?".into(), 500).unwrap();
+        assert!(hit.passages[0].text.contains("Rent is due"));
+        assert!(cache.select("doc".into(), 6, 100, "rent".into(), 500).is_none());
+        assert_eq!(cache.document_count(), 1);
+    }
 
     fn temp(name: &str, contents: &[u8]) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!("ezfiles-ffi-search-{}-{name}", std::process::id()));

@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassCard
 
 /**
@@ -61,6 +62,8 @@ fun PdfReorderScreen(
     viewModel: PdfReorderViewModel = hiltViewModel(),
 ) {
     val frame by viewModel.frame.collectAsStateWithLifecycle()
+    HapticOnChange(frame.outputs) { if (it.isNotEmpty()) confirm() }
+    HapticOnChange(frame.error) { if (it != null) reject() }
     val slots by viewModel.slots.collectAsStateWithLifecycle()
     var pickedUri by rememberSaveable { mutableStateOf<String?>(null) }
     val choose = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->

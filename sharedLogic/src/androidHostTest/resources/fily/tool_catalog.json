@@ -1,0 +1,671 @@
+{
+  "searchLibrary": {
+    "description": "Search authorized files; latest means modified time, recent means opened time.",
+    "status": "proposed_local_adapter",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "sort": {
+          "enum": [
+            "relevance",
+            "modified_desc",
+            "opened_desc",
+            "size_desc"
+          ]
+        },
+        "fileType": {
+          "type": "string"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "folderId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "after": {
+          "type": "string",
+          "minLength": 1
+        },
+        "before": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minBytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "query",
+        "sort"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "searchDocuments": {
+    "description": "Existing bounded filename search.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "listRecentDocuments": {
+    "description": "Return authorized recently opened files.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "getDocumentInfo": {
+    "description": "Inspect metadata of a known authorized ID.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "openDocument": {
+    "description": "Request foreground opening; success requires a tool result.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "getDocumentExcerpt": {
+    "description": "Read permitted text, which may be partial or unavailable.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxChars": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4000
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "findTextInDocument": {
+    "description": "Find a literal phrase inside an authorized document.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId",
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "listBookmarks": {
+    "description": "List saved locations.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "openBookmark": {
+    "description": "Open a known saved location.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "bookmarkId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "bookmarkId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "addBookmark": {
+    "description": "Open bookmark confirmation for a valid PDF page.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pageNumber": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "documentId",
+        "pageNumber"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "prepareShareDocument": {
+    "description": "Open review and system chooser; does not send to a recipient.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "prepareShareDocuments": {
+    "description": "Review sharing an ordered authorized selection.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "documentIds"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "preparePrintDocument": {
+    "description": "Open print review; does not prove physical printing.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "openTextEditor": {
+    "description": "Open a blank text editor.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "createTextDocument": {
+    "description": "Prepare a text draft; user chooses save destination.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "text",
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "openTextToPdf": {
+    "description": "Open text-to-PDF options.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "createPdfFromText": {
+    "description": "Prepare PDF draft text for review and output selection.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "text",
+        "title"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "openImagesToPdf": {
+    "description": "Open image selection for PDF creation.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "createPdfFromImages": {
+    "description": "Review an authorized ordered image selection.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "documentIds"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "openScanner": {
+    "description": "Open camera scan capture/review; ask platform permission there.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "openImageToText": {
+    "description": "Open local image OCR selection/review.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "openPdfTools": {
+    "description": "Open the PDF tools screen.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "mergePdfDocuments": {
+    "description": "Review ordered PDF merge; preserve user order.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "documentIds"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "extractPdfPages": {
+    "description": "Review extraction with a one-based page range.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pageRange": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId",
+        "pageRange"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "prepareOrganizePdf": {
+    "description": "Review page organization.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "prepareResizePdf": {
+    "description": "Review PDF page-size options.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "preparePdfToImages": {
+    "description": "Review PDF-to-image export.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "preparePdfToText": {
+    "description": "Review PDF text export; extraction limits apply.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "preparePdfToZip": {
+    "description": "Review PDF resource ZIP export.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "openPasswordTool": {
+    "description": "Open password options; enter passwords privately in the app.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "openTidyUp": {
+    "description": "Open organization review; does not delete.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "openSimilarDocuments": {
+    "description": "Review similarity groups; similarity is not equality.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "startTidyScan": {
+    "description": "Start visible cancellable local analysis.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "getTidyReport": {
+    "description": "Return consented cached aggregate; may be partial.",
+    "status": "existing_workflow",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "controlReader": {
+    "description": "Proposed UI adapter, not currently exposed as an assistant API.",
+    "status": "proposed_local_adapter",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "enum": [
+            "next_page",
+            "previous_page",
+            "go_to_page",
+            "zoom_in",
+            "zoom_out",
+            "show_contents",
+            "show_source",
+            "show_preview",
+            "rotate_photo",
+            "next_photo",
+            "previous_photo",
+            "play",
+            "pause",
+            "seek",
+            "subtitles",
+            "audio_track"
+          ]
+        },
+        "value": {
+          "type": [
+            "string",
+            "integer",
+            "number"
+          ]
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "proposeFilePlan": {
+    "description": "Propose rename/move/grouping without changing files; requires future adapter.",
+    "status": "proposed_local_adapter",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "documentIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true
+        },
+        "operation": {
+          "enum": [
+            "rename",
+            "move",
+            "group"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "documentIds",
+        "operation",
+        "destination"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "cancelAction": {
+    "description": "Cancel pending local work; cannot recall external delivery.",
+    "status": "proposed_local_adapter",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+}

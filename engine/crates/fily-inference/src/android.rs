@@ -15,6 +15,7 @@ use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::{LlamaStateSeqFlags, SeqState};
 
+use crate::reuse::reusable_len;
 use crate::{Completion, FilyError};
 
 const CONTEXT_TOKENS: usize = 4096;
@@ -116,6 +117,20 @@ fn run(
     }
 }
 
+/// The saved stable prefix: its tokens and the sequence state right after they were decoded.
+struct Prefix {
+    tokens: Vec<LlamaToken>,
+    state: SeqState,
+}
+
+/// What the context's KV cache holds: the tokens at positions `0..tokens.len()`. Only the worker
+/// thread touches it. A model reload or a GPU-to-CPU fallback starts a new worker, so it also
+/// starts a new, empty cache.
+struct Kv {
+    tokens: Vec<LlamaToken>,
+    prefix: Option<Prefix>,
+}
+
 fn run_with_model(
     backend: &LlamaBackend,
     path: &str,
@@ -137,20 +152,78 @@ fn run_with_model(
     let mut context = model.new_context(backend, params).map_err(|error| error.to_string())?;
     let vocab = model.vocab();
     let prefix_tokens = vocab.tokenize(stable_prefix.as_bytes(), false, true);
-    let mut prefix = None;
+    let mut kv = Kv { tokens: Vec::new(), prefix: None };
     if !prefix_tokens.is_empty() && prefix_tokens.len() < CONTEXT_TOKENS / 2 {
         decode(&mut context, &prefix_tokens, 0, cancelled).map_err(String::from)?;
-        prefix = context.state_seq_get(0, LlamaStateSeqFlags::empty()).ok();
+        kv.tokens = prefix_tokens.clone();
+        kv.prefix = context
+            .state_seq_get(0, LlamaStateSeqFlags::empty())
+            .ok()
+            .map(|state| Prefix { tokens: prefix_tokens, state });
     }
     if started.send(Ok(())).is_err() {
         return Ok(());
     }
 
     while let Ok(Request::Complete { prompt, grammar, max_tokens, answer }) = incoming.recv() {
-        let result = generate(&model, &mut context, &prefix_tokens, prefix.as_ref(), &prompt, &grammar, max_tokens, cancelled, gpu);
+        let result = serve(&model, &mut context, &mut kv, &prompt, &grammar, max_tokens, cancelled, gpu);
         let _ = answer.send(result);
     }
     Ok(())
+}
+
+/// Runs one request. A failure empties the cache (back to the saved prefix), so a partly
+/// decoded prompt is never reused.
+#[allow(clippy::too_many_arguments)]
+fn serve(
+    model: &LlamaModel,
+    context: &mut LlamaContext<'_>,
+    kv: &mut Kv,
+    prompt: &str,
+    grammar: &str,
+    max_tokens: usize,
+    cancelled: &AtomicBool,
+    gpu: bool,
+) -> Result<Completion, FilyError> {
+    let result = generate(model, context, kv, prompt, grammar, max_tokens, cancelled, gpu);
+    if result.is_err() {
+        reset(context, kv);
+    }
+    result
+}
+
+/// Empties the cache, then restores the saved prefix when that works.
+fn reset(context: &mut LlamaContext<'_>, kv: &mut Kv) {
+    context.clear_kv_cache();
+    kv.tokens.clear();
+    if let Some(prefix) = &kv.prefix {
+        if context.state_seq_set(&prefix.state, 0).is_ok() {
+            kv.tokens = prefix.tokens.clone();
+        }
+    }
+}
+
+/// Leaves the context holding the longest reusable head of `tokens` and nothing more. Returns how
+/// many leading tokens of `tokens` are already in the context.
+fn prepare(context: &mut LlamaContext<'_>, kv: &mut Kv, tokens: &[LlamaToken]) -> usize {
+    let reuse = reusable_len(&kv.tokens, tokens);
+    if reuse == kv.tokens.len() {
+        return reuse;
+    }
+    if context.kv_cache_seq_rm(0, Some(reuse as u32), None).is_ok() {
+        kv.tokens.truncate(reuse);
+        return reuse;
+    }
+    // Some layers (recurrent state) cannot drop a tail. Start again from the saved prefix when it
+    // is a head of this prompt, otherwise from an empty cache.
+    reset(context, kv);
+    let head = reusable_len(&kv.tokens, tokens);
+    if head < kv.tokens.len() {
+        context.clear_kv_cache();
+        kv.tokens.clear();
+        return 0;
+    }
+    head
 }
 
 fn decode(context: &mut LlamaContext<'_>, tokens: &[LlamaToken], start: usize, cancelled: &AtomicBool) -> Result<(), FilyError> {
@@ -174,8 +247,7 @@ fn decode(context: &mut LlamaContext<'_>, tokens: &[LlamaToken], start: usize, c
 fn generate(
     model: &LlamaModel,
     context: &mut LlamaContext<'_>,
-    prefix_tokens: &[LlamaToken],
-    prefix: Option<&SeqState>,
+    kv: &mut Kv,
     prompt: &str,
     grammar: &str,
     max_tokens: usize,
@@ -189,19 +261,12 @@ fn generate(
         return Err(FilyError::Limit("Fily's 4096-token context is full".into()));
     }
 
-    context.clear_kv_cache();
-    let offset = match prefix {
-        Some(state) if tokens.len() > prefix_tokens.len() && tokens.starts_with(prefix_tokens) => {
-            if context.state_seq_set(state, 0).is_ok() {
-                prefix_tokens.len()
-            } else {
-                context.clear_kv_cache();
-                0
-            }
-        }
-        _ => 0,
-    };
-    decode(context, &tokens[offset..], offset, cancelled)?;
+    let reused = prepare(context, kv, &tokens);
+    let fresh = &tokens[reused..];
+    let prefill_start = Instant::now();
+    decode(context, fresh, reused, cancelled)?;
+    kv.tokens.extend_from_slice(fresh);
+    let prefill_ms = prefill_start.elapsed().as_millis() as u64;
 
     let mut sampler = if grammar.is_empty() {
         LlamaSampler::greedy()
@@ -232,6 +297,7 @@ fn generate(
         next.clear();
         next.add(token, (tokens.len() + index) as i32, &[0], true).map_err(|error| error.to_string())?;
         context.decode(&mut next).map_err(|error| error.to_string())?;
+        kv.tokens.push(token);
     }
     Ok(Completion {
         text: String::from_utf8_lossy(&bytes).trim().to_owned(),
@@ -239,5 +305,8 @@ fn generate(
         first_token_ms,
         elapsed_ms: start.elapsed().as_millis() as u64,
         gpu,
+        prefill_tokens: fresh.len() as u32,
+        reused_tokens: reused as u32,
+        prefill_ms,
     })
 }

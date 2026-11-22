@@ -29,7 +29,7 @@ import kotlin.system.exitProcess
 /** Reports live in app-private storage, which no other app can read. */
 private fun crashDir(context: Context) = File(context.filesDir, "crash")
 
-private fun deviceDescription(context: Context): DeviceDescription {
+internal fun deviceDescription(context: Context): DeviceDescription {
     val info = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
     val maker = Build.MANUFACTURER.orEmpty().replaceFirstChar { it.titlecase(Locale.ROOT) }
     val model = Build.MODEL.orEmpty()

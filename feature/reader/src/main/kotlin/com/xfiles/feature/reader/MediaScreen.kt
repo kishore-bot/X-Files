@@ -62,6 +62,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.compose.ContentFrame
 import com.xfiles.core.documents.FileEntry
@@ -92,7 +93,13 @@ internal fun MediaScreen(file: FileEntry, video: Boolean) {
     }
 
     DisposableEffect(file.uri, lifecycle) {
-        val activePlayer = ExoPlayer.Builder(context)
+        val activePlayer = ExoPlayer.Builder(
+            context,
+            DefaultRenderersFactory(context)
+                // The phone's own decoders first; FFmpeg only for what they can't play (AC3, DTS, TrueHD...).
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+                .setEnableDecoderFallback(true),
+        )
             .setSeekBackIncrementMs(SKIP_MS)
             .setSeekForwardIncrementMs(SKIP_MS)
             .build()
@@ -161,6 +168,7 @@ private fun PlayerContent(player: ExoPlayer, video: Boolean, file: FileEntry) {
     val styleStore = remember { SubtitleStyleStore(context.applicationContext) }
     var subtitleStyle by remember { mutableStateOf(styleStore.load()) }
     var subtitleSheet by remember { mutableStateOf(false) }
+    var detailsSheet by remember { mutableStateOf(false) }
     var tracks by remember(player) { mutableStateOf(player.subtitleTracks()) }
     val cues = rememberCues(player)
     val brightBehind = rememberBrightBehindSubtitles(
@@ -391,11 +399,15 @@ private fun PlayerContent(player: ExoPlayer, video: Boolean, file: FileEntry) {
                                 Text("CC", fontWeight = if (tracks.any { it.selected }) FontWeight.Bold else FontWeight.Normal)
                             }
                         }
+                        IconButton(onClick = { detailsSheet = true }) { Icon(EzIcons.Info, "File details") }
                         Text(formatTime(total))
                     }
                 }
             }
         }
+    }
+    if (detailsSheet) {
+        MediaDetailsSheet(file, player) { detailsSheet = false }
     }
     if (subtitleSheet) {
         SubtitleSheet(

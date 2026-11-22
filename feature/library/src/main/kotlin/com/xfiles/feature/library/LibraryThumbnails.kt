@@ -10,6 +10,7 @@ import android.os.CancellationSignal
 import android.util.LruCache
 import android.util.Size
 import com.xfiles.core.documents.FileEntry
+import com.xfiles.core.documents.MemoryPressure
 import com.xfiles.documents.DocumentKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,11 @@ internal object LibraryThumbnails {
     private val decodeSlots = Dispatchers.IO.limitedParallelism(2)
     private val cache = object : LruCache<String, Bitmap>(CACHE_BYTES) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+    }
+
+    init {
+        // Previews are cheap to decode again, so under memory pressure they go first.
+        MemoryPressure.register { cache.evictAll() }
     }
 
     /** Whether rows of this kind show a preview rather than the type icon. */

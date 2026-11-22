@@ -1,64 +1,37 @@
 package com.xfiles.core.documents
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
-import android.text.Layout
-import android.text.StaticLayout
-import android.text.TextPaint
+import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import kotlin.math.min
 
 /**
- * Lays text and pictures out as PDF pages with Android's [PdfDocument]. Pages are produced lazily from
- * [Sequence]s, so only one page's bitmap is alive at a time. Not thread-safe: callers run it on one lane.
+ * Lays text and pictures out as PDF files. Text goes through the platform's [PdfDocument], which embeds
+ * fonts; pictures go through [JpegPdfWriter], so each page keeps its JPEG and nothing else. Pages are
+ * produced lazily from [Sequence]s, so only one page's bitmap is alive at a time. Not thread-safe:
+ * callers run it on one lane.
  */
 internal object PdfComposer {
-    private const val MARGIN = 54f // 0.75 inch.
+    private const val MARGIN = 27f // Half an inch, around pictures placed on a paper size.
 
-    /** Text in 11 pt on [paper]; returns the page count. [onPage] reports each finished page. */
-    fun writeText(text: String, paper: PdfPaper, output: OutputStream, onPage: (Int) -> Unit = {}): Int {
-        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; color = Color.BLACK }
-        val width = (paper.width - 2 * MARGIN).toInt()
-        val height = paper.height - 2 * MARGIN
-        val layout = StaticLayout.Builder.obtain(text.ifEmpty { " " }, 0, text.ifEmpty { " " }.length, paint, width)
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setLineSpacing(2f, 1f)
-            .setIncludePad(false)
-            .build()
+    /** Every page of [layout] as a PDF; returns the page count. [onPage] reports each finished page. */
+    fun writeText(layout: TextPdfLayout, output: OutputStream, onPage: (Int) -> Unit = {}): Int {
         val document = PdfDocument()
         try {
-            var count = 0
-            pageBreaks(layout, height).forEach { lines ->
-                val top = layout.getLineTop(lines.first).toFloat()
-                val bottom = layout.getLineBottom(lines.last).toFloat()
-                val page = document.startPage(PdfDocument.PageInfo.Builder(paper.width.toInt(), paper.height.toInt(), ++count).create())
-                page.canvas.apply {
-                    translate(MARGIN, MARGIN - top)
-                    clipRect(0f, top, width.toFloat(), bottom)
-                    layout.draw(this)
-                }
+            val box = layout.box
+            for (index in layout.pages.indices) {
+                val page = document.startPage(PdfDocument.PageInfo.Builder(box.pageWidth, box.pageHeight, index + 1).create())
+                layout.draw(page.canvas, index)
                 document.finishPage(page)
-                onPage(count)
+                onPage(index + 1)
             }
             document.writeTo(output)
-            return count
+            return layout.pages.size
         } finally {
             document.close()
-        }
-    }
-
-    /** Groups the layout's lines into pages of at most [height] points; a page always holds one line. */
-    fun pageBreaks(layout: Layout, height: Float): Sequence<IntRange> = sequence {
-        var first = 0
-        while (first < layout.lineCount) {
-            val top = layout.getLineTop(first)
-            var last = first
-            while (last + 1 < layout.lineCount && layout.getLineBottom(last + 1) - top <= height) last++
-            yield(first..last)
-            first = last + 1
         }
     }
 
@@ -73,14 +46,12 @@ internal object PdfComposer {
         val top: Float,
         val drawnWidth: Float,
         val drawnHeight: Float,
-    ) {
-        fun pictureRect() = RectF(left, top, left + drawnWidth, top + drawnHeight)
-    }
+    )
 
     internal fun layout(pictureWidth: Int, pictureHeight: Int, paper: PdfPaper?): PictureLayout {
         val pageWidth = paper?.width ?: pictureWidth.toFloat()
         val pageHeight = paper?.height ?: pictureHeight.toFloat()
-        val margin = if (paper == null) 0f else MARGIN / 2
+        val margin = if (paper == null) 0f else MARGIN
         val scale = min((pageWidth - 2 * margin) / pictureWidth, (pageHeight - 2 * margin) / pictureHeight)
         val drawnWidth = pictureWidth * scale
         val drawnHeight = pictureHeight * scale
@@ -95,30 +66,55 @@ internal object PdfComposer {
     }
 
     /**
-     * One picture per page. [pictures] is consumed lazily and each bitmap is recycled once drawn.
-     * With [paper] `null` each page takes its picture's size; otherwise the picture is centred inside the margins.
+     * One picture per page, each encoded as a JPEG at [quality] and then released. [pictures] is consumed
+     * lazily. With [paper] `null` each page takes its picture's size; otherwise the picture is centred.
      */
-    fun writePictures(pictures: Sequence<Bitmap>, paper: PdfPaper?, output: OutputStream, onPage: (Int) -> Unit = {}): Int {
-        val document = PdfDocument()
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-        try {
-            var count = 0
-            for (bitmap in pictures) {
+    fun writePictures(
+        pictures: Sequence<Bitmap>,
+        paper: PdfPaper?,
+        quality: PdfImageQuality,
+        output: OutputStream,
+        onPage: (Int) -> Unit = {},
+    ): Int {
+        val writer = JpegPdfWriter { bytes, length -> output.write(bytes, 0, length) }
+        var count = 0
+        for (bitmap in pictures) {
+            try {
+                val layout = layout(bitmap.width, bitmap.height, paper)
+                val flat = opaque(bitmap)
                 try {
-                    val layout = layout(bitmap.width, bitmap.height, paper)
-                    val page = document.startPage(PdfDocument.PageInfo.Builder(layout.pageWidth.toInt(), layout.pageHeight.toInt(), ++count).create())
-                    page.canvas.drawColor(Color.WHITE)
-                    page.canvas.drawBitmap(bitmap, null, layout.pictureRect(), paint)
-                    document.finishPage(page)
-                    onPage(count)
+                    val jpeg = ByteArrayOutputStream().also { flat.compress(Bitmap.CompressFormat.JPEG, quality.jpegQuality, it) }.toByteArray()
+                    writer.addPage(
+                        pageWidth = layout.pageWidth,
+                        pageHeight = layout.pageHeight,
+                        left = layout.left,
+                        top = layout.top,
+                        width = layout.drawnWidth,
+                        height = layout.drawnHeight,
+                        pixelWidth = flat.width,
+                        pixelHeight = flat.height,
+                        jpeg = jpeg,
+                    )
                 } finally {
-                    bitmap.recycle()
+                    if (flat !== bitmap) flat.recycle()
                 }
+                onPage(++count)
+            } finally {
+                bitmap.recycle()
             }
-            document.writeTo(output)
-            return count
-        } finally {
-            document.close()
         }
+        writer.finish()
+        return count
+    }
+
+    /** JPEG has no transparency; transparent pixels would turn black, so they go onto white. */
+    fun opaque(bitmap: Bitmap): Bitmap {
+        if (!bitmap.hasAlpha()) return bitmap
+        val flat = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        Canvas(flat).apply {
+            drawColor(Color.WHITE)
+            drawBitmap(bitmap, 0f, 0f, null)
+        }
+        return flat
     }
 }

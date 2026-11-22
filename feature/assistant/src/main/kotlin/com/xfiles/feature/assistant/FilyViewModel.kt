@@ -14,6 +14,7 @@ import com.xfiles.fily.AssistantAccess
 import com.xfiles.fily.AssistantModel
 import com.xfiles.fily.FilyDocuments
 import com.xfiles.fily.FilyNavigator
+import com.xfiles.fily.FilyGpuGuard
 import com.xfiles.fily.FilyPrefKeys
 import com.xfiles.fily.FilyPreferences
 import com.xfiles.fily.FilyPrompt
@@ -26,11 +27,13 @@ import com.xfiles.fily.ToolExecutor
 import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class FilyViewModel @Inject internal constructor(
@@ -47,6 +50,8 @@ class FilyViewModel @Inject internal constructor(
     private val mutableGeneration = MutableStateFlow<FilyGeneration?>(null)
     val generation = mutableGeneration.asStateFlow()
     private var request: Job? = null
+    /** Set while the loaded model runs on the GPU; its answers are what prove or rule out the GPU. */
+    private var gpuGuard: FilyGpuGuard? = null
 
     private val mutableSpeechLanguage = MutableStateFlow(preferences.get(FilyPrefKeys.SPEECH_LANGUAGE)?.takeIf(String::isNotBlank))
     /** The picked recognition and speech language (BCP-47), or null for the phone's own English. */
@@ -67,6 +72,10 @@ class FilyViewModel @Inject internal constructor(
         return FilySession(
             complete = { prompt, grammar ->
                 val result = inference.complete(prompt, grammar)
+                gpuGuard?.let { guard ->
+                    withContext(Dispatchers.IO) { guard.answered(result.gpu) }
+                    if (!result.gpu) gpuGuard = null
+                }
                 mutableGeneration.value = result
                 result.text
             },
@@ -134,8 +143,7 @@ class FilyViewModel @Inject internal constructor(
         mutableUi.value = FilyUiState(request = words, working = true)
         request = viewModelScope.launch {
             try {
-                val gpu = Build.HARDWARE.contains("qcom", ignoreCase = true)
-                inference.load(path, gpu, FilyPrompt.STABLE_PREFIX)
+                ensureModel(path, gpuWanted = Build.HARDWARE.contains("qcom", ignoreCase = true))
                 access.requireEnabled()
                 val reply = session.ask(words)
                 if (access.enabled.value) mutableUi.value = FilyUiState(request = words, reply = reply)
@@ -155,7 +163,36 @@ class FilyViewModel @Inject internal constructor(
         request?.cancel()
         inference.cancel()
         inference.close()
+        gpuGuard = null
         mutableUi.value = FilyUiState()
+    }
+
+    /**
+     * Loads the model unless it is already the loaded one. The GPU guard is consulted only for a real load,
+     * so a running GPU model never reads its own "trying" state as a crash. Disk work runs on IO.
+     */
+    private suspend fun ensureModel(path: String, gpuWanted: Boolean) {
+        if (inference.isLoaded(path)) return
+        withContext(Dispatchers.IO) {
+            val guard = FilyGpuGuard(preferences, buildStamp(path))
+            val useGpu = gpuWanted && guard.startLoad(preferGpu = true)
+            val onGpu = inference.load(path, useGpu, FilyPrompt.STABLE_PREFIX)
+            if (useGpu && !onGpu) guard.failed()
+            gpuGuard = guard.takeIf { onGpu }
+        }
+    }
+
+    /** Changes with the app build (version and install time) and with the model file, so each gets one GPU attempt. */
+    private fun buildStamp(path: String): String {
+        val app = getApplication<Application>()
+        val info = runCatching { app.packageManager.getPackageInfo(app.packageName, 0) }.getOrNull()
+        val code = when {
+            info == null -> 0L
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> info.longVersionCode
+            else -> info.versionCode.toLong()
+        }
+        val model = File(path)
+        return "$code.${info?.lastUpdateTime ?: 0L}.${model.length()}.${model.lastModified()}"
     }
 
     override fun onCleared() {

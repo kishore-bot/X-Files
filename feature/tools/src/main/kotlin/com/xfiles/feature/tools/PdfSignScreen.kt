@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.documents.MAX_SAVED_SIGNATURES
+import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassCard
 import com.xfiles.documents.PdfSignStroke
 import kotlin.math.abs
@@ -67,6 +68,8 @@ fun PdfSignScreen(
     viewModel: PdfSignViewModel = hiltViewModel(),
 ) {
     val frame by viewModel.frame.collectAsStateWithLifecycle()
+    HapticOnChange(frame.outputs) { if (it.isNotEmpty()) confirm() }
+    HapticOnChange(frame.error) { if (it != null) reject() }
     val input by viewModel.input.collectAsStateWithLifecycle()
     val saved by viewModel.saved.collectAsStateWithLifecycle()
     val protection by viewModel.protection.collectAsStateWithLifecycle()

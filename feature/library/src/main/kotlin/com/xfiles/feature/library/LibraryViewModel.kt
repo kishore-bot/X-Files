@@ -6,18 +6,22 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.xfiles.core.documents.ConversionRepository
 import com.xfiles.core.documents.DocumentRepository
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FolderLibrary
 import com.xfiles.core.documents.FolderRepository
 import com.xfiles.core.documents.LibraryContentSearch
 import com.xfiles.core.documents.LibrarySearchRepository
+import com.xfiles.core.documents.PrintRequest
+import com.xfiles.core.documents.canPrint
 import com.xfiles.documents.library.LibraryCategory
 import com.xfiles.documents.library.libraryCategories
 import com.xfiles.documents.search.FileNameIndex
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +32,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -47,8 +52,13 @@ class LibraryViewModel @Inject constructor(
     private val documents: DocumentRepository,
     private val folders: FolderRepository,
     private val search: LibrarySearchRepository,
+    private val conversions: ConversionRepository,
 ) : ViewModel() {
     val recents = documents.recents
+    private val printRequests = Channel<PrintRequest>(Channel.BUFFERED)
+    /** Print previews ready for the system print screen, or refusals to show; collected while the library is shown. */
+    val prints = printRequests.receiveAsFlow()
+    private var printJob: Job? = null
     private val mutableRecentsLoaded = MutableStateFlow(false)
     /** True once the first recents read finished; the launch screen reports fully drawn on it. */
     val recentsLoaded = mutableRecentsLoaded.asStateFlow()
@@ -93,6 +103,25 @@ class LibraryViewModel @Inject constructor(
 
     fun clearRecents() {
         viewModelScope.launch { documents.clearRecents() }
+    }
+
+    fun removeRecent(file: FileEntry) {
+        viewModelScope.launch { documents.removeRecent(file) }
+    }
+
+    /** Lays [file] out as a plain PDF off the main thread, then sends it to [prints]. */
+    fun print(file: FileEntry) {
+        if (!file.kind.canPrint() || printJob?.isActive == true) return
+        printJob = viewModelScope.launch {
+            val request = try {
+                PrintRequest.Ready(conversions.printable(file, password = null), file.name)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                PrintRequest.Failed("This file can't be printed. Open it first, then try again.")
+            }
+            printRequests.send(request)
+        }
     }
 
     fun setQuery(value: String) {

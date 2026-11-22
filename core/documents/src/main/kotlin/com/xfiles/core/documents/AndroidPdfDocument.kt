@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.pdf.LoadParams
 import android.graphics.pdf.PdfRenderer
 import android.graphics.pdf.PdfRendererPreV
+import android.graphics.pdf.content.PdfPageTextContent
 import android.graphics.pdf.models.PageMatchBounds
 import android.net.Uri
 import android.os.Build
@@ -50,9 +51,22 @@ class AndroidPdfDocument @Inject constructor(
     private val io = Dispatchers.IO.limitedParallelism(1)
     private val ocrCache = LruCache<String, Array<List<PdfTextLine>?>>(4)
 
+    /** Per-page character geometry for selection; bounded by page count. */
+    private val textCache = LruCache<String, PdfPageText>(TEXT_CACHE_PAGES)
+
     /** Small page bitmaps for the page grid and scrubber, by document, page and size. Bounded in bytes. */
     private val thumbnails = object : LruCache<String, Bitmap>(THUMBNAIL_CACHE_BYTES) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+
+    init {
+        MemoryPressure.register { trim() }
+    }
+
+    /** Drops the cached OCR text and page bitmaps; they are rebuilt on demand. Safe from any thread (LruCache is synchronized). */
+    fun trim() {
+        ocrCache.evictAll()
+        thumbnails.evictAll()
     }
 
     /** Every PDF can be searched: through the text layer, or through OCR where there is none. */
@@ -67,26 +81,35 @@ class AndroidPdfDocument @Inject constructor(
      * at most [ocrPages] of them. Without it (library indexing, Tidy) only the cheap text layer is used.
      */
     suspend fun text(uri: Uri, password: String?, limit: Int, ocr: Boolean, ocrPages: Int = MAX_OCR_PAGES): String =
+        pagedText(uri, password, limit, ocr, ocrPages).text
+
+    /**
+     * [text] with the offset where each page starts, so passages can cite page numbers. Every page the reader
+     * reached has an entry, blank pages included, so the numbers match the PDF.
+     */
+    suspend fun pagedText(uri: Uri, password: String?, limit: Int, ocr: Boolean, ocrPages: Int = MAX_OCR_PAGES): PagedText =
         withContext(io) {
-            val layer = if (hasTextLayer) layerText(uri, password, limit) else ""
-            if (layer.isNotBlank() || !ocr) return@withContext layer.take(limit)
+            val layer = if (hasTextLayer) layerText(uri, password, limit) else PagedText("", emptyList())
+            if (layer.text.isNotBlank() || !ocr) return@withContext layer.limited(limit)
             val out = StringBuilder()
+            val starts = ArrayList<Int>()
             forEachOcrPage(uri, password, ocrPages) { _, lines ->
-                if (lines.isNotEmpty()) {
-                    if (out.isNotEmpty()) out.append("\n\n")
-                    lines.joinTo(out, "\n") { it.text }
-                }
+                if (out.isNotEmpty() && lines.isNotEmpty()) out.append("\n\n")
+                starts += out.length
+                lines.joinTo(out, "\n") { it.text }
                 out.length < limit
             }
-            out.take(limit).toString()
+            PagedText(out.toString(), starts).limited(limit)
         }
 
-    private suspend fun layerText(uri: Uri, password: String?, limit: Int): String {
+    private suspend fun layerText(uri: Uri, password: String?, limit: Int): PagedText {
         val out = StringBuilder()
+        val starts = ArrayList<Int>()
         fun add(page: String) {
-            if (page.isBlank()) return
-            if (out.isNotEmpty()) out.append("\n\n")
-            out.append(page.trim())
+            val body = page.trim()
+            if (body.isNotEmpty() && out.isNotEmpty()) out.append("\n\n")
+            starts += out.length
+            out.append(body)
         }
         if (Build.VERSION.SDK_INT >= 35) {
             openRenderer(uri, password).use { pdf ->
@@ -112,7 +135,7 @@ class AndroidPdfDocument @Inject constructor(
                 }
             }
         }
-        return out.toString()
+        return PagedText(out.toString(), starts)
     }
 
     /**
@@ -242,6 +265,55 @@ class AndroidPdfDocument @Inject constructor(
         }
     }
 
+    /**
+     * Per-character geometry of one page, for selecting text: the text layer's bounds where the platform gives
+     * them (Android 15, or 12-14 with the PDF module), otherwise OCR lines of the rendered page. Cached per page,
+     * built on the IO lane, so a second selection on the page is instant. Scanned pages are OCR'd once.
+     */
+    suspend fun pageText(uri: Uri, password: String?, index: Int): PdfPageText = withContext(io) {
+        val key = "$uri|$index"
+        textCache.get(key)?.let { return@withContext it }
+        currentCoroutineContext().ensureActive()
+        val layer = if (hasTextLayer) layerRuns(uri, password, index) else emptyList()
+        val built = if (layer.any { it.text.isNotBlank() }) {
+            PdfPageText.build(layer)
+        } else {
+            PdfPageText.build(ocrLines(uri, password, index).map { PdfTextRun(it.text, listOf(it.box)) })
+        }
+        textCache.put(key, built)
+        built
+    }
+
+    /** One page's text runs from the platform text layer; empty when the platform has none. */
+    private suspend fun layerRuns(uri: Uri, password: String?, index: Int): List<PdfTextRun> {
+        if (Build.VERSION.SDK_INT >= 35) {
+            return openRenderer(uri, password).use { pdf ->
+                if (index !in 0 until pdf.pageCount) return@use emptyList()
+                pdf.openPage(index).use { page -> page.textContents.toRuns(page.width, page.height) }
+            }
+        }
+        if (!supportsPdfExtensions()) return emptyList()
+        val descriptor = openDescriptor(uri)
+        val pdf = try {
+            openOlderRenderer(descriptor)
+        } catch (error: Exception) {
+            descriptor.close()
+            throw error
+        }
+        return pdf.use { renderer -> if (index in 0 until renderer.pageCount) renderer.runs(index) else emptyList() }
+    }
+
+    /** OCR lines of one page, through the same per-document cache as the page-by-page reads. */
+    private suspend fun ocrLines(uri: Uri, password: String?, index: Int): List<PdfTextLine> {
+        val key = uri.toString()
+        return openRenderer(uri, password).use { pdf ->
+            if (index !in 0 until pdf.pageCount) return@use emptyList()
+            val known = ocrCache[key]?.takeIf { it.size == pdf.pageCount }
+                ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount).also { ocrCache.put(key, it) }
+            known[index] ?: recognizePage(pdf, index).also { known[index] = it }
+        }
+    }
+
     suspend fun search(uri: Uri, query: String, password: String?): PdfSearchResult = withContext(io) {
         if (query.isBlank()) return@withContext PdfSearchResult(emptyList(), truncated = false)
         when {
@@ -356,6 +428,7 @@ class AndroidPdfDocument @Inject constructor(
         const val MAX_OCR_SEARCH_PAGES = 80
         const val MAX_THUMBNAIL_EDGE = 512
         const val THUMBNAIL_CACHE_BYTES = 16 * 1024 * 1024
+        const val TEXT_CACHE_PAGES = 24
     }
 }
 
@@ -378,7 +451,29 @@ private class ExtensionPdfText(descriptor: ParcelFileDescriptor) : AutoCloseable
     fun text(index: Int): String =
         renderer.openPage(index).use { page -> page.textContents.joinToString("\n") { it.text.orEmpty() } }
 
+    fun runs(index: Int): List<PdfTextRun> =
+        renderer.openPage(index).use { page -> page.textContents.toRuns(page.width, page.height) }
+
     override fun close() = renderer.close()
+}
+
+/** Platform text segments as page-fraction runs. Bounds are page points from the top-left corner. */
+@SuppressLint("NewApi")
+private fun List<PdfPageTextContent>.toRuns(width: Int, height: Int): List<PdfTextRun> {
+    if (width <= 0 || height <= 0) return emptyList()
+    return map { content ->
+        PdfTextRun(
+            content.text.orEmpty(),
+            content.bounds.orEmpty().map { rect ->
+                PdfMatchBox(
+                    (rect.left / width).coerceIn(0f, 1f),
+                    (rect.top / height).coerceIn(0f, 1f),
+                    (rect.right / width).coerceIn(0f, 1f),
+                    (rect.bottom / height).coerceIn(0f, 1f),
+                )
+            },
+        )
+    }
 }
 
 @SuppressLint("NewApi")

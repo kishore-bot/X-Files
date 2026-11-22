@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfMatchBox
+import com.xfiles.documents.PdfBox
 import com.xfiles.design.EzIcons
 import com.xfiles.design.glassBar
 import kotlin.math.roundToInt
@@ -271,10 +272,23 @@ private fun PdfThumbnail(index: Int, load: suspend (Int) -> Bitmap?) {
 
 /** Two pages side by side (left is the lower page number). Each page keeps its own pinch and pan. */
 @Composable
-internal fun PdfSpread(page: FilePreview.Pdf, facing: FilePreview.Pdf, rotation: Int, highlights: (Int) -> List<PdfMatchBox>) {
+internal fun PdfSpread(
+    page: FilePreview.Pdf,
+    facing: FilePreview.Pdf,
+    rotation: Int,
+    highlights: (Int) -> List<PdfMatchBox>,
+    text: (Int) -> PdfTextSource?,
+    marks: (Int) -> List<PdfBox>,
+) {
     val (left, right) = if (page.page < facing.page) page to facing else facing to page
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ReaderImage(left.bitmap, "Page ${left.page + 1}", rotation, highlights(left.page), Modifier.weight(1f).fillMaxHeight())
-        ReaderImage(right.bitmap, "Page ${right.page + 1}", rotation, highlights(right.page), Modifier.weight(1f).fillMaxHeight())
+        ReaderImage(
+            left.bitmap, "Page ${left.page + 1}", rotation, highlights(left.page), Modifier.weight(1f).fillMaxHeight(),
+            text = text(left.page), marks = marks(left.page),
+        )
+        ReaderImage(
+            right.bitmap, "Page ${right.page + 1}", rotation, highlights(right.page), Modifier.weight(1f).fillMaxHeight(),
+            text = text(right.page), marks = marks(right.page),
+        )
     }
 }

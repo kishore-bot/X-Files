@@ -50,8 +50,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PdfPageText
 import com.xfiles.design.EzIcons
 import com.xfiles.documents.DocumentKind
+import com.xfiles.documents.PdfBox
 import com.xfiles.documents.PdfMarkup
 import com.xfiles.documents.PdfMarkupKind
 import com.xfiles.design.BarIconButton
@@ -108,8 +110,11 @@ fun ReaderScreen(
     onEditFile: ((Uri, String) -> Unit)? = null,
     /** Cell and slide editing for the open spreadsheet or presentation. */
     structuredEdits: StructuredEditSession? = null,
+    /** Character geometry of a PDF page for text selection; see DocumentAnalysisViewModel.pdfText. */
+    pdfText: suspend (Int) -> PdfPageText? = { null },
 ) {
     PrintRequests(printRequests)
+    val context = LocalContext.current
     (printing as? PrintStatus.Failed)?.let { failed ->
         AlertDialog(
             onDismissRequest = onDismissPrintError,
@@ -419,11 +424,33 @@ fun ReaderScreen(
                             } else {
                                 val active = pdfFind.matches.getOrNull(pdfFind.selected)
                                 fun highlights(page: Int) = active?.takeIf { showPdfFind && it.page == page }?.boxes.orEmpty()
+                                // Highlights made in this session show on their page; the marks save with the annotated copy.
+                                fun marksOn(page: Int): List<PdfBox> = markup.marks.asSequence()
+                                    .filterIsInstance<PdfMarkup.Highlight>()
+                                    .filter { it.page == page }
+                                    .flatMap { it.boxes.asSequence() }
+                                    .toList()
+                                fun textSource(page: Int): PdfTextSource = PdfTextSource(
+                                    page = page,
+                                    load = { pdfText(page) },
+                                    onHighlight = { boxes -> onAddMarkup(PdfMarkup.Highlight(page, boxes)) },
+                                    onSearch = { query ->
+                                        showPdfFind = true
+                                        onPdfQuery(query)
+                                    },
+                                )
                                 val facing = state.facing
                                 if (state.twoPage && facing != null) {
-                                    PdfSpread(preview, facing, rotation, ::highlights)
+                                    PdfSpread(preview, facing, rotation, ::highlights, ::textSource, ::marksOn)
                                 } else {
-                                    ReaderImage(preview.bitmap, "Page ${preview.page + 1}", rotation, highlights(preview.page))
+                                    ReaderImage(
+                                        preview.bitmap,
+                                        "Page ${preview.page + 1}",
+                                        rotation,
+                                        highlights(preview.page),
+                                        text = textSource(preview.page),
+                                        marks = marksOn(preview.page),
+                                    )
                                 }
                             }
                         }
@@ -456,7 +483,23 @@ fun ReaderScreen(
             }
         }
     }
-    ready?.summary?.let { SummaryDialog(it, onDismissSummary) }
+    val summaryState = ready?.summary
+    if (ready != null && summaryState != null) {
+        val inPdf = ready.preview is FilePreview.Pdf
+        SummaryDialog(
+            state = summaryState,
+            documentName = ready.file.name,
+            onReference = { query ->
+                if (inPdf) {
+                    showPdfFind = true
+                    onPdfQuery(query)
+                } else {
+                    copyToClipboard(context, query)
+                }
+            },
+            onDismiss = onDismissSummary,
+        )
+    }
     if (confirmDiscard) {
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
@@ -511,7 +554,12 @@ internal fun ExternalOpen(file: FileEntry, message: String = "An in-app preview 
 }
 
 @Composable
-private fun SummaryDialog(state: SummaryState, onDismiss: () -> Unit) {
+private fun SummaryDialog(
+    state: SummaryState,
+    documentName: String,
+    onReference: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("At a glance") },
@@ -525,7 +573,10 @@ private fun SummaryDialog(state: SummaryState, onDismiss: () -> Unit) {
                         if (summary.wordCount > 0u) {
                             Text("${summary.wordCount} words \u00B7 ${summary.readingMinutes} min read")
                         }
-                        if (summary.keySentences.isEmpty() && summary.keywords.isEmpty()) Text("No summary is available for this text.")
+                        if (summary.items.isNotEmpty()) GlanceItemGroups(summary.items, documentName, onReference)
+                        if (summary.keySentences.isEmpty() && summary.keywords.isEmpty() && summary.items.isEmpty()) {
+                            Text("No summary is available for this text.")
+                        }
                         summary.keySentences.forEach { Text(it) }
                         if (summary.keywords.isNotEmpty()) Text(summary.keywords.joinToString(", "))
                     }

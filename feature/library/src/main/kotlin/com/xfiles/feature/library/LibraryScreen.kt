@@ -33,6 +33,8 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -81,6 +83,7 @@ import com.xfiles.core.documents.FolderLibrary
 import com.xfiles.core.documents.LibraryContentSearch
 import com.xfiles.core.documents.LibrarySearchHit
 import com.xfiles.core.documents.LinkedFolder
+import com.xfiles.core.documents.canPrint
 import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzBadgeColors
 import com.xfiles.design.EzChip
@@ -106,6 +109,7 @@ import com.xfiles.design.floatingGlass
 import com.xfiles.design.glass
 import com.xfiles.design.glassCard
 import com.xfiles.design.pressScale
+import com.xfiles.design.rememberEzHaptics
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.library.LibraryCategory
 import com.xfiles.documents.library.libraryCategories
@@ -143,6 +147,8 @@ fun LibraryScreen(
     onOpen: () -> Unit,
     onFile: (FileEntry) -> Unit,
     onShareFiles: (List<FileEntry>) -> Unit,
+    onPrint: (FileEntry) -> Unit,
+    onRemoveRecent: (FileEntry) -> Unit,
     onClear: () -> Unit,
     onAddFolder: () -> Unit,
     onRemoveFolder: (Uri) -> Unit,
@@ -187,13 +193,30 @@ fun LibraryScreen(
     }
     val haptics = LocalHapticFeedback.current
     val hapticsOn = LocalHapticsEnabled.current
+    val ezHaptics = rememberEzHaptics()
+    fun setPicked(file: FileEntry, on: Boolean) {
+        if (on) {
+            if (file !in picked) picked.add(file)
+        } else {
+            picked.remove(file)
+        }
+    }
     fun toggle(file: FileEntry) {
-        if (picked.contains(file)) picked.remove(file) else picked.add(file)
+        val on = file !in picked
+        setPicked(file, on)
+        ezHaptics.toggle(on)
     }
     fun longPress(file: FileEntry) {
         if (hapticsOn) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        toggle(file)
+        setPicked(file, file !in picked)
     }
+    fun actionsFor(file: FileEntry) = FileRowActions(
+        canPrint = file.kind.canPrint(),
+        selectable = picked.size < MaxSharedFiles,
+        onShare = { onShareFiles(listOf(file)) },
+        onPrint = { onPrint(file) },
+        onRemove = if (tab == HomeTab.Recent) ({ ezHaptics.confirm(); onRemoveRecent(file) }) else null,
+    )
     fun openPicked() {
         val file = picked.single()
         picked.clear()
@@ -288,7 +311,9 @@ fun LibraryScreen(
                     items(bookmarks, key = { it.key }, contentType = { "bookmark" }) { bookmark ->
                         FileRow(
                             file = bookmark.file,
-                            detail = bookmark.page?.let { "Page ${it + 1}" },
+                            detail = bookmark.page?.let { page ->
+                                listOfNotNull("Page ${page + 1}", bookmark.label, bookmark.snippet?.let { "“$it”" }).joinToString(" · ")
+                            },
                             isPicked = bookmark.file in picked,
                             selecting = picked.isNotEmpty(),
                             onOpen = { onBookmark(bookmark) },
@@ -325,6 +350,7 @@ fun LibraryScreen(
                         onOpen = { onFile(file) },
                         onToggle = { toggle(file) },
                         onLongPress = { longPress(file) },
+                        actions = actionsFor(file),
                     )
                 }
             }
@@ -376,6 +402,7 @@ fun LibraryScreen(
             confirmText = "Clear",
             onConfirm = {
                 confirmClear = false
+                ezHaptics.confirm()
                 onClear()
             },
             dismissText = "Cancel",
@@ -391,6 +418,7 @@ fun LibraryScreen(
             confirmText = "Remove",
             onConfirm = {
                 removingFolder = null
+                ezHaptics.confirm()
                 onRemoveFolder(folder.uri)
             },
             dismissText = "Keep",
@@ -651,8 +679,10 @@ private fun FileRow(
     onOpen: () -> Unit,
     onToggle: () -> Unit,
     onLongPress: () -> Unit,
+    actions: FileRowActions? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
         RowGutter
             .fillMaxWidth()
@@ -677,8 +707,68 @@ private fun FileRow(
             Text(file.name, style = FileNameStyle, color = EzColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             detail?.let { Text(it, fontSize = 12.sp, color = EzColors.TextSecondary, modifier = Modifier.padding(top = 3.dp)) }
         }
-        if (!selecting) Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary)
+        if (!selecting) {
+            if (actions != null) {
+                Box {
+                    GlassIconButton(
+                        icon = EzIcons.More,
+                        contentDescription = "More actions for ${file.name}",
+                        onClick = { menuOpen = true },
+                        size = 40.dp,
+                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        FileMenuItem("Open", EzIcons.Document) {
+                            menuOpen = false
+                            onOpen()
+                        }
+                        FileMenuItem("Share original", EzIcons.Share) {
+                            menuOpen = false
+                            actions.onShare()
+                        }
+                        FileMenuItem("Print", EzIcons.Print, enabled = actions.canPrint) {
+                            menuOpen = false
+                            actions.onPrint()
+                        }
+                        FileMenuItem(
+                            if (isPicked) "Unselect" else "Select for sharing",
+                            EzIcons.ListLines,
+                            enabled = isPicked || actions.selectable,
+                        ) {
+                            menuOpen = false
+                            onToggle()
+                        }
+                        actions.onRemove?.let { remove ->
+                            FileMenuItem("Remove from recents", EzIcons.Close) {
+                                menuOpen = false
+                                remove()
+                            }
+                        }
+                    }
+                }
+            } else {
+                Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary)
+            }
+        }
     }
+}
+
+/** What a file row's More menu offers. Bookmarks have no menu; Recent rows can also remove themselves from recents. */
+private class FileRowActions(
+    val canPrint: Boolean,
+    val selectable: Boolean,
+    val onShare: () -> Unit,
+    val onPrint: () -> Unit,
+    val onRemove: (() -> Unit)?,
+)
+
+@Composable
+private fun FileMenuItem(label: String, icon: ImageVector, enabled: Boolean = true, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = { Icon(icon, null) },
+        enabled = enabled,
+        onClick = onClick,
+    )
 }
 
 /**

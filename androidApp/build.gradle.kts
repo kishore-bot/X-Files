@@ -90,6 +90,8 @@ dependencies {
     if (firebaseReports) {
         "prodImplementation"(platform(libs.firebase.bom))
         "prodImplementation"(libs.firebase.crashlytics)
+        // Feedback reports (src/firebase FirestoreFeedbackSender). Absent from builds without Firebase config.
+        "prodImplementation"(libs.firebase.firestore)
         // Already shipped by this Crashlytics version; exposed for ConsentedCrashBackendFactory.
         "prodImplementation"("com.google.android.datatransport:transport-runtime:5.0.0")
         "prodImplementation"("com.google.android.datatransport:transport-backend-cct:5.0.0")
@@ -101,6 +103,7 @@ dependencies {
     ksp(libs.appfunctions.compiler)
     implementation(project(":core:designsystem"))
     implementation(project(":core:documents"))
+    implementation(project(":documentEngine"))
     implementation(project(":feature:library"))
     implementation(project(":feature:reader"))
     implementation(project(":feature:tools"))

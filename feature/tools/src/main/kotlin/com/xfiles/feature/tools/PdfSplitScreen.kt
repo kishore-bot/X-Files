@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,13 +29,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import com.xfiles.documents.PdfSpanParse
-import com.xfiles.documents.parsePdfSpans
+import com.xfiles.documents.PdfSplitPlan
+import com.xfiles.documents.planPdfSplit
 
 /**
- * Ranges such as `1-3, 4-8, 9-` become one PDF each. The text is checked as it's
- * typed: bounds, order, and shared pages. Names can be changed per part, and the
- * parts are written into a folder the user picks.
+ * Splits a PDF three ways: page ranges such as `1-3, 4-8, 9-`, every N pages, or one
+ * file per page. Each mode is checked as it's typed: bounds, order, shared pages and
+ * file count. Names can be changed per part, and the parts are written into a folder.
  */
 @Composable
 fun PdfSplitScreen(
@@ -61,7 +66,8 @@ fun PdfSplitScreen(
     }
     BackHandler(onBack = back)
 
-    val parse = remember(input.text, frame.pageCount) { parsePdfSpans(input.text, frame.pageCount) }
+    val parse = remember(input.plan, frame.pageCount) { planPdfSplit(input.plan, frame.pageCount) }
+    val plan = input.plan
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -73,17 +79,54 @@ fun PdfSplitScreen(
             onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },
         )
         if (frame.isOpen && frame.outputs.isEmpty()) {
-            OutlinedTextField(
-                value = input.text,
-                onValueChange = viewModel::setRanges,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !frame.busy,
-                singleLine = true,
-                label = { Text("Page ranges") },
-                placeholder = { Text("1-3, 4-8, 9-") },
-                supportingText = { Text(rangeMessage(parse)) },
-                isError = parse is PdfSpanParse.Invalid,
-            )
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = plan is PdfSplitPlan.Ranges,
+                    onClick = { viewModel.setPlan(PdfSplitPlan.Ranges("")) },
+                    enabled = !frame.busy,
+                    label = { Text("Page ranges") },
+                )
+                FilterChip(
+                    selected = plan is PdfSplitPlan.EveryPages,
+                    onClick = { viewModel.setPlan(PdfSplitPlan.EveryPages("2")) },
+                    enabled = !frame.busy,
+                    label = { Text("Every N pages") },
+                )
+                FilterChip(
+                    selected = plan == PdfSplitPlan.OnePerPage,
+                    onClick = { viewModel.setPlan(PdfSplitPlan.OnePerPage) },
+                    enabled = !frame.busy,
+                    label = { Text("One file per page") },
+                )
+            }
+            when (plan) {
+                is PdfSplitPlan.Ranges -> OutlinedTextField(
+                    value = plan.text,
+                    onValueChange = { viewModel.setPlan(PdfSplitPlan.Ranges(it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !frame.busy,
+                    singleLine = true,
+                    label = { Text("Page ranges") },
+                    placeholder = { Text("1-3, 4-8, 9-") },
+                    supportingText = { Text(rangeMessage(parse)) },
+                    isError = parse is PdfSpanParse.Invalid,
+                )
+                is PdfSplitPlan.EveryPages -> OutlinedTextField(
+                    value = plan.pagesText,
+                    onValueChange = { viewModel.setPlan(PdfSplitPlan.EveryPages(it)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !frame.busy,
+                    singleLine = true,
+                    label = { Text("Pages per file") },
+                    supportingText = { Text(rangeMessage(parse)) },
+                    isError = parse is PdfSpanParse.Invalid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                PdfSplitPlan.OnePerPage -> Text(
+                    rangeMessage(parse),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             if (parse is PdfSpanParse.Valid) {
                 val names = viewModel.partNames(parse.spans)
                 parse.spans.forEachIndexed { index, span ->

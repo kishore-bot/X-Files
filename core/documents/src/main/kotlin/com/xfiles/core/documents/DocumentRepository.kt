@@ -33,8 +33,23 @@ data class FileEntry(
     val modifiedAt: Long? = null,
 )
 
-data class FileBookmark(val file: FileEntry, val page: Int?) {
+/**
+ * A saved place in a document. [label] names the place (a PDF page's heading) and [snippet] is a few words of
+ * the text there; both are optional, so bookmarks saved before they existed still load.
+ */
+data class FileBookmark(val file: FileEntry, val page: Int?, val label: String? = null, val snippet: String? = null) {
     val key: String get() = "${file.uri}|${page ?: -1}"
+}
+
+/** A recent entry with its open count and the last few open times (epoch milliseconds, oldest first). */
+internal data class RecentRecord(val file: FileEntry, val opens: Int, val visits: List<Long>)
+
+/** Enough for frecency: older visits weigh almost nothing after a few weeks. */
+private const val MAX_VISITS = 10
+
+private fun JSONObject.visitTimes(): List<Long> {
+    val array = optJSONArray("visits") ?: return emptyList()
+    return List(array.length()) { array.optLong(it) }.filter { it > 0L }.takeLast(MAX_VISITS)
 }
 
 sealed interface FilePreview {
@@ -79,12 +94,25 @@ class DocumentRepository @Inject constructor(
 
     suspend fun remember(file: FileEntry) = withContext(io) {
         currentCoroutineContext().ensureActive()
-        val previous = readRecents()
+        val previous = readRecords()
         if (!persistReadAccess(file.uri)) return@withContext
-        val updated = (listOf(file) + previous.filter { it.uri != file.uri }).take(MAX_RECENTS)
+        val earlier = previous.firstOrNull { it.file.uri == file.uri }
+        val visits = ((earlier?.visits.orEmpty()) + System.currentTimeMillis()).takeLast(MAX_VISITS)
+        val entry = RecentRecord(file, opens = (earlier?.opens ?: 0) + 1, visits = visits)
+        val updated = (listOf(entry) + previous.filter { it.file.uri != file.uri }).take(MAX_RECENTS)
         saveRecents(updated)
-        previous.filter { old -> updated.none { it.uri == old.uri } }.forEach { releaseIfUnused(it.uri) }
-        mutableRecents.value = updated
+        previous.filter { old -> updated.none { it.file.uri == old.file.uri } }.forEach { releaseIfUnused(it.file.uri) }
+        publish(updated)
+    }
+
+    /** Forgets one recent entry. The file itself is untouched, so there is nothing to confirm. */
+    suspend fun removeRecent(file: FileEntry) = withContext(io) {
+        val previous = readRecords()
+        val updated = previous.filterNot { it.file.uri == file.uri }
+        if (updated.size == previous.size) return@withContext
+        saveRecents(updated)
+        releaseIfUnused(file.uri)
+        publish(updated)
     }
 
     /** The stored recents, read fresh (for the home-screen widget); leaves the in-memory state alone. */
@@ -137,7 +165,9 @@ class DocumentRepository @Inject constructor(
                     .put("uri", it.file.uri.toString())
                     .put("name", it.file.name)
                     .put("kind", it.file.kind.name)
-                    .put("page", it.page ?: -1),
+                    .put("page", it.page ?: -1)
+                    .putOpt("label", it.label)
+                    .putOpt("snippet", it.snippet),
             )
         }
         preferences.edit().putString("bookmarks", records.toString()).apply()
@@ -181,6 +211,10 @@ class DocumentRepository @Inject constructor(
 
     suspend fun searchPdf(file: FileEntry, query: String, password: String?): PdfSearchResult =
         pdfs.search(file.uri, query, password)
+
+    /** Per-character geometry of a PDF page for text selection (cached; see [AndroidPdfDocument.pageText]). */
+    suspend fun pageText(file: FileEntry, index: Int, password: String?): PdfPageText =
+        pdfs.pageText(file.uri, password, index)
 
     /** A PDF page as a small bitmap for the page grid (cached; see [AndroidPdfDocument.thumbnail]). */
     suspend fun pageThumbnail(file: FileEntry, index: Int, password: String?, maxEdge: Int): Bitmap =
@@ -231,9 +265,24 @@ class DocumentRepository @Inject constructor(
         else analyzer.extractText(file.uri, file.name, bounded.toUInt())
     }
 
+    /**
+     * [extractText] with PDF page offsets, and a higher limit ([MAX_PAGED_CHARS]) for passage retrieval over long
+     * documents. Only callers that cache the result should use it: reading a long PDF is slow.
+     */
+    suspend fun pagedText(file: FileEntry, limit: Int): PagedText {
+        val bounded = limit.coerceIn(1, MAX_PAGED_CHARS)
+        return if (file.kind == DocumentKind.Pdf) pdfs.pagedText(file.uri, null, bounded, ocr = true)
+        else PagedText(analyzer.extractText(file.uri, file.name, bounded.toUInt()), emptyList())
+    }
+
     suspend fun summary(text: String) = analyzer.summarize(text)
 
-    private fun readRecents(): List<FileEntry> {
+    /** Recents ranked by frecency (see [byFrecency]), read fresh from the store. */
+    private fun readRecents(): List<FileEntry> =
+        readRecords().byFrecency(System.currentTimeMillis(), { it.visits }).map { it.file }
+
+    /** The stored records in last-opened order; [publish] ranks them for display. */
+    private fun readRecords(): List<RecentRecord> {
         val records = try {
             JSONArray(preferences.getString("recent_files", "[]"))
         } catch (_: org.json.JSONException) {
@@ -247,9 +296,14 @@ class DocumentRepository @Inject constructor(
                 if (uri !in grants && treeGrant(uri) !in grants) continue
                 val name = record.optString("name")
                 val kind = DocumentKind.entries.find { it.name == record.optString("kind") } ?: documentKind(name, null)
-                add(FileEntry(uri, name, kind))
+                // Records written before counts and visit times existed read as one open with no known times.
+                add(RecentRecord(FileEntry(uri, name, kind), opens = record.optInt("opens", 1).coerceAtLeast(1), visits = record.visitTimes()))
             }
         }
+    }
+
+    private fun publish(records: List<RecentRecord>) {
+        mutableRecents.value = records.byFrecency(System.currentTimeMillis(), { it.visits }).map { it.file }
     }
 
     private fun readBookmarks(): List<FileBookmark> {
@@ -267,7 +321,9 @@ class DocumentRepository @Inject constructor(
                 val name = record.optString("name")
                 val kind = DocumentKind.entries.find { it.name == record.optString("kind") } ?: documentKind(name, null)
                 val page = record.optInt("page", -1).takeIf { it >= 0 }
-                add(FileBookmark(FileEntry(uri, name, kind), page))
+                val label = record.optString("label").takeIf { it.isNotEmpty() }
+                val snippet = record.optString("snippet").takeIf { it.isNotEmpty() }
+                add(FileBookmark(FileEntry(uri, name, kind), page, label, snippet))
             }
         }
     }
@@ -284,7 +340,7 @@ class DocumentRepository @Inject constructor(
     }
 
     private fun releaseIfUnused(uri: Uri) {
-        if (readRecents().any { it.uri == uri } || readBookmarks().any { it.file.uri == uri }) return
+        if (readRecords().any { it.file.uri == uri } || readBookmarks().any { it.file.uri == uri }) return
         releaseGrant(uri)
     }
 
@@ -297,12 +353,21 @@ class DocumentRepository @Inject constructor(
     private fun persistedReadGrants(): Set<Uri> =
         resolver.persistedUriPermissions.filter { it.isReadPermission }.mapTo(HashSet()) { it.uri }
 
-    private fun saveRecents(files: List<FileEntry>) {
-        val records = JSONArray()
-        files.forEach {
-            records.put(JSONObject().put("uri", it.uri.toString()).put("name", it.name).put("kind", it.kind.name))
+    private fun saveRecents(records: List<RecentRecord>) {
+        val array = JSONArray()
+        records.forEach { record ->
+            val visits = JSONArray()
+            record.visits.forEach(visits::put)
+            array.put(
+                JSONObject()
+                    .put("uri", record.file.uri.toString())
+                    .put("name", record.file.name)
+                    .put("kind", record.file.kind.name)
+                    .put("opens", record.opens)
+                    .put("visits", visits),
+            )
         }
-        preferences.edit().putString("recent_files", records.toString()).apply()
+        preferences.edit().putString("recent_files", array.toString()).apply()
     }
 
     private fun releaseGrant(uri: Uri) {

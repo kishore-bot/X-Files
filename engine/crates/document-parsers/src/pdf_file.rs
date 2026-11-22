@@ -609,6 +609,12 @@ impl<R: Read + Seek> PdfFile<R> {
         Ok(Some(self.decode_stream(&dict, raw)?))
     }
 
+    /// Decoded data of stream object `number` (decrypted, filters undone), or `None` when the
+    /// object is not a plain stream in this file's cross-reference table.
+    pub(crate) fn decoded_stream(&mut self, number: u32) -> Result<Option<Vec<u8>>> {
+        self.stream_object_data(number)
+    }
+
     fn decrypted_stream(&self, number: u32, generation: u16, dict: &Dict, raw: Vec<u8>) -> Result<Vec<u8>> {
         match &self.crypt {
             Some(crypt) => crypt.decrypt_stream(number, generation, dict, &raw),

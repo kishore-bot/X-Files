@@ -39,7 +39,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -61,7 +60,6 @@ import com.xfiles.design.glassCard
 import com.xfiles.design.glossyPrimary
 import com.xfiles.fily.AssistantModel
 import com.xfiles.settings.ThemePreference
-import java.net.URLEncoder
 import kotlinx.coroutines.launch
 
 /**
@@ -82,11 +80,11 @@ fun AboutScreen(
     var vision by rememberSaveable { mutableStateOf(false) }
     var showingFormats by rememberSaveable { mutableStateOf(false) }
     var showingLicences by rememberSaveable { mutableStateOf(false) }
+    var showingFeedback by rememberSaveable { mutableStateOf(false) }
     val back: () -> Unit = { if (vision) vision = false else onBack() }
     BackHandler(onBack = back)
     val context = LocalContext.current
     val (versionName, versionCode) = remember(context) { packageVersion(context) }
-    val links = LocalUriHandler.current
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         EzTopBar(
             title = if (vision) "Why Xfiles" else "About Xfiles",
@@ -139,12 +137,8 @@ fun AboutScreen(
                     item("team-heading") { SectionHeading("The team") }
                     item("maker") { MakerCard() }
                     item("more-heading") { SectionHeading("More") }
-                    if (FEEDBACK_EMAIL.isNotBlank()) {
-                        item("feedback") {
-                            NavigationCard(EzIcons.Feedback, "Send feedback", "Write to us from your mail or messaging app") {
-                                sendFeedback(links, versionName)
-                            }
-                        }
+                    item("feedback") {
+                        NavigationCard(EzIcons.Feedback, "Send feedback", "Tell the team about a bug or an idea") { showingFeedback = true }
                     }
                     item("licences") {
                         NavigationCard(EzIcons.Code, "Open-source licences", "The libraries and models Xfiles is built with") {
@@ -157,6 +151,7 @@ fun AboutScreen(
     }
     if (showingFormats) SupportedFilesSheet(onDismiss = { showingFormats = false })
     if (showingLicences) LicencesSheet(onDismiss = { showingLicences = false })
+    if (showingFeedback) FeedbackSheet(onDismiss = { showingFeedback = false })
 }
 
 /** The app's version name (with the dev suffix, where there is one) and version code, from the package. */
@@ -170,16 +165,6 @@ private fun packageVersion(context: Context): Pair<String, Long> = try {
     (info.versionName ?: "") to info.longVersionCode
 } catch (_: PackageManager.NameNotFoundException) {
     "" to 0L
-}
-
-/** Opens a blank feedback message addressed to [FEEDBACK_EMAIL], with the app version in the subject. */
-private fun sendFeedback(links: UriHandler, versionName: String) {
-    val subject = URLEncoder.encode("Xfiles feedback $versionName", "UTF-8").replace("+", "%20")
-    try {
-        links.openUri("mailto:$FEEDBACK_EMAIL?subject=$subject")
-    } catch (_: Exception) {
-        Unit // No mail app; nothing to open.
-    }
 }
 
 @Composable
@@ -387,6 +372,18 @@ private fun MakerCard() {
 private data class TeamMember(val name: String, val role: String, val linkedIn: String?, val email: String?)
 
 private val Team = listOf(
+    TeamMember(
+        name = "KISHORE K",
+        role = "Developer",
+        linkedIn = "https://www.linkedin.com/in/kishorek1",
+        email = "kishoreabhi333@gmail.com",
+    ),
+    TeamMember(
+        name = "Robin Isac",
+        role = "Developer",
+        linkedIn = "https://www.linkedin.com/in/robin-isac-07ba01329",
+        email = "robinisacsharon@gmail.com",
+    ),
     TeamMember(
         name = "Abhijith H M",
         role = "Market Analyst",

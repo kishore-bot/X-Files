@@ -34,6 +34,12 @@ interface FilyDocuments {
 
     /** Files whose text mentions [query]; only called when content access is on. */
     suspend fun searchContent(query: String, limit: Int): List<FilyDocument> = emptyList()
+
+    /**
+     * The passages of [id] that answer [question] within [budget] characters, from a cached per-document index.
+     * Null when retrieval is unavailable for the file, so the caller uses the plain excerpt.
+     */
+    suspend fun retrieve(id: String, question: String, budget: Int): FilyRetrieval? = null
 }
 
 enum class FilyTool { ScanToPdf, ImageToText, NewText, TextToPdf, ImagesToPdf, TidyUp, PdfTools }
@@ -203,19 +209,35 @@ class ToolExecutor(
     private suspend fun excerpt(doc: FilyDocument, maxChars: Int?): String {
         // Short enough to leave room for the reply in the model's 4,096-token context.
         val budget = (maxChars ?: MAX_EXCERPT_CHARS).coerceIn(1, MAX_EXCERPT_CHARS)
+        // A question about a long document: the passages that answer it, from the retrieval index. A question
+        // that names a page, or a document that fits whole, keeps the direct path below.
+        var fitsWhole = false
+        if (question.isNotBlank() && !Passages.namesPage(question)) {
+            val retrieved = documents.retrieve(doc.id, question, budget)
+            fitsWhole = retrieved is FilyRetrieval.Whole
+            if (retrieved is FilyRetrieval.Passages && retrieved.passages.isNotEmpty()) {
+                val text = FilyPassages.render(retrieved.passages, budget)
+                return excerptJson(doc, text, available = true, truncated = retrieved.omitted)
+            }
+        }
         val full = documents.text(doc.id, SOURCE_CHARS)
         val (text, cut) = when {
             full == null -> "" to false
+            // The whole document fits: send it all rather than keyword-picked sentences.
+            fitsWhole -> full.text.take(budget) to (full.text.length > budget)
             question.isNotBlank() -> Passages.select(full.text, question, budget, full.pageStarts)
             else -> full.text.take(budget) to (full.text.length > budget)
         }
-        return buildJsonObject {
+        return excerptJson(doc, text, available = full != null, truncated = cut || full?.truncated == true)
+    }
+
+    private fun excerptJson(doc: FilyDocument, text: String, available: Boolean, truncated: Boolean): String =
+        buildJsonObject {
             put("documentId", alias(doc.id))
             put("text", text)
-            put("available", full != null)
-            put("truncated", cut || full?.truncated == true)
+            put("available", available)
+            put("truncated", truncated)
         }.toString()
-    }
 
     private suspend fun findText(doc: FilyDocument, query: String): String {
         val needle = query.take(256)

@@ -8,6 +8,10 @@ pub struct FilyCompletion {
     pub first_token_ms: u64,
     pub elapsed_ms: u64,
     pub gpu: bool,
+    /// Prompt tokens decoded for this request; the rest came from the KV cache.
+    pub prefill_tokens: u32,
+    pub reused_tokens: u32,
+    pub prefill_ms: u64,
 }
 
 #[derive(uniffi::Object)]
@@ -29,6 +33,9 @@ impl FilyModel {
             first_token_ms: result.first_token_ms,
             elapsed_ms: result.elapsed_ms,
             gpu: result.gpu,
+            prefill_tokens: result.prefill_tokens,
+            reused_tokens: result.reused_tokens,
+            prefill_ms: result.prefill_ms,
         }).map_err(|error| match error {
             FilyError::Cancelled => crate::ReadError::Cancelled { detail: "Fily request cancelled".into() },
             FilyError::Limit(detail) => crate::ReadError::LimitExceeded { detail },

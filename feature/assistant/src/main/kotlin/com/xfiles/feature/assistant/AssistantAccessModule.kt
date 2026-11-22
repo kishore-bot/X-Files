@@ -27,6 +27,9 @@ internal object AssistantAccessModule {
             override fun put(key: String, value: String) {
                 preferences.edit().putString(key, value).apply()
             }
+            override fun putDurably(key: String, value: String) {
+                preferences.edit().putString(key, value).commit()
+            }
         }
     }
 

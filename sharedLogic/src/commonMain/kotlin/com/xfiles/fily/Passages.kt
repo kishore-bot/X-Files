@@ -10,7 +10,8 @@ import kotlin.math.ln
 internal object Passages {
     /** Small enough that a 1,500-character budget holds about five separate passages. */
     private const val CHUNK_CHARS = 280
-    private const val SEPARATOR = "\n…\n"
+    /** Between passages in a prompt. Three characters: the engine's budget counts it as such. */
+    internal const val SEPARATOR = "\n…\n"
 
     private val stopWords = setOf(
         "the", "and", "for", "are", "was", "were", "what", "which", "who", "whom", "when", "where", "why", "how",
@@ -95,6 +96,10 @@ internal object Passages {
         if (0 !in chosen && opening.length <= OPENING_CHARS && used + opening.length + SEPARATOR.length <= budget) chosen += 0
         return chosen.sorted().joinToString(SEPARATOR) { labelled(chunks[it]) }.take(budget) to true
     }
+
+    /** True when the question names a page of the document ("page 3"), which is read directly rather than searched. */
+    fun namesPage(question: String): Boolean =
+        pageRequest.find(question.lowercase())?.groupValues?.get(1)?.let(::spokenNumber) != null
 
     /** "What does page 3 say?" in a PDF: that page's text. */
     private fun pageText(text: String, pageStarts: List<Int>, question: String, budget: Int): Pair<String, Boolean>? {

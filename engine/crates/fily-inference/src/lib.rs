@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod reuse;
+
 #[cfg(all(target_os = "android", target_pointer_width = "64"))]
 mod android;
 #[cfg(all(target_os = "android", target_pointer_width = "64"))]
@@ -35,6 +37,11 @@ pub struct Completion {
     pub first_token_ms: u64,
     pub elapsed_ms: u64,
     pub gpu: bool,
+    /// Prompt tokens decoded for this request (the prefill cost).
+    pub prefill_tokens: u32,
+    /// Prompt tokens kept from the previous request's KV cache instead of being decoded again.
+    pub reused_tokens: u32,
+    pub prefill_ms: u64,
 }
 
 #[cfg(not(all(target_os = "android", target_pointer_width = "64")))]

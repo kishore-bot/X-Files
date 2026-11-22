@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassCard
 import com.xfiles.documentengine.PdfCompressSummary
 import com.xfiles.documents.PdfCompressQuality
@@ -39,6 +40,8 @@ fun PdfCompressScreen(
     viewModel: PdfCompressViewModel = hiltViewModel(),
 ) {
     val frame by viewModel.frame.collectAsStateWithLifecycle()
+    HapticOnChange(frame.outputs) { if (it.isNotEmpty()) confirm() }
+    HapticOnChange(frame.error) { if (it != null) reject() }
     val summary by viewModel.summary.collectAsStateWithLifecycle()
     val quality by viewModel.quality.collectAsStateWithLifecycle()
     val protection by viewModel.protection.collectAsStateWithLifecycle()

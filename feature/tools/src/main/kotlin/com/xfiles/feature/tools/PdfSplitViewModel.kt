@@ -6,11 +6,15 @@ import com.xfiles.core.documents.AndroidPdfDocument
 import com.xfiles.core.documents.DocumentRepository
 import com.xfiles.core.documents.PdfToolsRepository
 import com.xfiles.documents.PdfPageSpan
+import com.xfiles.documents.PdfSplitPlan
 import com.xfiles.documents.pdfSplitPartName
 import javax.inject.Inject
 
-/** The range text the user typed, and any part names they changed. Names are keyed by part index. */
-data class PdfSplitInput(val text: String = "", val names: Map<Int, String> = emptyMap())
+/** The chosen split plan, and any part names the user changed. Names are keyed by part index. */
+data class PdfSplitInput(
+    val plan: PdfSplitPlan = PdfSplitPlan.Ranges(""),
+    val names: Map<Int, String> = emptyMap(),
+)
 
 @HiltViewModel
 class PdfSplitViewModel @Inject constructor(
@@ -25,9 +29,9 @@ class PdfSplitViewModel @Inject constructor(
         lastSpans = emptyList()
     }
 
-    /** Typing a new range resets custom names, since the part numbers may no longer match. */
-    fun setRanges(text: String) {
-        setTool(PdfSplitInput(text = text))
+    /** Changing the plan, or its text, resets custom names, since the part numbers may no longer match. */
+    fun setPlan(plan: PdfSplitPlan) {
+        setTool(PdfSplitInput(plan = plan))
     }
 
     fun setName(index: Int, name: String) {

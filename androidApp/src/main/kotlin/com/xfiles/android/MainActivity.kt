@@ -41,6 +41,10 @@ import com.xfiles.crash.CrashBreadcrumbs
 import com.xfiles.crash.CrashReports
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PrintRequest
+import com.xfiles.core.documents.launchSystemPrint
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import com.xfiles.design.EzTheme
 import com.xfiles.design.LocalHapticsEnabled
 import com.xfiles.design.LocalReducedMotion
@@ -233,6 +237,17 @@ class MainActivity : ComponentActivity() {
         val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
             if (tree != null) library.addFolder(tree)
         }
+        val context = LocalContext.current
+        LaunchedEffect(library) {
+            library.prints.collect { request ->
+                when (request) {
+                    is PrintRequest.Ready -> if (!launchSystemPrint(context, request.pdf, request.name)) {
+                        Toast.makeText(context, "No print service is available.", Toast.LENGTH_SHORT).show()
+                    }
+                    is PrintRequest.Failed -> Toast.makeText(context, request.message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
         LibraryScreen(
             recentFiles = recentFiles,
             listing = listing,
@@ -250,6 +265,8 @@ class MainActivity : ComponentActivity() {
             onOpen = { picker.launch(arrayOf("*/*")) },
             onFile = { navigator.openDocument(it.uri) },
             onShareFiles = { files -> sharing.share(files.map { it.uri to it.name }) },
+            onPrint = library::print,
+            onRemoveRecent = library::removeRecent,
             onClear = library::clearRecents,
             onAddFolder = { folderPicker.launch(null) },
             onRemoveFolder = library::removeFolder,
@@ -306,6 +323,7 @@ class MainActivity : ComponentActivity() {
             onShare = analysis::share,
             onTwoPage = analysis::setTwoPage,
             pdfThumbnail = analysis::pdfThumbnail,
+            pdfText = analysis::pdfText,
             gallery = gallery,
             onGalleryPage = analysis::selectGalleryPage,
             galleryPage = analysis::galleryPage,

@@ -3,6 +3,9 @@ package com.xfiles.documentengine
 import android.content.ContentResolver
 import android.net.Uri
 import com.xfiles.documents.DocumentAnalysis
+import com.xfiles.documents.GlanceItem
+import com.xfiles.documents.GlanceKind
+import com.xfiles.engine.ffi.NativeGlanceItem
 import com.xfiles.engine.ffi.NativeLimits
 import com.xfiles.engine.ffi.glanceText
 import com.xfiles.engine.ffi.textReaderOpenBorrowedFd
@@ -31,6 +34,15 @@ class DocumentAnalyzer(private val resolver: ContentResolver) {
             summary.language,
             summary.words,
             summary.readingMinutes,
+            summary.items.map { it.toGlanceItem() },
         )
     }
+
+    /** The engine's kinds mirror [GlanceKind] by name; matched case-insensitively so the binding's naming does not matter. */
+    private fun NativeGlanceItem.toGlanceItem() = GlanceItem(
+        kind = GlanceKind.entries.firstOrNull { it.name.equals(kind.name, ignoreCase = true) } ?: GlanceKind.Reference,
+        text = text,
+        value = value,
+        label = label,
+    )
 }

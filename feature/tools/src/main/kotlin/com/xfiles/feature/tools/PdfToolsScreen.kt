@@ -50,6 +50,7 @@ import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzTextButton
 import com.xfiles.design.EzTopBar
+import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassBar
 import com.xfiles.design.glassCard
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -208,6 +209,8 @@ fun PdfToolsScreen(
         return
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    HapticOnChange(state.output) { if (it != null) confirm() }
+    HapticOnChange(state.error) { if (it != null) reject() }
     val input = key(state.action) { rememberTextFieldState() }
     val sourcePassword = remember(state.action, state.inputs) { TextFieldState() }
     val newPassword = remember(state.action, state.inputs) { TextFieldState() }

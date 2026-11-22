@@ -4,11 +4,16 @@ import com.xfiles.core.documents.DocumentRepository
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FolderRepository
 import com.xfiles.core.documents.LibrarySearchRepository
+import com.xfiles.core.documents.MAX_PAGED_CHARS
+import com.xfiles.documentengine.DocumentPassages
+import com.xfiles.documentengine.PassageSource
 import com.xfiles.documents.DocumentKind
 import com.xfiles.fily.FilyBookmark
 import com.xfiles.fily.FilyDocument
 import com.xfiles.fily.FilyDocuments
 import com.xfiles.fily.FilyExcerpt
+import com.xfiles.fily.FilyPassage
+import com.xfiles.fily.FilyRetrieval
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -25,6 +30,7 @@ class FilyDocumentsSource @Inject constructor(
     private val documents: DocumentRepository,
     private val folders: FolderRepository,
     private val search: LibrarySearchRepository,
+    private val passages: DocumentPassages,
 ) {
     /** Files in the linked folders as of the last [refresh]; empty until then or when no folder is linked. */
     @Volatile
@@ -73,8 +79,19 @@ class FilyDocumentsSource @Inject constructor(
         override suspend fun text(id: String, limit: Int): FilyExcerpt? {
             val file = file(id) ?: return null
             if (file.kind !in READABLE) return null
-            val text = documents.extractText(file, limit + 1)
-            return FilyExcerpt(text.take(limit), text.length > limit)
+            val paged = documents.pagedText(file, limit + 1)
+            return FilyExcerpt(paged.text.take(limit), paged.text.length > limit, paged.pageStarts)
+        }
+
+        /** Searches the file's indexed text; a document that fits [budget] whole is left to [text]. */
+        override suspend fun retrieve(id: String, question: String, budget: Int): FilyRetrieval? {
+            val file = file(id) ?: return null
+            if (file.kind !in READABLE) return null
+            val hits = passages.select(file.uri.toString(), file.modifiedAt, file.sizeBytes, question, budget) {
+                documents.pagedText(file, MAX_PAGED_CHARS).let { PassageSource(it.text, it.pageStarts) }
+            } ?: return null
+            if (hits.documentBytes <= budget) return FilyRetrieval.Whole
+            return FilyRetrieval.Passages(hits.passages.map { FilyPassage(it.text, it.page) }, hits.omitted)
         }
 
         override fun bookmarks(): List<FilyBookmark> =

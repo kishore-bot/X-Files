@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.design.HapticOnChange
 import com.xfiles.documents.PdfSpanParse
 import com.xfiles.documents.PdfWatermarkPosition
 import com.xfiles.documents.PdfWatermarkSpec
@@ -69,6 +70,8 @@ fun PdfWatermarkScreen(
     viewModel: PdfWatermarkViewModel = hiltViewModel(),
 ) {
     val frame by viewModel.frame.collectAsStateWithLifecycle()
+    HapticOnChange(frame.outputs) { if (it.isNotEmpty()) confirm() }
+    HapticOnChange(frame.error) { if (it != null) reject() }
     val spec by viewModel.spec.collectAsStateWithLifecycle()
     val protection by viewModel.protection.collectAsStateWithLifecycle()
     var pickedUri by rememberSaveable { mutableStateOf<String?>(null) }

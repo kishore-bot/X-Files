@@ -3,6 +3,7 @@ package com.xfiles.core.documents
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
@@ -17,6 +18,7 @@ import com.xfiles.documentengine.rewritePdf
 import com.xfiles.documentengine.writePdfTextLayer
 import com.xfiles.documents.DocumentKind
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
@@ -24,7 +26,6 @@ import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -41,11 +42,17 @@ sealed interface Conversion<out T> {
     data class Done<T>(val result: T) : Conversion<T>
 }
 
-/** How many pages of a picture PDF got searchable text: [pagesWithText] of [pages]. */
+/** How many pages of a picture got searchable text: [pagesWithText] of [pages]. */
 data class TextLayerOutcome(val pagesWithText: Int, val pages: Int)
 
 /** A picture PDF and, when searchable text was requested, what the text layer achieved (null otherwise). */
 data class ComposedPdf(val pdf: PreparedPdf, val textLayer: TextLayerOutcome?)
+
+/** One page of a live text preview: a bitmap of [pageIndex] (clamped to the text's pages) out of [pageCount]. */
+class TextPagePreview(val bitmap: Bitmap, val pageIndex: Int, val pageCount: Int)
+
+/** Pictures written from a PDF: [count] of them, and how many were rendered smaller than asked to fit the limits. */
+data class PageImagesResult(val count: Int, val reducedPages: Int)
 
 class UnprintableDocument : IllegalArgumentException("Sound and video files can't be printed.")
 
@@ -65,21 +72,29 @@ class ConversionRepository @Inject constructor(
     private val cache = File(app.cacheDir, "conversions")
     private val lane = Dispatchers.IO.limitedParallelism(1)
 
+    /** The last text laid out, kept so paging through a preview and then exporting doesn't redo the layout. Lane-only. */
+    private var textLayout: TextPdfLayout? = null
+
     // --- Create ---------------------------------------------------------------------------------
 
     /**
-     * Pictures (gallery or camera) as one PDF, one picture per page. With [searchable] each page is then
-     * read on-device and an invisible text layer is added in one Rust update, so the text selects and
-     * searches while the pictures stay as they were. Progress: composing, then reading, page by page.
+     * Pictures (gallery or camera) as one PDF, one picture per page, stored at [quality]. With [searchable]
+     * each page is then read on-device and an invisible text layer is added in one Rust update, so the text
+     * selects and searches while the pictures stay as they were. Progress: composing, then reading, page by page.
      */
-    fun imagesToPdf(images: List<Uri>, paper: PdfPaper?, searchable: Boolean = false): Flow<Conversion<ComposedPdf>> = channelFlow {
+    fun imagesToPdf(
+        images: List<Uri>,
+        paper: PdfPaper?,
+        searchable: Boolean = false,
+        quality: PdfImageQuality = PdfImageQuality.Balanced,
+    ): Flow<Conversion<ComposedPdf>> = channelFlow {
         require(images.size in 1..MAX_IMAGES) { "Choose 1 to $MAX_IMAGES pictures." }
         val composed = workFile(".pdf")
         var layered: File? = null
         try {
             val total = if (searchable) images.size * 2 else images.size
             val pages = composed.outputStream().buffered().use { out ->
-                PdfComposer.writePictures(images.asSequence().map(::decodeBounded), paper, out) { done ->
+                PdfComposer.writePictures(images.asSequence().map { decodeBounded(it, quality.maxSidePx) }, paper, quality, out) { done ->
                     trySend(Conversion.Progress(done, total))
                 }
             }
@@ -110,7 +125,7 @@ class ConversionRepository @Inject constructor(
         val lines = ArrayList<PdfTextLine>()
         images.forEachIndexed { index, uri ->
             currentCoroutineContext().ensureActive()
-            val bitmap = decodeBounded(uri)
+            val bitmap = decodeBounded(uri, MAX_PICTURE_PX)
             try {
                 val layout = PdfComposer.layout(bitmap.width, bitmap.height, paper)
                 val read = try {
@@ -147,14 +162,21 @@ class ConversionRepository @Inject constructor(
      * Gallery pictures added to an existing PDF: appended, or inserted before page [beforePage] (1-based).
      * Pictures become pages first, then the Rust engine merges them, keeping the PDF's own pages intact.
      */
-    fun addPicturesToPdf(pdf: Uri, password: String?, pictures: List<Uri>, paper: PdfPaper?, beforePage: Int?): Flow<Conversion<PreparedPdf>> = channelFlow {
+    fun addPicturesToPdf(
+        pdf: Uri,
+        password: String?,
+        pictures: List<Uri>,
+        paper: PdfPaper?,
+        beforePage: Int?,
+        quality: PdfImageQuality = PdfImageQuality.Balanced,
+    ): Flow<Conversion<PreparedPdf>> = channelFlow {
         require(pictures.size in 1..MAX_IMAGES) { "Choose 1 to $MAX_IMAGES pictures." }
         val base = stagePlainPdf(pdf, password)
         val pages = workFile(".pdf")
         val output = workFile(".pdf")
         try {
             pages.outputStream().buffered().use { out ->
-                PdfComposer.writePictures(pictures.asSequence().map(::decodeBounded), paper, out) { done ->
+                PdfComposer.writePictures(pictures.asSequence().map { decodeBounded(it, quality.maxSidePx) }, paper, quality, out) { done ->
                     trySend(Conversion.Progress(done, pictures.size * 2))
                 }
             }
@@ -176,12 +198,13 @@ class ConversionRepository @Inject constructor(
         }
     }.flowOn(lane)
 
-    suspend fun textToPdf(text: String, paper: PdfPaper): PreparedPdf = withContext(lane) {
+    /** The text as a PDF in [style]: one page per [TextPdfLayout] page, with the template's decoration. */
+    suspend fun textToPdf(text: String, style: TextPdfStyle): PreparedPdf = withContext(lane) {
         require(text.isNotBlank()) { "Type some text first." }
         require(text.length <= MAX_TEXT) { "Text to PDF takes up to ${MAX_TEXT / 1000}k characters." }
         val target = workFile(".pdf")
         try {
-            val pages = target.outputStream().buffered().use { PdfComposer.writeText(text, paper, it) }
+            val pages = target.outputStream().buffered().use { PdfComposer.writeText(layoutFor(text, style), it) }
             PreparedPdf(target, pages, false, false, false)
         } catch (error: Throwable) {
             target.delete()
@@ -189,30 +212,64 @@ class ConversionRepository @Inject constructor(
         }
     }
 
+    /** One page of the text as [style] draws it, [widthPx] wide, for the live preview. */
+    suspend fun textPreview(text: String, style: TextPdfStyle, pageIndex: Int, widthPx: Int): TextPagePreview = withContext(lane) {
+        val layout = layoutFor(text, style)
+        val index = pageIndex.coerceIn(0, layout.pages.lastIndex)
+        TextPagePreview(layout.render(index, widthPx.coerceIn(1, MAX_PREVIEW_WIDTH_PX)), index, layout.pages.size)
+    }
+
     // --- Convert --------------------------------------------------------------------------------
 
-    /** Each page as a JPEG in the folder the user granted; emits the number of pictures written. */
-    fun pdfToImages(pdf: Uri, password: String?, folder: Uri, baseName: String): Flow<Conversion<Int>> = channelFlow {
+    /**
+     * Each page as a [format] picture at [dpi] in the folder the user granted. Pages are rendered and encoded
+     * one at a time, and a page too large for the pixel limits is rendered smaller; the result counts those.
+     * A picture that fails to write is removed again rather than left half-written.
+     */
+    fun pdfToImages(
+        pdf: Uri,
+        password: String?,
+        folder: Uri,
+        baseName: String,
+        format: PageImageFormat,
+        dpi: Int,
+    ): Flow<Conversion<PageImagesResult>> = channelFlow {
         val parent = DocumentsContract.buildDocumentUriUsingTree(folder, DocumentsContract.getTreeDocumentId(folder))
         withRenderer(pdf, password) { renderer ->
             val total = renderer.pageCount
             require(total <= MAX_PAGES) { "Convert PDFs up to $MAX_PAGES pages." }
-            renderedPages(renderer).forEachIndexed { index, bitmap ->
+            var reduced = 0
+            renderedPages(renderer, dpi).forEachIndexed { index, rendered ->
+                val bitmap = rendered.bitmap
+                if (rendered.reduced) reduced++
                 try {
                     currentCoroutineContext().ensureActive()
-                    val name = "$baseName page ${(index + 1).toString().padStart(total.toString().length, '0')}.jpg"
-                    val created = DocumentsContract.createDocument(resolver, parent, "image/jpeg", name)
-                        ?: throw IOException("The folder refused a new picture.")
-                    val out = resolver.openOutputStream(created, "w") ?: throw IOException("Can't write to the folder.")
-                    out.use { if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it)) throw IOException("Page ${index + 1} could not be encoded.") }
+                    val name = "$baseName page ${(index + 1).toString().padStart(total.toString().length, '0')}.${format.extension}"
+                    val bytes = ByteArrayOutputStream().also {
+                        if (!bitmap.compress(format.compressFormat, format.quality, it)) throw IOException("Page ${index + 1} could not be encoded.")
+                    }.toByteArray()
+                    createPicture(parent, name, format.mimeType, bytes)
                 } finally {
                     bitmap.recycle()
                 }
                 send(Conversion.Progress(index + 1, total))
             }
-            send(Conversion.Done(total))
+            send(Conversion.Done(PageImagesResult(total, reduced)))
         }
     }.flowOn(lane)
+
+    /** Writes one picture into [parent]; a failed write removes the new file so no half-written picture is left. */
+    private fun createPicture(parent: Uri, name: String, mimeType: String, bytes: ByteArray) {
+        val created = DocumentsContract.createDocument(resolver, parent, mimeType, name)
+            ?: throw IOException("The folder refused a new picture.")
+        try {
+            val out = resolver.openOutputStream(created, "w") ?: throw IOException("Can't write to the folder.")
+            out.use { it.write(bytes) }
+        } catch (error: Throwable) {
+            runCatching { DocumentsContract.deleteDocument(resolver, created) }
+            throw error
+        }
+    }
 
     /** The PDF's text through the Rust engine, which also reads PDFs Android's renderer has no text API for. */
     suspend fun pdfToText(file: FileEntry): String = withContext(lane) {
@@ -260,14 +317,18 @@ class ConversionRepository @Inject constructor(
             }
             DocumentKind.Image -> {
                 val target = workFile(".pdf")
-                val pages = target.outputStream().buffered().use { PdfComposer.writePictures(sequenceOf(decodeBounded(file.uri)), PdfPaper.A4, it) }
+                val quality = PdfImageQuality.High
+                val pages = target.outputStream().buffered().use {
+                    PdfComposer.writePictures(sequenceOf(decodeBounded(file.uri, quality.maxSidePx)), PdfPaper.A4, quality, it)
+                }
                 PreparedPdf(target, pages, false, false, false)
             }
             DocumentKind.Text, DocumentKind.Document -> {
                 val text = analyzer.extractText(file.uri, file.name, MAX_TEXT.toUInt())
                 require(text.isNotBlank()) { "This document has no printable text." }
                 val target = workFile(".pdf")
-                val pages = target.outputStream().buffered().use { PdfComposer.writeText(text, PdfPaper.A4, it) }
+                val style = TextPdfStyle.of(TextPdfTemplate.MinimalLetter, PdfPaper.A4)
+                val pages = target.outputStream().buffered().use { PdfComposer.writeText(TextPdfLayout(text, style), it) }
                 PreparedPdf(target, pages, false, false, false)
             }
             DocumentKind.Audio, DocumentKind.Video, DocumentKind.Unknown -> throw UnprintableDocument()
@@ -275,6 +336,12 @@ class ConversionRepository @Inject constructor(
     }
 
     // --- Shared ---------------------------------------------------------------------------------
+
+    /** The layout for [text] in [style], reused while both stay the same. Lane-only. */
+    private fun layoutFor(text: String, style: TextPdfStyle): TextPdfLayout {
+        textLayout?.takeIf { it.style == style && it.text == text }?.let { return it }
+        return TextPdfLayout(text, style).also { textLayout = it }
+    }
 
     /** Opens [pdf] for rendering; a password-protected PDF is first unlocked into a private copy. */
     private suspend fun <T> withRenderer(pdf: Uri, password: String?, block: suspend (PdfRenderer) -> T): T {
@@ -293,14 +360,17 @@ class ConversionRepository @Inject constructor(
         }
     }
 
-    /** Renders pages lazily, about 150 dpi and at most 2,400 px on the long side. */
-    private fun renderedPages(renderer: PdfRenderer): Sequence<Bitmap> = (0 until renderer.pageCount).asSequence().map { index ->
+    /** A rendered page and whether it was made smaller than asked for. */
+    private class RenderedPage(val bitmap: Bitmap, val reduced: Boolean)
+
+    /** Renders pages lazily at [dpi], each within the pixel limits; the caller recycles each bitmap. */
+    private fun renderedPages(renderer: PdfRenderer, dpi: Int): Sequence<RenderedPage> = (0 until renderer.pageCount).asSequence().map { index ->
         renderer.openPage(index).use { page ->
-            val scale = min(150f / 72f, 2400f / max(page.width, page.height))
-            Bitmap.createBitmap(max(1, (page.width * scale).roundToInt()), max(1, (page.height * scale).roundToInt()), Bitmap.Config.ARGB_8888).also {
-                it.eraseColor(Color.WHITE)
-                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            }
+            val size = pageRenderSize(page.width.toFloat(), page.height.toFloat(), dpi)
+            val bitmap = Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            RenderedPage(bitmap, size.reduced)
         }
     }
 
@@ -328,14 +398,20 @@ class ConversionRepository @Inject constructor(
         }
     }
 
-    private fun decodeBounded(uri: Uri): Bitmap =
+    /**
+     * Decodes a picture with its EXIF turn applied, its longest side at most [maxSide]. ImageDecoder
+     * subsamples while decoding, so a large photo never exists at full size in memory.
+     */
+    private fun decodeBounded(uri: Uri, maxSide: Int): Bitmap =
         ImageDecoder.decodeBitmap(ImageDecoder.createSource(resolver, uri)) { decoder, info, _ ->
             val longest = max(info.size.width, info.size.height)
-            if (longest > MAX_PICTURE_PX) {
-                val scale = MAX_PICTURE_PX.toFloat() / longest
+            if (longest > maxSide) {
+                val scale = maxSide.toFloat() / longest
                 decoder.setTargetSize(max(1, (info.size.width * scale).roundToInt()), max(1, (info.size.height * scale).roundToInt()))
             }
-            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE // PdfDocument draws on a software canvas.
+            // Wide-gamut photos would otherwise keep their own colours, which a PDF's DeviceRGB misreads.
+            decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE // PdfDocument and JPEG encoding need software pixels.
         }
 
     private suspend fun copyBounded(input: java.io.InputStream, output: java.io.OutputStream) {
@@ -371,7 +447,9 @@ class ConversionRepository @Inject constructor(
         const val MAX_IMAGES = 100
         const val MAX_PAGES = 500
         const val MAX_TEXT = 1_000_000
+        /** The longest side read for text recognition, which needs detail more than a small file does. */
         const val MAX_PICTURE_PX = 2400
+        const val MAX_PREVIEW_WIDTH_PX = 1600
         const val MAX_INPUT_BYTES = 128L * 1024 * 1024
     }
 }
