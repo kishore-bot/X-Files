@@ -218,7 +218,7 @@ Prerequisites: JDK 17, Android SDK platform 37, NDK 29.0.14206865 and Rust stabl
 ./gradlew :androidApp:assembleShare
 
 # Optional Firebase diagnostics APK
-./gradlew :androidApp:assembleShare -Pezfiles.firebaseCrashReports=true
+./gradlew -Pxfiles.firebaseCrashReports=true :androidApp:assembleProdRelease
 
 # Static checks; add the Firebase property to check that profile
 ./gradlew :shared:lintDebug :androidApp:lintDebug
