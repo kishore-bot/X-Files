@@ -126,6 +126,7 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     fun dismissPrintError() = printController.dismiss()
 
+    private val unregisterPdfCache = com.xfiles.core.documents.MemoryPressure.register(pdfPages::trim)
     private var readerJob: Job? = null
     private var pdfJumpId = android.os.SystemClock.elapsedRealtimeNanos()
     private var spreadJob: Job? = null
@@ -157,14 +158,24 @@ class DocumentAnalysisViewModel @Inject constructor(
                 val preview = opened.preview
                 if (preview is FilePreview.Pdf) {
                     pdfPassword = password
-                    pdfPages.remember(preview)
+                    pdfPages.remember(opened.file, preview, viewModelScope)
                     progress.write(uri.toString(), "pdf-page", preview.page.toString())
                 }
                 if (preview is FilePreview.Picture) progress.viewImage(uri.toString())
-                documents.remember(opened.file)
                 (preview as? FilePreview.Structured)?.let { structuredEdits.bind(opened.file.uri, opened.file.name, it) } ?: structuredEdits.close()
             }
             mutableState.value = opened
+            if (opened is ReaderState.Ready) {
+                viewModelScope.launch {
+                    try {
+                        documents.remember(opened.file)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.w("XfilesReader", "Could not update recent documents", error)
+                    }
+                }
+            }
         }
     }
 
@@ -330,6 +341,8 @@ class DocumentAnalysisViewModel @Inject constructor(
     private fun discardMarkup() = markupController.discard()
 
     override fun onCleared() {
+        unregisterPdfCache()
+        pdfPages.clear()
         markupController.release()
         super.onCleared()
     }

@@ -180,6 +180,12 @@ impl NativeSearchIndex {
         Arc::new(Self(SearchIndex::open(dir, Default::default())))
     }
 
+    /// Loads a committed query snapshot without touching files owned by an active writer.
+    #[uniffi::constructor]
+    pub fn committed(dir: String) -> Arc<Self> {
+        Arc::new(Self(SearchIndex::committed(dir, Default::default())))
+    }
+
     pub fn document_count(&self) -> u32 {
         self.0.len() as u32
     }

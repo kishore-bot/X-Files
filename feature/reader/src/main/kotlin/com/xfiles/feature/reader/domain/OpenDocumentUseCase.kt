@@ -3,6 +3,8 @@ package com.xfiles.feature.reader.domain
 import android.net.Uri
 import com.xfiles.core.documents.DocumentRepository
 import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PerformanceTrace
+import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.structure.DocumentError
 import com.xfiles.documents.structure.DocumentException
 import com.xfiles.feature.reader.ReaderState
@@ -18,7 +20,11 @@ class OpenDocumentUseCase @Inject constructor(
     suspend operator fun invoke(uri: Uri, page: Int, password: String?): ReaderState {
         val file = documents.describe(uri)
         val preview = try {
-            documents.preview(file, page, password)
+            if (file.kind == DocumentKind.Pdf) {
+                PerformanceTrace.span("XfilesPdfFirstPage") { documents.preview(file, page, password) }
+            } else {
+                documents.preview(file, page, password)
+            }
         } catch (error: DocumentException) {
             return when (error.error) {
                 is DocumentError.PasswordRequired -> ReaderState.Password(file, page, incorrect = false)

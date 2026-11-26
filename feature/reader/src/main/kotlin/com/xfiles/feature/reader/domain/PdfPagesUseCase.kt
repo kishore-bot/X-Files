@@ -1,6 +1,8 @@
 package com.xfiles.feature.reader.domain
 
 import android.graphics.Bitmap
+import android.net.Uri
+import android.util.LruCache
 import android.util.Log
 import com.xfiles.core.documents.DocumentRepository
 import com.xfiles.core.documents.FileEntry
@@ -9,6 +11,11 @@ import com.xfiles.core.documents.PdfPageText
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -23,26 +30,55 @@ internal fun pdfPartner(page: Int, count: Int): Int? =
 class PdfPagesUseCase @Inject constructor(
     private val documents: DocumentRepository,
 ) {
-    private val cache = object : LinkedHashMap<Int, FilePreview.Pdf>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, FilePreview.Pdf>?): Boolean =
-            size > CACHED_PAGES
+    private val cache = object : LruCache<Int, FilePreview.Pdf>(
+        (Runtime.getRuntime().maxMemory() / 8).coerceIn(16L * MIB, 48L * MIB).toInt(),
+    ) {
+        override fun sizeOf(key: Int, value: FilePreview.Pdf): Int = value.bitmap.allocationByteCount
     }
+    private data class Render(val result: Deferred<FilePreview.Pdf>, var readers: Int = 0)
+
+    private val inFlight = mutableMapOf<Int, Render>()
+    private var owner: CoroutineScope? = null
+    private var uri: Uri? = null
     private var prefetchJob: Job? = null
     private var generation = 0L
 
-    /** Keeps a page that was just opened, so turning back to it is instant. */
-    fun remember(page: FilePreview.Pdf) {
-        cache[page.page] = page
+    /** Seeds the reader session with the first rendered page. Used only by its ViewModel. */
+    fun remember(file: FileEntry, page: FilePreview.Pdf, scope: CoroutineScope) {
+        uri = file.uri
+        owner = scope
+        cache.put(page.page, page)
     }
 
-    /** Page bitmap from the small cache, or rendered once and kept while recent. */
+    /** Simultaneous demand and prefetch for the same page share the render while any caller still needs it. */
     suspend fun page(file: FileEntry, index: Int, password: String?): FilePreview.Pdf {
-        cache[index]?.let { return it }
+        val scope = owner?.takeIf { uri == file.uri } ?: throw CancellationException("PDF session changed")
+        cache.get(index)?.let { return it }
         val session = generation
-        val rendered = documents.page(file, index, password)
-        if (session != generation) throw CancellationException("PDF session changed")
-        cache[index] = rendered
-        return rendered
+        val render = inFlight.getOrPut(index) {
+            Render(scope.async(start = CoroutineStart.LAZY) {
+                val page = documents.page(file, index, password)
+                try {
+                    currentCoroutineContext().ensureActive()
+                    if (generation != session) throw CancellationException("PDF session changed")
+                } catch (cancelled: CancellationException) {
+                    page.bitmap.recycle()
+                    throw cancelled
+                }
+                cache.put(page.page, page)
+                page
+            })
+        }
+        render.readers++
+        return try {
+            render.result.await()
+        } finally {
+            render.readers--
+            if (render.readers == 0 && inFlight[index] === render) {
+                inFlight.remove(index)
+                render.result.cancel()
+            }
+        }
     }
 
     /** Warms the neighbours of what is shown, so the next turn is already rendered. Failures are silent. */
@@ -50,13 +86,13 @@ class PdfPagesUseCase @Inject constructor(
         prefetchJob?.cancel()
         val targets = if (twoPage) {
             val start = shown - shown % 2
-            listOf(start + 2, start + 3, start - 2, start - 1)
+            listOf(start + 2, start + 3)
         } else {
             listOf(shown + 1, shown - 1)
         }
         prefetchJob = scope.launch {
             for (index in targets) {
-                if (index !in 0 until count || cache.containsKey(index)) continue
+                if (index !in 0 until count || cache.get(index) != null) continue
                 try {
                     page(file, index, password)
                 } catch (cancelled: CancellationException) {
@@ -70,9 +106,18 @@ class PdfPagesUseCase @Inject constructor(
 
     fun clear() {
         generation++
+        owner = null
+        uri = null
+        inFlight.values.forEach { it.result.cancel() }
+        inFlight.clear()
+        trim()
+    }
+
+    fun trim() {
         prefetchJob?.cancel()
         prefetchJob = null
-        cache.clear()
+        // Visible composables can still hold these bitmaps. Drop only the cache's ownership.
+        cache.evictAll()
     }
 
     /** A page for the grid: small, and read off the main thread. Null when none can be read. */
@@ -98,8 +143,7 @@ class PdfPagesUseCase @Inject constructor(
         }
 
     private companion object {
-        /** Enough for the pages on screen in the continuous view, with a neighbour each side. */
-        const val CACHED_PAGES = 10
+        const val MIB = 1024 * 1024
         const val GRID_THUMBNAIL_EDGE = 240
     }
 }

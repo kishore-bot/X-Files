@@ -2,6 +2,7 @@ package com.xfiles.documentengine
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.os.Trace
 import com.xfiles.documents.DocumentAnalysis
 import com.xfiles.documents.GlanceItem
 import com.xfiles.documents.GlanceKind
@@ -11,6 +12,8 @@ import com.xfiles.engine.ffi.glanceText
 import com.xfiles.engine.ffi.textReaderOpenBorrowedFd
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 class DocumentAnalyzer(private val resolver: ContentResolver) {
@@ -20,8 +23,19 @@ class DocumentAnalyzer(private val resolver: ContentResolver) {
         val descriptor = resolver.openFileDescriptor(uri, "r")
             ?: throw IOException("The selected document could not be opened.")
         descriptor.use { source ->
-            textReaderOpenBorrowedFd(source.fd, name, NativeLimits(32uL * 1024uL * 1024uL, 0uL, 0uL)).use { reader ->
-                reader.read(maxCharacters)
+            val job = currentCoroutineContext()
+            job.ensureActive()
+            val tracing = Trace.isEnabled()
+            if (tracing) Trace.beginSection("XfilesNativeTextRead")
+            try {
+                textReaderOpenBorrowedFd(source.fd, name, NativeLimits(32uL * 1024uL * 1024uL, 0uL, 0uL)).use { reader ->
+                    val text = reader.read(maxCharacters)
+                    job.ensureActive()
+                    if (tracing) Trace.setCounter("XfilesNativeTextChars", text.length.toLong())
+                    text
+                }
+            } finally {
+                if (tracing) Trace.endSection()
             }
         }
     }

@@ -183,7 +183,7 @@ fun LibraryScreen(
     SideEffect(tab, matching, bookmarks) {
         onListedFiles(if (tab == HomeTab.Bookmarks) bookmarks.map { it.file } else matching)
     }
-    val searchesInside = searchEnabled && tab == HomeTab.Library && !library.scanning && query.length >= 2
+    val searchesInside = searchEnabled && tab == HomeTab.Library && query.length >= 2
     SideEffect(query, searchesInside, library.files) {
         if (searchesInside) onSearchInside(query) else onStopSearch()
     }

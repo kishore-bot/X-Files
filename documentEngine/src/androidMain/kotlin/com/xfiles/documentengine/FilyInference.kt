@@ -2,13 +2,17 @@ package com.xfiles.documentengine
 
 import com.xfiles.engine.ffi.FilyModel
 import com.xfiles.engine.ffi.ReadException
+import android.os.SystemClock
+import android.os.Trace
 import android.util.Log
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -31,7 +35,7 @@ data class FilyGeneration(
 class FilyInference : AutoCloseable {
     @Volatile private var lane: CoroutineDispatcher = newLane()
     @Volatile private var model: FilyModel? = null
-    @Volatile private var running = false
+    private val running = AtomicReference<FilyModel?>()
     private var configuration: Configuration? = null
 
     /** True when [path] is the loaded model, on whichever engine it ended up on. */
@@ -46,7 +50,7 @@ class FilyInference : AutoCloseable {
             openCpu(request)
             return false
         }
-        val opening = CoroutineScope(lane).async { FilyModel(path, true, prefix) }
+        val opening = CoroutineScope(lane).async { openModel(path, true, prefix) }
         val gpu = try {
             withTimeoutOrNull(GPU_LOAD_TIMEOUT_MS) { opening.await() }
         } catch (error: CancellationException) {
@@ -68,10 +72,11 @@ class FilyInference : AutoCloseable {
     suspend fun complete(prompt: String, grammar: String): FilyGeneration {
         val config = checkNotNull(configuration) { "Fily model is not loaded" }
         val active = checkNotNull(model) { "Fily model is not loaded" }
-        if (!config.preferGpu) return withContext(lane) { generate(active, prompt, grammar) }
+        val queuedAt = SystemClock.elapsedRealtime()
+        if (!config.preferGpu) return withContext(lane) { generate(active, prompt, grammar, queuedAt) }
 
         // Not a child of this call: a hung native call cannot be cancelled, so it is left behind.
-        val call = CoroutineScope(lane).async { generate(active, prompt, grammar) }
+        val call = CoroutineScope(lane).async { generate(active, prompt, grammar, queuedAt) }
         val gpuAnswer = try {
             withTimeoutOrNull(GPU_RESPONSE_TIMEOUT_MS) { call.await() }
         } catch (error: ReadException.LimitExceeded) {
@@ -87,15 +92,15 @@ class FilyInference : AutoCloseable {
         call.invokeOnCompletion { runCatching { active.close() } }
         model = null
         lane = newLane()
-        val cpu = withContext(lane) { FilyModel(config.path, false, config.prefix) }
-        model = cpu
-        configuration = config.copy(preferGpu = false)
-        return withContext(lane) { generate(cpu, prompt, grammar) }
+        openCpu(config)
+        val cpu = checkNotNull(model)
+        val fallbackQueuedAt = SystemClock.elapsedRealtime()
+        return withContext(lane) { generate(cpu, prompt, grammar, fallbackQueuedAt) }
     }
 
     /** Stops the request in flight. Idle calls are ignored so they cannot cancel the next request. */
     fun cancel() {
-        if (running) model?.let { current -> runCatching { current.cancel() } }
+        running.get()?.let { current -> runCatching { current.cancel() } }
     }
 
     override fun close() {
@@ -104,14 +109,29 @@ class FilyInference : AutoCloseable {
         configuration = null
         if (active != null) {
             runCatching { active.cancel() }
-            active.close()
+            CoroutineScope(Dispatchers.IO).launch { runCatching { active.close() } }
         }
     }
 
     private suspend fun openCpu(request: Configuration) {
-        val cpu = withContext(lane) { FilyModel(request.path, false, request.prefix) }
-        model = cpu
-        configuration = request.copy(preferGpu = false)
+        var opened: FilyModel? = null
+        try {
+            model = withContext(lane) { openModel(request.path, false, request.prefix).also { opened = it } }
+            configuration = request.copy(preferGpu = false)
+        } catch (error: Throwable) {
+            opened?.let { orphan -> CoroutineScope(Dispatchers.IO).launch { runCatching { orphan.close() } } }
+            throw error
+        }
+    }
+
+    private fun openModel(path: String, gpu: Boolean, prefix: String): FilyModel {
+        val tracing = Trace.isEnabled()
+        if (tracing) Trace.beginSection(if (gpu) "XfilesFilyLoadGpu" else "XfilesFilyLoadCpu")
+        try {
+            return FilyModel(path, gpu, prefix)
+        } finally {
+            if (tracing) Trace.endSection()
+        }
     }
 
     private suspend fun closeCurrent() {
@@ -127,10 +147,20 @@ class FilyInference : AutoCloseable {
         lane = newLane()
     }
 
-    private fun generate(engine: FilyModel, prompt: String, grammar: String): FilyGeneration {
-        running = true
+    private fun generate(engine: FilyModel, prompt: String, grammar: String, queuedAt: Long): FilyGeneration {
+        running.set(engine)
+        val tracing = Trace.isEnabled()
+        if (tracing) {
+            Trace.setCounter("XfilesFilyQueueMs", SystemClock.elapsedRealtime() - queuedAt)
+            Trace.beginSection("XfilesFilyGenerate")
+        }
         try {
             val output = engine.complete(prompt, grammar, MAX_TOKENS.toUInt())
+            if (tracing) {
+                Trace.setCounter("XfilesFilyFirstTokenMs", output.firstTokenMs.toLong())
+                Trace.setCounter("XfilesFilyPrefillTokens", output.prefillTokens.toLong())
+                Trace.setCounter("XfilesFilyReusedTokens", output.reusedTokens.toLong())
+            }
             Log.i(TAG, "prefill ${output.prefillTokens} tokens (${output.prefillMs} ms), reused ${output.reusedTokens}, " +
                 "first token ${output.firstTokenMs} ms, total ${output.elapsedMs} ms, ${output.tokens} generated, gpu=${output.gpu}")
             return FilyGeneration(
@@ -146,7 +176,8 @@ class FilyInference : AutoCloseable {
         } catch (error: ReadException.Cancelled) {
             throw CancellationException("Fily request cancelled").apply { initCause(error) }
         } finally {
-            running = false
+            if (tracing) Trace.endSection()
+            running.compareAndSet(engine, null)
         }
     }
 

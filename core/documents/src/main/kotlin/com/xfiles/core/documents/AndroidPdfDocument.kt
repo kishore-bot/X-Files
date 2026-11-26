@@ -31,6 +31,8 @@ import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 
@@ -51,7 +53,9 @@ class AndroidPdfDocument @Inject constructor(
     private val resolver = context.contentResolver
     private val cache = context.cacheDir
     private val io = Dispatchers.IO.limitedParallelism(1)
-    private val ocrCache = LruCache<String, Array<List<PdfTextLine>?>>(4)
+    private val textIo = Dispatchers.IO.limitedParallelism(1)
+    private val ocrRender = Mutex()
+    private val ocrCache = LruCache<String, List<PdfTextLine>>(64)
 
     /** Per-page character geometry for selection; bounded by page count. */
     private val textCache = LruCache<String, PdfPageText>(TEXT_CACHE_PAGES)
@@ -75,8 +79,15 @@ class AndroidPdfDocument @Inject constructor(
     /** Every PDF can be searched: through the text layer, or through OCR where there is none. */
     val canSearch: Boolean get() = true
 
-    private val hasTextLayer: Boolean
+    val supportsIndexText: Boolean
         get() = Build.VERSION.SDK_INT >= 35 || supportsPdfExtensions()
+
+    suspend fun indexText(uri: Uri, limit: Int): String = PerformanceTrace.onLane(
+        "XfilesPdfIndexText", "XfilesPdfTextQueue", textIo,
+    ) {
+        check(supportsIndexText) { "PDF text API is unavailable" }
+        layerText(uri, null, limit).limited(limit).text
+    }
 
     /**
      * Up to [limit] characters of the PDF's text, pages separated by blank lines. With [ocr], a PDF with no
@@ -91,8 +102,8 @@ class AndroidPdfDocument @Inject constructor(
      * reached has an entry, blank pages included, so the numbers match the PDF.
      */
     suspend fun pagedText(uri: Uri, password: String?, limit: Int, ocr: Boolean, ocrPages: Int = MAX_OCR_PAGES): PagedText =
-        withContext(io) {
-            val layer = if (hasTextLayer) layerText(uri, password, limit) else PagedText("", emptyList())
+        withContext(textIo) {
+            val layer = if (supportsIndexText) layerText(uri, password, limit) else PagedText("", emptyList())
             if (layer.text.isNotBlank() || !ocr) return@withContext layer.limited(limit)
             val out = StringBuilder()
             val starts = ArrayList<Int>()
@@ -120,6 +131,7 @@ class AndroidPdfDocument @Inject constructor(
                     currentCoroutineContext().ensureActive()
                     pdf.openPage(index).use { page -> add(page.textContents.joinToString("\n") { it.text.orEmpty() }) }
                     if (out.length >= limit) break
+                    if (index % 8 == 7) yield()
                 }
             }
         } else if (supportsPdfExtensions()) {
@@ -135,6 +147,7 @@ class AndroidPdfDocument @Inject constructor(
                     currentCoroutineContext().ensureActive()
                     add(it.text(index))
                     if (out.length >= limit) break
+                    if (index % 8 == 7) yield()
                 }
             }
         }
@@ -150,31 +163,31 @@ class AndroidPdfDocument @Inject constructor(
         password: String?,
         maxPages: Int,
         page: suspend (Int, List<PdfTextLine>) -> Boolean,
-    ) {
-        val key = revisionKey(uri, password)
-        openRenderer(uri, password).use { pdf ->
+    ): Boolean {
+        val revision = revisionKey(uri, password)
+        return openRenderer(uri, password).use { pdf ->
             val count = minOf(pdf.pageCount, maxPages)
-            val known = key?.let(ocrCache::get)?.takeIf { it.size == pdf.pageCount } ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount)
-            if (key != null) ocrCache.put(key, known)
             for (index in 0 until count) {
                 currentCoroutineContext().ensureActive()
-                val lines = known[index] ?: recognizePage(pdf, index).also { known[index] = it }
-                if (!page(index, lines)) break
+                if (!page(index, recognizeCached(pdf, index, revision))) return@use true
             }
+            count < pdf.pageCount
         }
     }
+
+    private suspend fun recognizeCached(pdf: PdfRenderer, index: Int, revision: String?): List<PdfTextLine> =
+        ocrRender.withLock {
+            val key = revision?.let { "$it|$index" }
+            key?.let(ocrCache::get)?.let { return@withLock it }
+            val lines = PerformanceTrace.span("XfilesPdfOcrPage") { recognizePage(pdf, index) }
+            if (key != null) ocrCache.put(key, lines)
+            lines
+        }
 
     private suspend fun recognizePage(pdf: PdfRenderer, index: Int): List<PdfTextLine> {
         val bitmap = pdf.openPage(index).use { page ->
             val scale = OCR_EDGE.toFloat() / maxOf(page.width, page.height).coerceAtLeast(1)
-            Bitmap.createBitmap(
-                (page.width * scale).toInt().coerceAtLeast(1),
-                (page.height * scale).toInt().coerceAtLeast(1),
-                Bitmap.Config.ARGB_8888,
-            ).also {
-                it.eraseColor(Color.WHITE)
-                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            }
+            renderBitmap(page, scale)
         }
         return try {
             val width = bitmap.width.toFloat()
@@ -200,7 +213,7 @@ class AndroidPdfDocument @Inject constructor(
         val needle = query.trim()
         val results = ArrayList<PdfPageMatches>()
         var remaining = MAX_MATCHES
-        forEachOcrPage(uri, password, MAX_OCR_SEARCH_PAGES) { index, lines ->
+        val incomplete = forEachOcrPage(uri, password, MAX_OCR_SEARCH_PAGES) { index, lines ->
             val hits = lines.flatMap { line ->
                 val length = line.text.length.coerceAtLeast(1)
                 val width = line.box.right - line.box.left
@@ -218,24 +231,43 @@ class AndroidPdfDocument @Inject constructor(
             }
             remaining > 0
         }
-        return PdfSearchResult(results, truncated = remaining <= 0)
+        return PdfSearchResult(results, truncated = incomplete)
     }
 
-    suspend fun render(uri: Uri, index: Int, password: String?): FilePreview.Pdf = withContext(io) {
-        openRenderer(uri, password).use { pdf ->
-            if (pdf.pageCount <= 0) throw IOException("PDF has no pages")
-            val pageIndex = index.coerceIn(0, pdf.pageCount - 1)
-            pdf.openPage(pageIndex).use { page ->
-                val scale = minOf(2f, MAX_BITMAP_EDGE.toFloat() / maxOf(page.width, page.height))
-                val bitmap = Bitmap.createBitmap(
-                    (page.width * scale).toInt().coerceAtLeast(1),
-                    (page.height * scale).toInt().coerceAtLeast(1),
-                    Bitmap.Config.ARGB_8888,
-                )
-                bitmap.eraseColor(Color.WHITE)
-                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                FilePreview.Pdf(bitmap, pageIndex, pdf.pageCount, canSearch)
+    suspend fun render(uri: Uri, index: Int, password: String?): FilePreview.Pdf {
+        var bitmap: Bitmap? = null
+        try {
+            return PerformanceTrace.onLane("XfilesPdfRender", "XfilesPdfRenderQueue", io) {
+                openRenderer(uri, password).use { pdf ->
+                    if (pdf.pageCount <= 0) throw IOException("PDF has no pages")
+                    val pageIndex = index.coerceIn(0, pdf.pageCount - 1)
+                    pdf.openPage(pageIndex).use { page ->
+                        val scale = minOf(2f, MAX_BITMAP_EDGE.toFloat() / maxOf(page.width, page.height).coerceAtLeast(1))
+                        val rendered = renderBitmap(page, scale).also { bitmap = it }
+                        FilePreview.Pdf(rendered, pageIndex, pdf.pageCount, canSearch)
+                    }
+                }
             }
+        } catch (error: Throwable) {
+            // The bitmap has not been returned to a viewer if dispatch or rendering failed.
+            bitmap?.recycle()
+            throw error
+        }
+    }
+
+    private fun renderBitmap(page: PdfRenderer.Page, scale: Float): Bitmap {
+        val bitmap = Bitmap.createBitmap(
+            (page.width * scale).toInt().coerceAtLeast(1),
+            (page.height * scale).toInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888,
+        )
+        return try {
+            bitmap.eraseColor(Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            bitmap
+        } catch (error: Throwable) {
+            bitmap.recycle()
+            throw error
         }
     }
 
@@ -254,14 +286,7 @@ class AndroidPdfDocument @Inject constructor(
                 if (pdf.pageCount <= 0) throw IOException("PDF has no pages")
                 pdf.openPage(index.coerceIn(0, pdf.pageCount - 1)).use { page ->
                     val scale = edge.toFloat() / maxOf(page.width, page.height).coerceAtLeast(1)
-                    val bitmap = Bitmap.createBitmap(
-                        (page.width * scale).toInt().coerceAtLeast(1),
-                        (page.height * scale).toInt().coerceAtLeast(1),
-                        Bitmap.Config.ARGB_8888,
-                    )
-                    bitmap.eraseColor(Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    bitmap.also { if (key != null) thumbnails.put(key, it) }
+                    renderBitmap(page, scale).also { if (key != null) thumbnails.put(key, it) }
                 }
             }
         }
@@ -276,7 +301,7 @@ class AndroidPdfDocument @Inject constructor(
         val key = revisionKey(uri, password)?.let { "$it|$index" }
         key?.let(textCache::get)?.let { return@withContext it }
         currentCoroutineContext().ensureActive()
-        val layer = if (hasTextLayer) layerRuns(uri, password, index) else emptyList()
+        val layer = if (supportsIndexText) layerRuns(uri, password, index) else emptyList()
         val built = if (layer.any { it.text.isNotBlank() }) {
             PdfPageText.build(layer)
         } else {
@@ -330,19 +355,24 @@ class AndroidPdfDocument @Inject constructor(
         val key = revisionKey(uri, password)
         return openRenderer(uri, password).use { pdf ->
             if (index !in 0 until pdf.pageCount) return@use emptyList()
-            val known = key?.let(ocrCache::get)?.takeIf { it.size == pdf.pageCount }
-                ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount).also { if (key != null) ocrCache.put(key, it) }
-            known[index] ?: recognizePage(pdf, index).also { known[index] = it }
+            recognizeCached(pdf, index, key)
         }
     }
 
-    suspend fun search(uri: Uri, query: String, password: String?): PdfSearchResult = withContext(io) {
-        if (query.isBlank()) return@withContext PdfSearchResult(emptyList(), truncated = false)
-        when {
+    suspend fun search(uri: Uri, query: String, password: String?): PdfSearchResult = PerformanceTrace.onLane(
+        "XfilesPdfSearch", "XfilesPdfTextQueue", textIo,
+    ) {
+        if (query.isBlank()) return@onLane PdfSearchResult(emptyList(), truncated = false)
+        var hasDigitalText = false
+        val layer = when {
             Build.VERSION.SDK_INT >= 35 -> openRenderer(uri, password).use { renderer ->
                 scan(renderer.pageCount) { index ->
                     renderer.openPage(index).use { page ->
-                        page.searchText(query).toNormalizedMatches(page.width, page.height)
+                        val matches = page.searchText(query).toNormalizedMatches(page.width, page.height)
+                        if (!hasDigitalText) {
+                            hasDigitalText = matches.isNotEmpty() || page.textContents.any { !it.text.isNullOrBlank() }
+                        }
+                        matches
                     }
                 }
             }
@@ -354,12 +384,18 @@ class AndroidPdfDocument @Inject constructor(
                     descriptor.close()
                     throw error
                 }
-                renderer.use { pdf -> scan(pdf.pageCount) { pdf.search(it, query) } }
+                renderer.use { pdf ->
+                    scan(pdf.pageCount) { index ->
+                        val result = pdf.search(index, query, inspectText = !hasDigitalText)
+                        hasDigitalText = hasDigitalText || result.second
+                        result.first
+                    }
+                }
             }
             else -> null
-        }?.takeIf { it.pages.isNotEmpty() }
-            // No text API, or a scanned PDF with no text layer: read the pages instead.
-            ?: ocrSearch(uri, query, password)
+        }
+        if (layer != null && (layer.pages.isNotEmpty() || hasDigitalText)) layer
+        else ocrSearch(uri, query, password)
     }
 
     private suspend fun scan(count: Int, page: (Int) -> List<List<PdfMatchBox>>): PdfSearchResult {
@@ -467,8 +503,11 @@ private class ExtensionPdfText(descriptor: ParcelFileDescriptor) : AutoCloseable
     private val renderer = PdfRendererPreV(descriptor)
     val pageCount: Int get() = renderer.pageCount
 
-    fun search(index: Int, query: String): List<List<PdfMatchBox>> =
-        renderer.openPage(index).use { page -> page.searchText(query).toNormalizedMatches(page.width, page.height) }
+    fun search(index: Int, query: String, inspectText: Boolean): Pair<List<List<PdfMatchBox>>, Boolean> =
+        renderer.openPage(index).use { page ->
+            val matches = page.searchText(query).toNormalizedMatches(page.width, page.height)
+            matches to (matches.isNotEmpty() || (inspectText && page.textContents.any { !it.text.isNullOrBlank() }))
+        }
 
     fun text(index: Int): String =
         renderer.openPage(index).use { page -> page.textContents.joinToString("\n") { it.text.orEmpty() } }

@@ -45,6 +45,7 @@ data class PdfFindState(
     val loading: Boolean = false,
     val truncated: Boolean = false,
     val error: Boolean = false,
+    val query: String = "",
 )
 
 data class PdfMarkupState(

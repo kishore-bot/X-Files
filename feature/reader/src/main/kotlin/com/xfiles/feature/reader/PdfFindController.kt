@@ -24,18 +24,18 @@ class PdfFindController @Inject constructor(
     /** Searches [file] for [query]; [onFirstMatch] turns the reader to the first page found. */
     fun start(scope: CoroutineScope, file: FileEntry, query: String, password: String?, onFirstMatch: (Int) -> Unit) {
         clear()
-        mutable.value = PdfFindState(loading = true)
+        mutable.value = PdfFindState(loading = true, query = query)
         job = scope.launch {
             delay(SEARCH_DELAY_MS)
             try {
                 val found = search(file, query, password)
-                mutable.value = found
+                mutable.value = found.copy(query = query)
                 found.matches.firstOrNull()?.let { onFirstMatch(it.page) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 Log.w("XfilesReader", "PDF search failed", error)
-                mutable.value = PdfFindState(error = true)
+                mutable.value = PdfFindState(error = true, query = query)
             }
         }
     }

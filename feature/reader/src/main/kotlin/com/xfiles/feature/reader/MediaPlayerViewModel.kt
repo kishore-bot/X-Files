@@ -1,6 +1,7 @@
 package com.xfiles.feature.reader
 
 import android.net.Uri
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
@@ -10,8 +11,11 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import com.xfiles.core.documents.FileEntry
+import com.xfiles.core.documents.PerformanceTrace
 import com.xfiles.feature.reader.domain.MediaAudioTrack
 import com.xfiles.feature.reader.domain.MediaMetadataUseCase
 import com.xfiles.feature.reader.domain.MediaSubtitleFile
@@ -35,6 +39,7 @@ import kotlinx.coroutines.launch
  * when the view goes away; state survives rotation, and nothing here holds the player after detach.
  */
 @HiltViewModel
+@androidx.annotation.OptIn(UnstableApi::class)
 internal class MediaPlayerViewModel @Inject constructor(
     private val tracks: MediaTracksUseCase,
     private val subtitleFiles: MediaSubtitleFilesUseCase,
@@ -56,10 +61,28 @@ internal class MediaPlayerViewModel @Inject constructor(
     private var hideJob: Job? = null
     private var cueJob: Job? = null
 
+    private var seekEnd: (() -> Unit)? = null
+    private var seekStartedAt = 0L
+    private var seekTimeout: Job? = null
+    private var droppedFrames = 0L
+    private val analytics = object : AnalyticsListener {
+        override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+            this@MediaPlayerViewModel.droppedFrames += droppedFrames
+            PerformanceTrace.counter("XfilesVideoDroppedFrames", this@MediaPlayerViewModel.droppedFrames)
+        }
+    }
+
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             readPlayback(player)
             if (events.contains(Player.EVENT_TRACKS_CHANGED)) refreshTracks(player)
+        }
+
+        override fun onRenderedFirstFrame() {
+            if (seekEnd != null) {
+                PerformanceTrace.counter("XfilesVideoSeekToFrameMs", SystemClock.elapsedRealtime() - seekStartedAt)
+                endSeekMeasurement()
+            }
         }
 
         override fun onCues(cueGroup: CueGroup) {
@@ -91,6 +114,11 @@ internal class MediaPlayerViewModel @Inject constructor(
             )
         }
         exo.addListener(listener)
+        if (video) {
+            droppedFrames = 0
+            PerformanceTrace.counter("XfilesVideoDroppedFrames", 0)
+            exo.addAnalyticsListener(analytics)
+        }
         exo.setPlaybackSpeed(MediaSpeedSteps[state.value.speedIndex])
         exo.repeatMode = if (state.value.repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         if (subtitleToRestore == SUBTITLES_OFF) chooseSubtitle(exo, null)
@@ -128,6 +156,8 @@ internal class MediaPlayerViewModel @Inject constructor(
     fun detach() {
         val exo = player ?: return
         exo.removeListener(listener)
+        exo.removeAnalyticsListener(analytics)
+        endSeekMeasurement()
         pollJob?.cancel()
         hideJob?.cancel()
         cueJob?.cancel()
@@ -142,9 +172,18 @@ internal class MediaPlayerViewModel @Inject constructor(
         val exo = player
         when (event) {
             MediaPlayerEvent.PlayPause -> exo?.togglePlayback()
-            MediaPlayerEvent.SeekBack -> exo?.seekBack()
-            MediaPlayerEvent.SeekForward -> exo?.seekForward()
-            is MediaPlayerEvent.SeekTo -> exo?.seekTo(event.positionMs)
+            MediaPlayerEvent.SeekBack -> exo?.let {
+                beginSeekMeasurement(it, it.currentPosition - it.seekBackIncrement)
+                it.seekBack()
+            }
+            MediaPlayerEvent.SeekForward -> exo?.let {
+                beginSeekMeasurement(it, it.currentPosition + it.seekForwardIncrement)
+                it.seekForward()
+            }
+            is MediaPlayerEvent.SeekTo -> exo?.let {
+                beginSeekMeasurement(it, event.positionMs)
+                it.seekTo(event.positionMs)
+            }
             is MediaPlayerEvent.Scrub -> scrub(exo, event.fraction)
             MediaPlayerEvent.ScrubFinished -> finishScrub(exo)
             is MediaPlayerEvent.SetDragging -> {
@@ -208,6 +247,26 @@ internal class MediaPlayerViewModel @Inject constructor(
         }
     }
 
+    private fun beginSeekMeasurement(exo: ExoPlayer, target: Long) {
+        endSeekMeasurement()
+        if (!state.value.video || !exo.isCurrentMediaItemSeekable || exo.duration <= 0 ||
+            exo.currentPosition == target.coerceIn(0L, exo.duration)
+        ) return
+        seekEnd = PerformanceTrace.begin("XfilesVideoSeekPending") ?: return
+        seekStartedAt = SystemClock.elapsedRealtime()
+        seekTimeout = viewModelScope.launch {
+            delay(5_000)
+            endSeekMeasurement()
+        }
+    }
+
+    private fun endSeekMeasurement() {
+        seekEnd?.invoke()
+        seekEnd = null
+        seekTimeout?.cancel()
+        seekTimeout = null
+    }
+
     private fun readPlayback(exo: Player) {
         val before = state.value.playing
         val playing = exo.playWhenReady && exo.playbackState != Player.STATE_ENDED
@@ -251,7 +310,9 @@ internal class MediaPlayerViewModel @Inject constructor(
     private fun finishScrub(exo: ExoPlayer?) {
         val fraction = state.value.scrubFraction ?: return
         if (exo != null) {
-            exo.seekTo((fraction * state.value.duration).toLong())
+            val target = (fraction * state.value.duration).toLong()
+            beginSeekMeasurement(exo, target)
+            exo.seekTo(target)
             exo.isScrubbingModeEnabled = false
             if (resumeAfterScrub) exo.play()
             readPlayback(exo)

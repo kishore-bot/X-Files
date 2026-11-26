@@ -42,16 +42,12 @@ class FilyDocumentsSource @Inject constructor(
      */
     suspend fun refresh() = withContext(Dispatchers.IO) {
         documents.loadRecents()
-        linked = if (folders.hasFolders()) {
-            try {
-                folders.scan().files
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                linked
-            }
-        } else {
-            emptyList()
+        linked = try {
+            folders.scan(reuseRecent = true).files
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            linked
         }
     }
 

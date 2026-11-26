@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
@@ -96,6 +96,8 @@ pub(crate) struct Inner {
     pub postings: usize,
     pub text_bytes: u64,
     pub dirty: bool,
+    // Process-local filenames awaiting durability, never serialized with the index.
+    pub(crate) pending_texts: Vec<u64>,
 }
 
 impl Inner {
@@ -210,6 +212,15 @@ impl SearchIndex {
         Self { dir, config, inner: Mutex::new(inner) }
     }
 
+    /// Loads only the last committed state, without collecting files or modifying the directory.
+    /// The writer may be preparing a new commit at the same time.
+    pub fn committed(dir: impl Into<PathBuf>, config: IndexConfig) -> Self {
+        let dir = dir.into();
+        let mut inner = load(&dir).unwrap_or_default();
+        inner.recount();
+        Self { dir, config, inner: Mutex::new(inner) }
+    }
+
     fn lock(&self) -> MutexGuard<'_, Inner> {
         match self.inner.lock() {
             Ok(guard) => guard,
@@ -303,7 +314,9 @@ impl SearchIndex {
         } else {
             let file = inner.next_file;
             fs::create_dir_all(self.dir.join(TEXTS))?;
-            fs::write(self.text_path(file), stored)?;
+            let mut snippet = fs::File::create(self.text_path(file))?;
+            snippet.write_all(stored)?;
+            inner.pending_texts.push(file);
             inner.next_file += 1;
             file
         };
@@ -454,9 +467,21 @@ impl SearchIndex {
         inner.compact();
         let bytes = store::encode(&inner);
         fs::create_dir_all(&self.dir)?;
+        if !inner.pending_texts.is_empty() {
+            for file in &inner.pending_texts {
+                fs::OpenOptions::new().write(true).open(self.text_path(*file))?.sync_all()?;
+            }
+            sync_dir(&self.dir.join(TEXTS))?;
+            inner.pending_texts.clear();
+        }
         let temp = self.dir.join(TEMP_FILE);
-        fs::write(&temp, &bytes)?;
+        {
+            let mut target = fs::File::create(&temp)?;
+            target.write_all(&bytes)?;
+            target.sync_all()?;
+        }
         fs::rename(&temp, self.dir.join(INDEX_FILE))?;
+        sync_dir(&self.dir)?;
         inner.dirty = false;
         // Older snippets are collected on the next open. Until then, queries that
         // already selected those snippets can still read them after this commit.
@@ -469,6 +494,16 @@ impl SearchIndex {
         wipe(&self.dir);
         *inner = Inner { next_file: 1, ..Inner::default() };
     }
+}
+
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn load(dir: &Path) -> Option<Inner> {

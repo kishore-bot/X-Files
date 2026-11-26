@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
+import android.os.SystemClock
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
@@ -40,6 +41,7 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
     private val storage = context.getSystemService(StorageManager::class.java)
     private val preferences = context.getSharedPreferences("library_folders", Context.MODE_PRIVATE)
     private val io = Dispatchers.IO.limitedParallelism(1)
+    private var lastScan: Pair<Long, FolderLibrary>? = null
 
     suspend fun link(uri: Uri, replacing: Uri? = null) = withContext(io) {
         require(DocumentsContract.isTreeUri(uri))
@@ -67,7 +69,14 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
         }
     }
 
-    suspend fun scan(): FolderLibrary = withContext(io) {
+    suspend fun scan(reuseRecent: Boolean = false): FolderLibrary = PerformanceTrace.onLane(
+        "XfilesFolderScan", "XfilesFolderQueue", io,
+    ) {
+        if (reuseRecent) {
+            lastScan?.let { (completed, result) ->
+                if (SystemClock.elapsedRealtime() - completed < RECENT_SCAN_MS) return@onLane result
+            }
+        }
         val folders = mutableListOf<LinkedFolder>()
         val found = LinkedHashMap<String, FileEntry>()
         var remaining = MAX_SCAN_ENTRIES
@@ -111,7 +120,13 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
         missing.forEach { unlink(it) }
         val error = "Some folders could not be read. Retry or reconnect the affected folders."
             .takeIf { folders.any { it.access != FolderAccess.Available } }
-        FolderLibrary(folders, found.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }), reachedLimit = remaining == 0, error = error)
+        val result = FolderLibrary(
+            folders, found.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }),
+            reachedLimit = remaining == 0, error = error,
+        )
+        lastScan = if (result.error == null) SystemClock.elapsedRealtime() to result else null
+        PerformanceTrace.counter("XfilesFolderFiles", result.files.size.toLong())
+        result
     }
 
     private fun volumeAvailable(tree: Uri, rootId: String): Boolean {
@@ -126,7 +141,9 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
 
     private fun rootName(uri: Uri, fallback: String): String? {
         val columns = arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE)
-        val result = resolver.query(uri, columns, null, null, null)
+        val result = PerformanceTrace.section("XfilesProviderRoot") {
+            resolver.query(uri, columns, null, null, null)
+        }
         if (result != null) {
             return result.use { cursor ->
                 if (cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING) || cursor.extras.containsKey(DocumentsContract.EXTRA_ERROR)) {
@@ -143,7 +160,7 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
         }
         // DocumentsProvider can swallow FileNotFoundException from query(). A path lookup can report
         // it explicitly. Providers without path support remain in the retry state.
-        DocumentsContract.findDocumentPath(resolver, uri)
+        PerformanceTrace.section("XfilesProviderPath") { DocumentsContract.findDocumentPath(resolver, uri) }
         throw IOException("Folder provider unavailable")
     }
 
@@ -161,8 +178,9 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
         while (queue.isNotEmpty() && remaining > 0) {
             currentCoroutineContext().ensureActive()
             val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, queue.removeFirst())
-            val result = resolver.query(children, CHILD_COLUMNS, null, null, null)
-                ?: throw IOException("Folder provider unavailable")
+            val result = PerformanceTrace.section("XfilesProviderChildren") {
+                resolver.query(children, CHILD_COLUMNS, null, null, null)
+            } ?: throw IOException("Folder provider unavailable")
             result.use { cursor ->
                 if (cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING) || cursor.extras.containsKey(DocumentsContract.EXTRA_ERROR)) {
                     throw IOException("Folder provider unavailable")
@@ -254,12 +272,14 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
     }
 
     private fun saveUris(uris: List<Uri>) {
+        lastScan = null
         val values = JSONArray()
         uris.forEach { values.put(it.toString()) }
         preferences.edit().putString("trees", values.toString()).apply()
     }
 
     private companion object {
+        const val RECENT_SCAN_MS = 2_000L
         const val MAX_FOLDERS = 20
         const val MAX_SCAN_ENTRIES = 6000
         val CHILD_COLUMNS = arrayOf(

@@ -75,6 +75,9 @@ class LibraryViewModel @Inject constructor(
     private var resumedOnce = false
     private var refreshAfterScan = false
     private var queryJob: Job? = null
+    private var indexJob: Job? = null
+    private var indexingSnapshot: FolderLibrary? = null
+    private var clearIndexJob: Job? = null
 
     private val query = MutableStateFlow("")
     private val mutableCategory = MutableStateFlow(LibraryCategory.entries.firstOrNull { it.name == progress.read("library", "category") } ?: LibraryCategory.All)
@@ -160,15 +163,19 @@ class LibraryViewModel @Inject constructor(
 
     fun setSearchEnabled(enabled: Boolean) {
         mutableSearchEnabled.value = enabled
-        if (enabled) return
+        if (enabled) {
+            if (!library.value.scanning) refreshSearchIndex(library.value)
+            return
+        }
         stopSearch()
-        viewModelScope.launch { clearSearchIndex() }
+        indexJob?.cancel()
+        clearIndexJob = viewModelScope.launch { clearSearchIndex() }
     }
 
     fun searchInside(query: String) {
         stopSearch()
         val snapshot = library.value
-        if (!searchEnabled.value || snapshot.scanning || query.length < 2) return
+        if (!searchEnabled.value || query.length < 2) return
         queryJob = viewModelScope.launch {
             delay(240)
             try {
@@ -203,8 +210,25 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    private fun refreshSearchIndex(snapshot: FolderLibrary) {
+        if (!searchEnabled.value || (indexJob?.isActive == true && indexingSnapshot == snapshot)) return
+        indexJob?.cancel()
+        indexingSnapshot = snapshot
+        indexJob = viewModelScope.launch {
+            clearIndexJob?.join()
+            try {
+                search.refresh(snapshot.files, prune = snapshot.error == null && !snapshot.reachedLimit)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("XfilesLibrary", "File content indexing failed", error)
+            } catch (error: LinkageError) {
+                Log.e("XfilesLibrary", "Rust search unavailable", error)
+            }
+        }
+    }
+
     private fun updateFolders(change: suspend () -> Unit = {}) {
-        stopSearch()
         scan?.cancel()
         scan = viewModelScope.launch {
             mutableLibrary.value = mutableLibrary.value.copy(scanning = true, error = null)
@@ -216,6 +240,7 @@ class LibraryViewModel @Inject constructor(
             } catch (_: Exception) {
                 mutableLibrary.value.copy(scanning = false, error = "The folder could not be updated. Try selecting it again.")
             }
+            refreshSearchIndex(library.value)
             documents.loadRecents()
             if (refreshAfterScan) {
                 refreshAfterScan = false

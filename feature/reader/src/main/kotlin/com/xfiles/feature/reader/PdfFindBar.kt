@@ -41,9 +41,10 @@ internal fun PdfFindBar(state: PdfFindState, onQuery: (String) -> Unit, onMove: 
         IconButton(onClick = onClose) { Icon(EzIcons.Close, "Close PDF search") }
     }
     when {
-        state.loading -> LinearProgressIndicator(Modifier.fillMaxWidth())
+        query.isBlank() -> Unit
+        state.loading || state.query != query.take(256) -> LinearProgressIndicator(Modifier.fillMaxWidth())
         state.error -> Text("Could not search this PDF.", color = MaterialTheme.colorScheme.error)
-        query.isNotBlank() -> Text(
+        else -> Text(
             if (state.matches.isEmpty()) "No matches" else "${state.selected + 1} / ${state.matches.size}${if (state.truncated) "+" else ""}",
             modifier = Modifier.padding(vertical = 3.dp),
             style = MaterialTheme.typography.labelMedium,
