@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import com.xfiles.fily.ReaderPosition
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,15 +45,33 @@ internal fun ColumnScope.SuppliedSheetGrid(
     frozenColumns: Int,
     cellEditor: CellEditor?,
     onEdited: () -> Unit,
+    currentSheet: () -> String,
+    turnSheet: (Int) -> String?,
+    hasMultipleSheets: Boolean,
 ) {
     val haptics = rememberHaptics()
     var editing by remember { mutableStateOf<EditTarget?>(null) }
     var selected by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var scroller by remember { mutableStateOf<SheetGridScroller?>(null) }
     val registerScroll = LocalViewerScroll.current
-    DisposableEffect(scroller, registerScroll) {
+    val currentTitle by rememberUpdatedState(currentSheet)
+    val turn by rememberUpdatedState(turnSheet)
+    DisposableEffect(scroller, registerScroll, hasMultipleSheets) {
         val current = scroller
-        val unregister = if (current != null) registerScroll(SheetGridViewerScroll(current)) else ({})
+        val unregister = if (current != null) {
+            registerScroll(SheetGridViewerScroll(
+                scroller = current,
+                currentPosition = {
+                    val title = currentTitle()
+                    val cell = selected?.takeIf { title == sheet.title }?.let { (row, column) ->
+                        "${columnName(column)}${sheet.rows[row].row ?: row + 1}"
+                    }
+                    ReaderPosition(sheet = title, cell = cell)
+                },
+                turnSheet = { turn(it) },
+                hasMultipleSheets = hasMultipleSheets,
+            ))
+        } else ({})
         onDispose { unregister() }
     }
     val density = LocalDensity.current

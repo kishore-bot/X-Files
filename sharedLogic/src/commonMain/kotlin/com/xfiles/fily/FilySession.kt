@@ -13,6 +13,13 @@ import kotlinx.serialization.json.put
 /** A file listed on screen: its assistant ID and the name shown. */
 data class ListedFile(val documentId: String, val name: String)
 
+data class FilyAppState(
+    val route: String,
+    val openDocumentId: String? = null,
+    val selectedFileIds: List<String> = emptyList(),
+    val pdfSaveStatus: PdfSaveStatus? = null,
+)
+
 /**
  * One spoken conversation with Fily: the model decides, [ToolExecutor] acts, and the tool's JSON
  * goes back to the model for a grounded reply. Exact screen commands skip the model. Not
@@ -36,11 +43,15 @@ class FilySession(
     /** The assistant ID of the document on screen, set by the UI; null in the library. */
     var openDocumentId: String? = null
 
+    /** Reads current UI state on every model step, including after tool handoffs. */
+    var appState: (() -> FilyAppState)? = null
+    private var lastAction: FilyActionReceipt? = null
+
     /** The files listed on the library screen, top first, set by the UI: for "open the second file". */
     var listedFiles: () -> List<ListedFile> = { emptyList() }
 
     /** Leaves the open file as the back button does (unsaved-changes prompt included); set by the UI. */
-    var closeDocument: (() -> Unit)? = null
+    var closeDocument: (() -> Boolean)? = null
 
     /** Shows a library section ("slides", "recent"), leaving any open file first; set by the UI. */
     var showSection: ((String) -> Unit)? = null
@@ -48,11 +59,20 @@ class FilySession(
     /** What is on screen, reported to the model as APP_STATE. */
     val screen: FilyScreen
         get() {
-            val document = openDocumentId?.let(tools::alias)
+            val app = appState?.invoke()
+            val document = (if (app != null) app.openDocumentId else openDocumentId)?.let(tools::alias)
+            val position = if (document != null) reader.target.value?.position else null
             return FilyScreen(
                 selectedDocumentId = document,
-                pageCount = reader.target.value?.position?.pageCount.takeIf { document != null },
+                pageCount = position?.pageCount,
                 readerCapabilities = if (document != null) reader.operations else emptyList(),
+                route = app?.route,
+                page = position?.page,
+                sheet = position?.sheet?.take(100),
+                cell = position?.cell,
+                selectedFileIds = app?.selectedFileIds.orEmpty().take(20).map(tools::alias),
+                lastAction = lastAction,
+                pdfSaveStatus = app?.pdfSaveStatus,
             )
         }
 
@@ -61,11 +81,14 @@ class FilySession(
         // The settings switch is the last word: off means Fily does nothing at all.
         if (!access.enabled.value) return OFF_REPLY
         val screen = screen
+        if (pdfSaveQuestion.matches(request.trim())) {
+            return screen.pdfSaveStatus?.reply ?: "I don't have a confirmed PDF save for the current screen."
+        }
         QuickCommands.parse(request, screen.readerCapabilities, screen.pageCount)?.let { return quick(request, it) }
         val show = showSection
         QuickCommands.librarySection(request)?.takeIf { show != null }?.let { section ->
             log("Built-in: section $section")
-            if (screen.selectedDocumentId != null) closeDocument?.invoke()
+            if (screen.selectedDocumentId != null && closeDocument?.invoke() != true) return "Finish or discard your changes first."
             show!!(section)
             val reply = if (section == "all") "Showing all your files." else "Showing ${section.replaceFirstChar(Char::uppercase)}."
             remember(listOf(
@@ -78,12 +101,12 @@ class FilySession(
         if (close != null && QuickCommands.isClose(request)) {
             if (screen.selectedDocumentId == null) return "No file is open."
             log("Built-in: close")
-            close()
-            remember(listOf(
-                FilyTurn(FilyRole.User, request),
-                FilyTurn(FilyRole.Assistant, buildJsonObject { put("kind", "reply"); put("text", "Closed."); put("citations", buildJsonArray { }) }.toString()),
-            ))
-            return "Closed."
+            val closed = close()
+            lastAction = FilyActionReceipt("closeDocument", if (closed) "done" else "blocked")
+            return finish(
+                mutableListOf(FilyTurn(FilyRole.User, request)),
+                AfterTool.Say(if (closed) "Closed." else "Finish or discard your changes first."),
+            )
         }
         val justOffered = offered
         offered = emptyList()
@@ -98,10 +121,11 @@ class FilySession(
         val system = FilyPrompt.system(toolNames)
         val grammar = FilyGrammar.forTools(toolNames)
         tools.question = request
-        val state = FilyTurn(FilyRole.User, FilyPrompt.appState(access.enabled.value, access.contentAccess.value, today(), screen))
         val exchange = mutableListOf(FilyTurn(FilyRole.User, request))
         val evidence = StringBuilder()
         repeat(MAX_TOOL_STEPS + 1) { step ->
+            val current = this.screen
+            val state = FilyTurn(FilyRole.User, FilyPrompt.appState(access.enabled.value, access.contentAccess.value, today(), current))
             val earlier = history.takeLast(MAX_HISTORY_EXCHANGES).flatten()
             val raw = complete(FilyPrompt.render(system, listOf(state) + earlier + exchange), grammar).trim()
             val response = parseModelResponse(raw)
@@ -114,12 +138,12 @@ class FilySession(
                 // Answers about file content must come from the text the tools returned.
                 return if (response.kind == "reply" && evidence.isNotEmpty()) Grounding.check(spoken, evidence.toString()) else spoken
             }
-            val result = if (toolName in toolNames) tools.execute(toolName, withOpenFile(response.toolArgs, screen)) else UNOFFERED_TOOL
+            val result = if (toolName in toolNames) tools.execute(toolName, withOpenFile(response.toolArgs, this.screen)) else UNOFFERED_TOOL
             log("Tool $toolName -> ${result.take(300)}")
             if (toolName in Grounding.CONTENT_TOOLS) evidence.append(Grounding.evidenceOf(result)).append('\n')
             exchange += FilyTurn(FilyRole.Tool, result)
             // Action results get a fixed, accurate sentence; only content answers go back to the model.
-            val parsed = runCatching { Json.parseToJsonElement(result).jsonObject }.getOrNull()
+            val parsed = recordResult(toolName, result)
             when (val next = parsed?.let { FilyReplies.afterTool(toolName, response.toolArgs, it, request, tools::nameOf) }) {
                 is AfterTool.Say -> return finish(exchange, next)
                 is AfterTool.Open -> {
@@ -130,7 +154,7 @@ class FilySession(
                     val opened = tools.execute("openDocument", args)
                     log("Built-in: open result ${next.documentId} -> $opened")
                     exchange += FilyTurn(FilyRole.Tool, opened)
-                    val say = runCatching { Json.parseToJsonElement(opened).jsonObject }.getOrNull()
+                    val say = recordResult("openDocument", opened)
                         ?.let { FilyReplies.afterTool("openDocument", args, it, request, tools::nameOf) } as? AfterTool.Say
                     return finish(exchange, say ?: AfterTool.Say("I couldn't open it."))
                 }
@@ -161,7 +185,22 @@ class FilySession(
     /** The files Fily just listed ("I found 3 files…"): "the second one" picks from these next. */
     private var offered: List<ListedFile> = emptyList()
 
-    fun clear() = history.clear()
+    fun clear() {
+        history.clear()
+        offered = emptyList()
+        lastAction = null
+    }
+
+    private fun recordResult(tool: String, result: String): JsonObject? {
+        val json = runCatching { Json.parseToJsonElement(result).jsonObject }.getOrNull()
+        val status = (json?.get("status") as? JsonPrimitive)?.contentOrNull
+        if (status != null) lastAction = FilyActionReceipt(tool.take(48), status)
+        return json
+    }
+
+    private val pdfSaveQuestion = Regex(
+        """(?i)^(?:hey fily[, ]+)?(?:did (?:I|you) save (?:the |that |this |my )?pdf|did (?:the |that |this |my )?pdf save|(?:was|is) (?:the |that |this |my )?pdf saved)[?.!]*$""",
+    )
 
     /**
      * Words the recognizer should expect: Fily's commands, and the words in file names when the
@@ -216,6 +255,7 @@ class FilySession(
         } else {
             buildJsonObject { put("status", "done"); position.page?.let { put("page", it) }; position.pageCount?.let { put("pageCount", it) } }
         }
+        lastAction = FilyActionReceipt(command.operation, if (result.failure == null) "done" else "failed")
         val answer = buildJsonObject {
             put("kind", "reply")
             put("text", reply)

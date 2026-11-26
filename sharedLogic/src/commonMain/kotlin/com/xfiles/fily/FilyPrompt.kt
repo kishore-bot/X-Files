@@ -17,7 +17,23 @@ data class FilyScreen(
     val selectedDocumentId: String? = null,
     val pageCount: Int? = null,
     val readerCapabilities: List<String> = emptyList(),
+    val route: String? = null,
+    val page: Int? = null,
+    val sheet: String? = null,
+    val cell: String? = null,
+    val selectedFileIds: List<String> = emptyList(),
+    val lastAction: FilyActionReceipt? = null,
+    val pdfSaveStatus: PdfSaveStatus? = null,
 )
+
+data class FilyActionReceipt(val action: String, val status: String)
+
+enum class PdfSaveStatus(val wire: String, val reply: String) {
+    Saving("saving", "The PDF is still saving."),
+    Saved("saved", "The app confirmed the PDF was saved."),
+    Ready("ready_for_review", "The PDF is ready for review. Choose Save to keep a copy."),
+    Failed("save_failed", "The app reported that it couldn't save the PDF."),
+}
 
 /**
  * The prompt layout Fily was trained on (training/catalog.py and build_dataset.py). The model only
@@ -58,10 +74,29 @@ object FilyPrompt {
             put("enabled", enabled)
             put("contentAllowed", contentAllowed)
             put("today", today)
-            screen.selectedDocumentId?.let {
-                put("authorizedIds", JsonArray(listOf(JsonPrimitive(it))))
-                put("selectedDocumentId", it)
+            put("capabilityFacts", buildJsonObject {
+                put("offline", "Fily and its tools run on this device once installed.")
+                put("documents", "PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, EPUB, plain text and supported source files.")
+                put("media", "Local images, audio and video. Available tracks and decoding depend on the file and device.")
+                put("archives", "Browse and extract supported ZIP files.")
+                put("spreadsheet", "Read sheet values. Save XLSX edits as a new copy. Formulas use cached values.")
+                put("actions", "Use the offered tools and current reader operations. PDF preparation opens a review screen. A save requires app confirmation.")
+            })
+            val ids = (listOfNotNull(screen.selectedDocumentId) + screen.selectedFileIds).distinct()
+            if (ids.isNotEmpty()) put("authorizedIds", JsonArray(ids.map(::JsonPrimitive)))
+            screen.selectedDocumentId?.let { put("selectedDocumentId", it) }
+            screen.route?.let { put("screen", it) }
+            screen.page?.let { put("page", it) }
+            screen.sheet?.let { put("sheet", it) }
+            screen.cell?.let { put("cell", it) }
+            if (screen.selectedFileIds.isNotEmpty()) put("selectedFileIds", JsonArray(screen.selectedFileIds.map(::JsonPrimitive)))
+            screen.lastAction?.let { receipt ->
+                put("lastAction", buildJsonObject {
+                    put("action", receipt.action)
+                    put("status", receipt.status)
+                })
             }
+            screen.pdfSaveStatus?.let { put("pdfSaveStatus", it.wire) }
             screen.pageCount?.let { put("pageCount", it) }
             if (screen.readerCapabilities.isNotEmpty()) {
                 put("readerCapabilities", JsonArray(screen.readerCapabilities.map(::JsonPrimitive)))

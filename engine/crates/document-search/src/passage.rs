@@ -4,7 +4,7 @@
 //! (roughly 250 tokens of English): paragraphs and sentences are kept whole
 //! where they fit, long ones are split between words, and consecutive chunks
 //! overlap by about a sentence. No chunk spans two PDF pages. Each chunk is
-//! indexed with BM25. A question then takes the best candidates, drops
+//! indexed with BM25 and offline concept vectors. A question fuses their ranks, drops
 //! near-duplicates (maximal marginal relevance over term sets), adds the
 //! chunk after each pick for context, and packs what fits a character budget,
 //! in document order.
@@ -14,10 +14,10 @@
 //! byte bound. Building an index is CPU work: callers build it off the main
 //! thread and then query it.
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::concepts::Concepts;
 use crate::index::{analyze, query_terms};
 use crate::lru::Lru;
 
@@ -98,6 +98,7 @@ struct Chunk {
     /// Stemmed word counts; the chunk's length in words is their sum.
     terms: HashMap<String, u32>,
     words: u32,
+    concepts: Concepts,
 }
 
 /// The chunks of one document, with a BM25 posting list per term.
@@ -112,6 +113,14 @@ pub struct PassageIndex {
     footprint: usize,
 }
 
+#[derive(Clone, Copy)]
+enum Retrieval {
+    Lexical,
+    #[cfg(test)]
+    Semantic,
+    Hybrid,
+}
+
 impl PassageIndex {
     /// Indexes `text`. `page_starts` are the byte offsets where PDF pages begin, from page 1.
     pub fn new(text: &str, page_starts: &[u32], config: PassageConfig) -> Self {
@@ -122,7 +131,8 @@ impl PassageIndex {
             .into_iter()
             .map(|(start, end, page)| {
                 let (terms, words) = analyze(&text[start..end], usize::MAX);
-                Chunk { start, end, page, chars: text[start..end].chars().count(), terms, words }
+                let concepts = Concepts::of(&text[start..end]);
+                Chunk { start, end, page, chars: text[start..end].chars().count(), terms, words, concepts }
             })
             .collect();
         let mut postings: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
@@ -141,7 +151,7 @@ impl PassageIndex {
             }
         }
         let average_words = if chunks.is_empty() { 1.0 } else { (total_words as f32 / chunks.len() as f32).max(1.0) };
-        let footprint = text.len() + chunks.len() * 64 + posting_count * 24 + term_bytes;
+        let footprint = text.len() + chunks.len() * std::mem::size_of::<Chunk>() + posting_count * 24 + term_bytes;
         Self { text: text.to_owned(), chunks, postings, average_words, config, truncated, footprint }
     }
 
@@ -154,22 +164,21 @@ impl PassageIndex {
         self.chunks.len()
     }
 
-    /// The best passages for `question` within `budget_chars`, including the
-    /// separators and labels a prompt adds. Empty (and omitted) when no word of
-    /// the question occurs in the document.
+    /// The best passages for the question within the prompt budget, including separators and labels.
     pub fn select(&self, question: &str, budget_chars: usize) -> Selection {
-        let terms: Vec<String> = query_terms(question)
-            .into_iter()
-            .filter(|term| !STOP_WORDS.contains(&term.folded.as_str()))
-            .map(|term| term.stemmed)
-            .collect();
-        let scores = self.scores(&terms);
-        let mut ranked: Vec<(usize, f32)> = scores.iter().enumerate().filter(|(_, s)| **s > 0.0).map(|(i, s)| (i, *s)).collect();
-        if ranked.is_empty() {
+        let retrieval = if question.bytes().any(|byte| byte.is_ascii_digit()) {
+            Retrieval::Lexical
+        } else {
+            Retrieval::Hybrid
+        };
+        self.select_with(question, budget_chars, retrieval)
+    }
+
+    fn select_with(&self, question: &str, budget_chars: usize, retrieval: Retrieval) -> Selection {
+        let ranked = self.ranked(question, retrieval);
+        if ranked.is_empty() || self.config.max_passages == 0 {
             return Selection { passages: Vec::new(), omitted: true, document_bytes: self.text.len() };
         }
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal).then(a.0.cmp(&b.0)));
-        ranked.truncate(self.config.candidates);
         let top = ranked[0].1;
 
         let picks = self.diverse(ranked, top);
@@ -206,6 +215,56 @@ impl PassageIndex {
         kept.sort_unstable();
         let omitted = self.truncated || kept.len() < self.chunks.len();
         Selection { passages: self.merge_runs(&kept), omitted, document_bytes: self.text.len() }
+    }
+
+    fn ranked(&self, question: &str, retrieval: Retrieval) -> Vec<(usize, f32)> {
+        let terms: Vec<String> = query_terms(question)
+            .into_iter()
+            .filter(|term| !STOP_WORDS.contains(&term.folded.as_str()))
+            .map(|term| term.stemmed)
+            .collect();
+        #[cfg(test)]
+        if matches!(retrieval, Retrieval::Semantic) {
+            return self.semantic(Concepts::of(question));
+        }
+
+        let lexical = self.top_candidates(self.scores(&terms).into_iter().enumerate());
+        // A number may specify an invoice, an amount, or another exact identifier.
+        if matches!(retrieval, Retrieval::Lexical) {
+            return lexical;
+        }
+        let semantic = self.semantic(Concepts::of(question));
+        if semantic.is_empty() {
+            return lexical;
+        }
+        if lexical.is_empty() {
+            return semantic;
+        }
+
+        // Reciprocal rank fusion combines the rankings without comparing raw BM25 and cosine scores.
+        let mut fused = HashMap::new();
+        for (list, weight) in [(&lexical, 1.0), (&semantic, 1.1)] {
+            for (rank, (index, _)) in list.iter().enumerate() {
+                *fused.entry(*index).or_insert(0.0) += weight / (20 + rank + 1) as f32;
+            }
+        }
+        self.top_candidates(fused.into_iter())
+    }
+
+    fn semantic(&self, query: Concepts) -> Vec<(usize, f32)> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        self.top_candidates(self.chunks.iter().enumerate().map(|(index, chunk)| {
+            (index, query.similarity(chunk.concepts))
+        }))
+    }
+
+    fn top_candidates(&self, scores: impl Iterator<Item = (usize, f32)>) -> Vec<(usize, f32)> {
+        let mut ranked: Vec<_> = scores.filter(|(_, score)| *score > 0.0).collect();
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        ranked.truncate(self.config.candidates);
+        ranked
     }
 
     /// Maximal marginal relevance: each step takes the candidate that balances score
@@ -672,6 +731,65 @@ mod tests {
         cache.get_or_build("b", 1, 1, &big, &[]);
         assert_eq!(cache.document_count(), 1);
         assert!(cache.footprint() <= one + one / 2);
+    }
+
+    #[test]
+    fn hybrid_retrieval_comparison() {
+        use std::time::Instant;
+
+        let pages = [
+            "Pay by card at the shop counter. Quote invoice INV-6103 when contacting us.",
+            "For invoice INV-6147, amounts are payable within twenty-one calendar days.",
+            "Written requests for reimbursement must include the original receipt.",
+            "This agreement automatically renews for a further twelve months.",
+            "The manufacturer guarantee applies to defects in materials.",
+        ];
+        let mut text = String::new();
+        let mut starts = Vec::new();
+        for page in pages {
+            starts.push(text.len() as u32);
+            text.push_str(page);
+            text.push('\n');
+        }
+        let start = Instant::now();
+        let config = PassageConfig { max_passages: 1, ..PassageConfig::default() };
+        let index = PassageIndex::new(&text, &starts, config);
+        let build_us = start.elapsed().as_micros();
+        let cases = [
+            ("INV-6147", 2),
+            ("when do I have to pay", 2),
+            ("Can I get my money back?", 3),
+            ("Will the agreement roll over?", 4),
+            ("What does the warranty cover?", 5),
+        ];
+        let mut hits = [0; 3];
+        let modes = [
+            ("BM25", Retrieval::Lexical),
+            ("concepts", Retrieval::Semantic),
+            ("hybrid", Retrieval::Hybrid),
+        ];
+        for (slot, (name, mode)) in modes.into_iter().enumerate() {
+            let started = Instant::now();
+            for _ in 0..100 {
+                for (question, expected) in cases {
+                    let result = index.select_with(question, 500, mode);
+                    let actual = result.passages.first().and_then(|passage| passage.page);
+                    if actual == Some(expected) {
+                        hits[slot] += 1;
+                    }
+                }
+            }
+            println!(
+                "{name}: correct top-page citation {}/{}, {:.1} us/query (500 queries)",
+                hits[slot] / 100,
+                cases.len(),
+                started.elapsed().as_secs_f64() * 2_000.0,
+            );
+        }
+        println!("comparison fixture: build {build_us} us, estimated index {} bytes", index.footprint());
+        assert_eq!(hits[2] / 100, cases.len());
+        assert!(hits[2] > hits[0] && hits[2] > hits[1]);
+        assert_eq!(index.select("INV-6147", 500).passages[0].page, Some(2));
     }
 
     /// Cost of indexing and answering on a 1 MB, 215-page document. Run with

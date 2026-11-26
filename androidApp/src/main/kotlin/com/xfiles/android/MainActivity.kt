@@ -75,6 +75,7 @@ import com.xfiles.feature.tools.ArchiveMode
 import com.xfiles.feature.tools.ArchiveToolScreen
 import com.xfiles.feature.tools.PdfToolsScreen
 import com.xfiles.feature.tools.PdfToolsViewModel
+import com.xfiles.feature.tools.ConvertOutput
 import com.xfiles.feature.tools.ConvertViewModel
 import com.xfiles.feature.tools.ConvertTool
 import com.xfiles.feature.tools.OpenTool
@@ -84,7 +85,9 @@ import com.xfiles.tidy.TidyService
 import com.xfiles.feature.tidy.TidyUpScreen
 import com.xfiles.feature.tidy.TidyViewModel
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.xfiles.fily.FilyAppState
 import com.xfiles.fily.ListedFile
+import com.xfiles.fily.PdfSaveStatus
 import com.xfiles.fily.ReaderControl
 import com.xfiles.settings.ThemePreference
 import dagger.hilt.android.AndroidEntryPoint
@@ -156,6 +159,7 @@ class MainActivity : ComponentActivity() {
                 navigator.openDocument(uri)
             }
             var displayedFiles by remember { mutableStateOf(emptyList<FileEntry>()) }
+            var selectedFiles by remember { mutableStateOf(emptyList<FileEntry>()) }
             var showFily by rememberSaveable { mutableStateOf(false) }
             val action by pendingAction.collectAsStateWithLifecycle()
             LaunchedEffect(action) {
@@ -224,12 +228,16 @@ class MainActivity : ComponentActivity() {
                             onBack = navigator::back,
                             entryProvider = entryProvider {
                                 entry<Route.Library> {
-                                    LibraryRoute(navigator, onFily = { showFily = !showFily }, onListedFiles = { displayedFiles = it })
+                                    LibraryRoute(
+                                        navigator, onFily = { showFily = !showFily },
+                                        onListedFiles = { displayedFiles = it },
+                                        onSelectedFiles = { selectedFiles = it },
+                                    )
                                 }
                                 entry<Route.Reader> { ReaderRoute(navigator, onFily = { showFily = !showFily }) }
                                 entry<Route.Editor> { draft?.let { TextEditorScreen(it, editor) } }
                                 entry<Route.Tools> {
-                                    PdfToolsScreen(pdfTools, onBack = navigator::back)
+                                    PdfToolsScreen(pdfTools, onBack = navigator::back, convert = convert)
                                 }
                                 entry<Route.CompressZip> {
                                     ArchiveToolScreen(mode = ArchiveMode.Compress, onBack = navigator::back)
@@ -260,7 +268,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                         )
-                        if (showFily && !inPip) FilyOverlay(navigator, { displayedFiles }, onDismiss = { showFily = false })
+                        if (showFily && !inPip) FilyOverlay(navigator, { displayedFiles }, { selectedFiles }, onDismiss = { showFily = false })
                         if (!inPip && !showFily) CrashReportPrompt(crashReports)
                         // The screen name only (never a file name), for the crash report.
                         SideEffect(navigator.top) { CrashBreadcrumbs.screen = (navigator.top as? Route)?.toString() }
@@ -271,7 +279,12 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun LibraryRoute(navigator: AppNavigator, onFily: () -> Unit, onListedFiles: (List<FileEntry>) -> Unit) {
+    private fun LibraryRoute(
+        navigator: AppNavigator,
+        onFily: () -> Unit,
+        onListedFiles: (List<FileEntry>) -> Unit,
+        onSelectedFiles: (List<FileEntry>) -> Unit,
+    ) {
         val recentFiles by library.recents.collectAsStateWithLifecycle()
         val recentsLoaded by library.recentsLoaded.collectAsStateWithLifecycle()
         // Startup Timing (and Macrobenchmark) ends at the first frame where the library is ready to use.
@@ -358,6 +371,7 @@ class MainActivity : ComponentActivity() {
             },
             onFily = onFily,
             onListedFiles = onListedFiles,
+            onSelectedFiles = onSelectedFiles,
         )
     }
 
@@ -420,13 +434,17 @@ class MainActivity : ComponentActivity() {
             onRotate = analysis::rotate,
             onEditedPreview = analysis::showEditedPreview,
             onAttachScroll = analysis::attachViewerScroll,
+            onAttachPdfPage = analysis::attachVisiblePdfPage,
         )
     }
 
     @Composable
-    private fun FilyOverlay(navigator: AppNavigator, listed: () -> List<FileEntry>, onDismiss: () -> Unit) {
-        val reader by analysis.state.collectAsStateWithLifecycle()
-        val active = reader as? ReaderState.Ready
+    private fun FilyOverlay(
+        navigator: AppNavigator,
+        listed: () -> List<FileEntry>,
+        selected: () -> List<FileEntry>,
+        onDismiss: () -> Unit,
+    ) {
         val control = remember { ReaderControl() }
         val local = remember { FilyLibrary.create(filySource, analysis) }
         // Rescans the linked folders and reloads recents each time Fily opens, so its files are current.
@@ -440,19 +458,30 @@ class MainActivity : ComponentActivity() {
                 navigator = actions,
                 tidy = actions,
             ).apply {
-                listedFiles = { listed().map { ListedFile(it.uri.toString(), it.name) } }
+                listedFiles = {
+                    if (navigator.top == Route.Library) listed().map { ListedFile(it.uri.toString(), it.name) }
+                    else emptyList()
+                }
+                appState = {
+                    val route = navigator.top as? Route
+                    val file = (analysis.state.value as? ReaderState.Ready)?.file.takeIf { route == Route.Reader }
+                    FilyAppState(
+                        route = route?.toString() ?: "Unknown",
+                        openDocumentId = file?.uri?.toString(),
+                        selectedFileIds = if (route == Route.Library) selected().map { it.uri.toString() } else emptyList(),
+                        pdfSaveStatus = filyPdfSaveStatus(route),
+                    )
+                }
                 closeDocument = {
-                    if (analysis.markup.value.marks.isEmpty() && navigator.top == Route.Reader) navigator.back()
+                    val markup = analysis.markup.value
+                    if (markup.marks.isEmpty() && !markup.saving && navigator.top == Route.Reader) navigator.back()
+                    navigator.top != Route.Reader
                 }
             }
         }
-        val activeFile = active?.file?.uri
-        val pdf = active?.preview is FilePreview.Pdf
-        SideEffect { session.openDocumentId = activeFile?.toString() }
-        DisposableEffect(control, activeFile, pdf) {
-            // Page commands for PDFs; scroll commands for HTML and spreadsheets (the target reads what is on screen).
-            val unbind = if (active != null) control.attach(FilyViewerTarget(analysis)) else null
-            onDispose { unbind?.invoke() }
+        DisposableEffect(control, navigator) {
+            val unbind = control.attach(FilyViewerTarget(analysis) { navigator.top == Route.Reader })
+            onDispose { unbind() }
         }
         val install by voice.install.collectAsStateWithLifecycle()
         val enabled by voice.access.enabled.collectAsStateWithLifecycle()
@@ -468,6 +497,29 @@ class MainActivity : ComponentActivity() {
             )
         } else {
             VoiceAssistantSheet(voice, session, onDismiss = onDismiss)
+        }
+    }
+
+    private fun filyPdfSaveStatus(route: Route?): PdfSaveStatus? {
+        if (route != Route.Tools) return null
+        return when (pdfTools.open.value) {
+            is OpenTool.Pdf -> pdfTools.state.value.let { state ->
+                when {
+                    state.saved -> PdfSaveStatus.Saved
+                    state.saving -> PdfSaveStatus.Saving
+                    state.output != null && state.error != null -> PdfSaveStatus.Failed
+                    state.output != null -> PdfSaveStatus.Ready
+                    else -> null
+                }
+            }
+            is OpenTool.Convert -> convert.state.value.let { state ->
+                when {
+                    (state.output as? ConvertOutput.Done)?.pdfSaved == true -> PdfSaveStatus.Saved
+                    state.output is ConvertOutput.Pdf && !state.busy -> PdfSaveStatus.Ready
+                    else -> null
+                }
+            }
+            else -> null
         }
     }
 

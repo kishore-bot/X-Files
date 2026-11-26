@@ -14,7 +14,7 @@ data class PassageHit(val text: String, val page: Int?)
 data class PassageHits(val passages: List<PassageHit>, val omitted: Boolean, val documentBytes: Long)
 
 /**
- * Passage retrieval for Fily: one BM25 index per document, in a bounded LRU. An index is rebuilt when the file's
+ * Passage retrieval for Fily: one hybrid BM25/concept index per document, in a bounded LRU. An index is rebuilt when the file's
  * modified time or size changes, so an edited file is never answered from its old text. Building an index is CPU
  * work and runs on the default dispatcher; a cached question costs one lookup and one ranking.
  */

@@ -64,7 +64,7 @@ sealed interface ConvertOutput {
     /** [notice] says how far the searchable text layer got, when it was requested. */
     data class Pdf(val pdf: PreparedPdf, val suggestedName: String, val notice: String? = null) : ConvertOutput
     data class Text(val text: String, val suggestedName: String) : ConvertOutput
-    data class Done(val message: String) : ConvertOutput
+    data class Done(val message: String, val pdfSaved: Boolean = false) : ConvertOutput
 }
 
 data class ConvertState(
@@ -356,7 +356,7 @@ class ConvertViewModel @Inject constructor(
     fun savePdf(destination: Uri) = launch("The PDF could not be saved here. Choose another location.") {
         val output = state.value.output as? ConvertOutput.Pdf ?: return@launch
         conversions.save(output.pdf, destination)
-        setOutput(ConvertOutput.Done("PDF saved."))
+        setOutput(ConvertOutput.Done("PDF saved.", pdfSaved = true))
     }
 
     fun saveText(destination: Uri) = launch("The text could not be saved here. Choose another location.") {

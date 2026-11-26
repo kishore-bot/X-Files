@@ -20,6 +20,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -109,6 +110,7 @@ fun ReaderScreen(
     pagePreview: suspend (Int) -> FilePreview.Pdf? = { null },
     /** Registers the HTML or spreadsheet viewer for the assistant's scroll commands; see DocumentAnalysisViewModel.attachViewerScroll. */
     onAttachScroll: (ViewerScroll) -> () -> Unit = { {} },
+    onAttachPdfPage: ((String) -> Int?) -> () -> Unit = { {} },
 ) {
     PrintRequests(printRequests)
     val context = LocalContext.current
@@ -130,6 +132,12 @@ fun ReaderScreen(
     val rotation = documentKey?.let(rotationOf) ?: 0
 
     val chromeVm: ReaderUiViewModel = hiltViewModel()
+    DisposableEffect(chromeVm, onAttachPdfPage) {
+        val detach = onAttachPdfPage { key ->
+            chromeVm.state.value.takeIf { it.documentKey == key }?.visiblePdfPage
+        }
+        onDispose { detach() }
+    }
     val chromeState by chromeVm.state.collectAsStateWithLifecycle()
     val initialUi = remember(chromeVm, documentKey) { chromeVm.restoreDocument(documentKey) }
     val ui = if (chromeState.documentKey == documentKey) chromeState else initialUi

@@ -43,36 +43,50 @@ internal class FilyLibrary private constructor(
  * The open viewer as Fily drives it: PDF pages when a PDF is open, otherwise the scroll viewer on screen
  * (HTML or spreadsheet) when one is registered. The operations follow what is on screen right now.
  */
-internal class FilyViewerTarget(private val reader: DocumentAnalysisViewModel) : ReaderTarget {
+internal class FilyViewerTarget(
+    private val reader: DocumentAnalysisViewModel,
+    private val readerVisible: () -> Boolean,
+) : ReaderTarget {
+    private val viewer get() = reader.currentScrollViewer.takeIf { readerVisible() }
     // A PDF takes page commands; every viewer that registered a scroller (PDF pages included) takes scrolling.
     override val operations: Set<String>
-        get() = (if (current() != null) PAGE_OPERATIONS else emptySet()) + reader.currentScrollViewer?.operations.orEmpty()
+        get() = (if (current() != null) PAGE_OPERATIONS else emptySet()) + viewer?.operations.orEmpty()
     override val position: ReaderPosition
-        get() = current()?.let { ReaderPosition(page = it.page + 1, pageCount = it.pageCount) } ?: ReaderPosition()
+        get() {
+            val ready = (reader.state.value as? ReaderState.Ready).takeIf { readerVisible() }
+            val pdf = ready?.preview as? FilePreview.Pdf
+            if (ready != null && pdf != null) {
+                val visible = reader.visiblePdfPage(ready.file)?.takeIf { it in 0 until pdf.pageCount }
+                return ReaderPosition(page = (visible ?: pdf.page) + 1, pageCount = pdf.pageCount)
+            }
+            return viewer?.position ?: ReaderPosition()
+        }
 
     override suspend fun perform(operation: String, value: String?): String? {
         if (current() == null || operation !in PAGE_OPERATIONS) {
-            val scroll = reader.currentScrollViewer ?: return "unsupported_here"
-            return if (scroll.scroll(operation)) null else "unsupported_here"
+            val scroll = viewer ?: return "unsupported_here"
+            return scroll.perform(operation)
         }
         val initial = reader.state.value as? ReaderState.Ready ?: return "no_document"
         val pdf = initial.preview as? FilePreview.Pdf ?: return "unsupported_here"
         if (initial.turningPage) return "not_available"
+        val visible = reader.visiblePdfPage(initial.file)?.takeIf { it in 0 until pdf.pageCount } ?: pdf.page
         val page = when (operation) {
-            "next_page" -> pdf.page + 1
-            "previous_page" -> pdf.page - 1
+            "next_page" -> visible + 1
+            "previous_page" -> visible - 1
             "go_to_page" -> (value?.toIntOrNull() ?: return "missing_arguments") - 1
             else -> return "unsupported_here"
         }
         if (page !in 0 until pdf.pageCount) return "out_of_range"
-        if (page == pdf.page) return null
+        if (page == visible) return null
         reader.changePage(page)
         val end = reader.state.first { it !is ReaderState.Ready || !it.turningPage } as? ReaderState.Ready
         val rendered = end?.preview as? FilePreview.Pdf
         return if (end != null && end.file.uri == initial.file.uri && rendered?.page == page) null else "not_available"
     }
 
-    private fun current(): FilePreview.Pdf? = (reader.state.value as? ReaderState.Ready)?.preview as? FilePreview.Pdf
+    private fun current(): FilePreview.Pdf? =
+        ((reader.state.value as? ReaderState.Ready)?.preview as? FilePreview.Pdf).takeIf { readerVisible() }
 }
 
 private val PAGE_OPERATIONS = setOf("next_page", "previous_page", "go_to_page")

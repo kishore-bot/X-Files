@@ -5,11 +5,12 @@
 //! - [`SearchIndex`]: a BM25 full-text index with snippets, persisted in a
 //!   private directory with bounded memory and disk.
 //! - [`PassageIndex`] and [`PassageCache`]: the passages of one document that
-//!   answer a question, chunked, BM25-ranked and packed into a budget.
+//!   answer a question, chunked, ranked by BM25 and concept similarity, and packed into a budget.
 //! - [`PlainText`] and [`html_to_text`]: plain text for indexing.
 
 #![forbid(unsafe_code)]
 
+mod concepts;
 mod fold;
 mod index;
 mod lru;

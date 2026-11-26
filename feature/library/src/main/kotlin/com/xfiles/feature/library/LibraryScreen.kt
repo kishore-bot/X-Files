@@ -160,6 +160,7 @@ fun LibraryScreen(
     onTools: (LibraryTool) -> Unit,
     onFily: () -> Unit,
     onListedFiles: (List<FileEntry>) -> Unit,
+    onSelectedFiles: (List<FileEntry>) -> Unit,
 ) {
     val search = rememberTextFieldState()
     val query = search.text.toString().trim()
@@ -173,6 +174,8 @@ fun LibraryScreen(
     var removingFolder by rememberSaveable { mutableStateOf<String?>(null) }
     // The multi-select set. It is cleared when the tab changes, and by the back gesture.
     val picked = remember { mutableStateListOf<FileEntry>() }
+    val selection = picked.toList()
+    SideEffect(selection) { onSelectedFiles(selection) }
 
     LaunchedEffect(onQueryChange) {
         snapshotFlow { search.text.toString().trim() }.collect(onQueryChange)

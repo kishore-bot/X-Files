@@ -132,7 +132,19 @@ internal fun SpreadsheetPreview(
         }
         if (document.truncated) Text("Showing the rows within the preview limit.", color = palette.secondary)
         key(sheet) {
-            SuppliedSheetGrid(LazyMatrixSheetGrid, sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
+            SuppliedSheetGrid(
+                LazyMatrixSheetGrid, sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited,
+                currentSheet = { workbook.sheets.getOrNull(selected)?.title ?: sheet.title },
+                turnSheet = { delta ->
+                    val target = (selected.takeIf { it in workbook.sheets.indices } ?: 0) + delta
+                    when {
+                        target < 0 -> "at_first_sheet"
+                        target >= workbook.sheets.size -> "at_last_sheet"
+                        else -> { selected = target; null }
+                    }
+                },
+                hasMultipleSheets = workbook.sheets.size > 1,
+            )
         }
     }
 }

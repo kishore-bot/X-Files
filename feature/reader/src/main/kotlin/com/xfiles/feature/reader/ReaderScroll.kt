@@ -8,6 +8,7 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.xfiles.fily.ReaderPosition
 
 /** Scroll operations a viewer can take for the voice assistant; the names match its controlReader catalog. */
 internal val SCROLL_OPERATIONS = setOf("scroll_down", "scroll_up", "scroll_top", "scroll_bottom")
@@ -19,6 +20,9 @@ internal val SCROLL_OPERATIONS = setOf("scroll_down", "scroll_up", "scroll_top",
 interface ViewerScroll {
     /** The scroll operations this viewer takes, a subset of [SCROLL_OPERATIONS]. */
     val operations: Set<String>
+    val position: ReaderPosition get() = ReaderPosition()
+
+    suspend fun perform(operation: String): String? = if (scroll(operation)) null else "unsupported_here"
 
     /** Performs [operation] on the main thread. Returns false when the viewer did not take it. */
     suspend fun scroll(operation: String): Boolean

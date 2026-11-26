@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import com.xfiles.fily.ReaderPosition
 
 /** Draws a sheet and exposes its scroll commands to the reader. */
 interface SheetGridRenderer {
@@ -50,8 +51,21 @@ interface SheetGridScroller {
 }
 
 /** Adapts a [SheetGridScroller] to the assistant's scroll commands. */
-internal class SheetGridViewerScroll(private val scroller: SheetGridScroller) : ViewerScroll {
-    override val operations: Set<String> = SCROLL_OPERATIONS
+internal class SheetGridViewerScroll(
+    private val scroller: SheetGridScroller,
+    private val currentPosition: () -> ReaderPosition,
+    private val turnSheet: (Int) -> String?,
+    hasMultipleSheets: Boolean,
+) : ViewerScroll {
+    override val operations: Set<String> =
+        if (hasMultipleSheets) SCROLL_OPERATIONS + setOf("next_sheet", "previous_sheet") else SCROLL_OPERATIONS
+    override val position: ReaderPosition get() = currentPosition()
+
+    override suspend fun perform(operation: String): String? = when (operation) {
+        "next_sheet" -> turnSheet(1)
+        "previous_sheet" -> turnSheet(-1)
+        else -> super.perform(operation)
+    }
 
     override suspend fun scroll(operation: String): Boolean {
         when (operation) {

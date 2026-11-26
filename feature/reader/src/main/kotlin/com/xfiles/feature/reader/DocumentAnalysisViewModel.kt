@@ -139,6 +139,14 @@ class DocumentAnalysisViewModel @Inject constructor(
     /** The scroll viewer on screen (HTML or spreadsheet), registered by the viewer while composed. */
     // Main-thread only: viewers register from composition effects, the assistant reads on the main thread.
     private val scrollViewers = ArrayList<ViewerScroll>(2)
+    private var visiblePdfPage: ((String) -> Int?)? = null
+
+    fun attachVisiblePdfPage(reader: (String) -> Int?): () -> Unit {
+        visiblePdfPage = reader
+        return { if (visiblePdfPage === reader) visiblePdfPage = null }
+    }
+
+    fun visiblePdfPage(file: FileEntry): Int? = visiblePdfPage?.invoke(file.uri.toString())
 
     fun open(uri: Uri, page: Int? = null, password: String? = null) {
         if (markup.value.saving) return
