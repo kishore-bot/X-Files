@@ -33,8 +33,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import bot.lazymatrix.LazyMatrixX
-import bot.lazymatrix.rememberGridScrollState
+import dev.lazymatrix.LazyMatrixX
+import dev.lazymatrix.rememberGridScrollState
 import com.xfiles.documents.structure.ContentBlock
 import kotlinx.coroutines.flow.first
 

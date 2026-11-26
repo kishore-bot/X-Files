@@ -156,7 +156,7 @@ internal fun BookPreview(document: StructuredDocument, onClose: () -> Unit = {},
     )
 
     BookSheetHost(
-        sheet = state.sheet.takeUnless { filyOpen },
+        sheet = if (filyOpen) BookSheet.None else state.sheet,
         vm = vm,
         state = state,
         annotations = annotations,

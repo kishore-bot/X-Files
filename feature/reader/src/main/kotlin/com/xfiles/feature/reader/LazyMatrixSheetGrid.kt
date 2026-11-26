@@ -26,10 +26,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import bot.lazymatrix.LazyMatrixX
-import bot.lazymatrix.LazyMatrixXY
-import bot.lazymatrix.LazyMatrixY
-import bot.lazymatrix.rememberGridScrollState
+import dev.lazymatrix.LazyMatrixX
+import dev.lazymatrix.LazyMatrixXY
+import dev.lazymatrix.LazyMatrixY
+import dev.lazymatrix.rememberGridScrollState
 import kotlinx.coroutines.flow.first
 import kotlin.math.roundToLong
 
