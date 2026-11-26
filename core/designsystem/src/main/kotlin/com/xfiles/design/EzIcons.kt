@@ -55,6 +55,7 @@ object EzIcons {
     val Grid = icon("M3,3h8v8H3V3zM5,5v4h4V5H5zM13,3h8v8h-8V3zM15,5v4h4V5h-4zM3,13h8v8H3v-8zM5,15v4h4v-4H5zM13,13h8v8h-8v-8zM15,15v4h4v-4h-4z")
     val Play = icon("M8,5v14l11,-7z")
     val Pause = icon("M6,19h4V5H6v14zM14,5v14h4V5h-4z")
+    val Settings = icon("M19.4,13a8,8 0,0 0,0 -2l2,-1.6 -1.9,-3.3 -2.4,1a8,8 0,0 0,-1.7 -1l-0.4,-2.6h-4l-0.4,2.6a8,8 0,0 0,-1.7 1l-2.4,-1 -1.9,3.3 2,1.6a8,8 0,0 0,0 2l-2,1.6 1.9,3.3 2.4,-1a8,8 0,0 0,1.7 1l0.4,2.6h4l0.4,-2.6a8,8 0,0 0,1.7 -1l2.4,1 1.9,-3.3zM13,15a3,3 0,1 1,0 -6,3 3,0 0,1 0,6z")
     val Fullscreen = icon("M7,14H5v5h5v-2H7v-3zM5,10h2V7h3V5H5v5zM17,17h-3v2h5v-5h-2v3zM14,5v2h3v3h2V5h-5z")
     val FullscreenExit = icon("M5,16h3v3h2v-5H5v2zM8,8H5v2h5V5H8v3zM14,19h2v-3h3v-2h-5v5zM16,5v3h3v2h-5V5h2z")
     val Rewind = icon("M11,18V6l-8.5,6 8.5,6zM11.5,12l8.5,6V6l-8.5,6z")

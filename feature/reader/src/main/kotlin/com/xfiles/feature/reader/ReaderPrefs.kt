@@ -34,14 +34,6 @@ internal fun readPageStyle(context: Context, key: String): PageStyle {
     return PageStyle.entries.firstOrNull { it.name == saved } ?: PageStyle.Standard
 }
 
-internal fun writePageStyle(context: Context, key: String, style: PageStyle) {
-    try {
-        prefs(context)?.edit()?.putString(key, style.name)?.apply()
-    } catch (_: Exception) {
-        // Without storage the choice still applies for this session.
-    }
-}
-
 /** The saved text scale for a viewer [kind] ("code" or "text"); 1 when nothing is saved. */
 internal fun readTextScale(context: Context, kind: String): Float {
     val saved = try {
@@ -50,12 +42,4 @@ internal fun readTextScale(context: Context, kind: String): Float {
         1f
     }
     return saved.coerceIn(TEXT_SCALE_MIN, TEXT_SCALE_MAX)
-}
-
-internal fun writeTextScale(context: Context, kind: String, scale: Float) {
-    try {
-        prefs(context, TEXT_PREFS_NAME)?.edit()?.putFloat(kind, scale.coerceIn(TEXT_SCALE_MIN, TEXT_SCALE_MAX))?.apply()
-    } catch (_: Exception) {
-        // Without storage the size still applies for this session.
-    }
 }

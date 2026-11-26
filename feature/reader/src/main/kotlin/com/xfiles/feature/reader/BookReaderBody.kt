@@ -132,7 +132,7 @@ internal fun BookReaderBody(
                 typography = typography,
                 marks = marks,
                 actions = actions,
-                initial = state.annotations.position,
+                initial = current,
                 jumpTo = jumpTo,
                 onJumpHandled = onJumpHandled,
                 onBlock = onBlock,

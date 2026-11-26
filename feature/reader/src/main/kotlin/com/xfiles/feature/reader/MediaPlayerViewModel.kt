@@ -40,6 +40,7 @@ internal class MediaPlayerViewModel @Inject constructor(
     private val subtitleFiles: MediaSubtitleFilesUseCase,
     private val metadata: MediaMetadataUseCase,
     private val styleStore: SubtitleStyleStore,
+    private val progress: com.xfiles.core.documents.FileProgress,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(MediaPlayerUiState(subtitleStyle = styleStore.load()))
     val state: StateFlow<MediaPlayerUiState> = mutableState.asStateFlow()
@@ -48,6 +49,8 @@ internal class MediaPlayerViewModel @Inject constructor(
     private var media: FileEntry? = null
     private var nearbyFiles: List<MediaSubtitleFile> = emptyList()
     private val loadedFiles = mutableListOf<MediaSubtitleFile>()
+    private var audioToRestore: String? = null
+    private var subtitleToRestore: String? = null
     private var resumeAfterScrub = false
     private var pollJob: Job? = null
     private var hideJob: Job? = null
@@ -70,6 +73,9 @@ internal class MediaPlayerViewModel @Inject constructor(
         detach()
         player = exo
         media = file
+        val key = file.uri.toString()
+        audioToRestore = progress.read(key, "media-audio")
+        subtitleToRestore = progress.read(key, "media-subtitle")?.takeIf(String::isNotEmpty)
         loadedFiles.clear()
         nearbyFiles = emptyList()
         mutableState.update { previous ->
@@ -77,14 +83,17 @@ internal class MediaPlayerViewModel @Inject constructor(
                 video = video,
                 title = file.name.substringBeforeLast('.'),
                 attached = true,
-                speedIndex = previous.speedIndex,
-                scale = previous.scale,
-                rotationLocked = previous.rotationLocked,
+                speedIndex = (progress.read(key, "media-speed")?.toIntOrNull() ?: MediaSpeedDefault).coerceIn(MediaSpeedSteps.indices),
+                scale = VideoScale.entries.firstOrNull { it.name == progress.read(key, "video-scale") } ?: VideoScale.Fit,
+                rotationLocked = progress.read(key, "video-lock") == "true",
+                repeatOne = progress.read(key, "media-repeat") == "true",
                 subtitleStyle = previous.subtitleStyle,
             )
         }
         exo.addListener(listener)
         exo.setPlaybackSpeed(MediaSpeedSteps[state.value.speedIndex])
+        exo.repeatMode = if (state.value.repeatOne) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        if (subtitleToRestore == SUBTITLES_OFF) chooseSubtitle(exo, null)
         refreshTracks(exo)
         readPlayback(exo)
         startPolling()
@@ -105,8 +114,11 @@ internal class MediaPlayerViewModel @Inject constructor(
         } else {
             viewModelScope.launch {
                 val found = subtitleFiles.nearby(file.uri)
-                if (media?.uri != file.uri) return@launch
+                val savedSidecar = progress.read(key, "media-sidecar")?.takeIf(String::isNotEmpty)
+                val sidecar = savedSidecar?.let { subtitleFiles.readable(Uri.parse(it)) }
+                if (player !== exo) return@launch
                 nearbyFiles = found
+                if (sidecar != null && progress.read(key, "media-sidecar") == savedSidecar) addSubtitle(sidecar)
                 refreshTracks(exo)
             }
         }
@@ -135,10 +147,14 @@ internal class MediaPlayerViewModel @Inject constructor(
             is MediaPlayerEvent.SeekTo -> exo?.seekTo(event.positionMs)
             is MediaPlayerEvent.Scrub -> scrub(exo, event.fraction)
             MediaPlayerEvent.ScrubFinished -> finishScrub(exo)
-            is MediaPlayerEvent.SetDragging -> mutableState.update { it.copy(dragging = event.active) }
+            is MediaPlayerEvent.SetDragging -> {
+                mutableState.update { it.copy(dragging = event.active) }
+                if (!event.active) scheduleHide()
+            }
             is MediaPlayerEvent.SetSpeed -> {
                 mutableState.update { it.copy(speedIndex = event.index) }
                 exo?.setPlaybackSpeed(MediaSpeedSteps[event.index])
+                rememberSetting("media-speed", event.index.toString())
             }
             is MediaPlayerEvent.Boost -> {
                 mutableState.update { it.copy(boosted = event.on) }
@@ -148,10 +164,21 @@ internal class MediaPlayerViewModel @Inject constructor(
                 val on = !state.value.repeatOne
                 mutableState.update { it.copy(repeatOne = on) }
                 exo?.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+                rememberSetting("media-repeat", on.toString())
             }
-            MediaPlayerEvent.CycleScale -> mutableState.update { it.copy(scale = it.scale.next()) }
-            MediaPlayerEvent.ToggleRotationLock -> mutableState.update { it.copy(rotationLocked = !it.rotationLocked) }
-            MediaPlayerEvent.ToggleControls -> if (state.value.controlsVisible) hideControls() else showControls()
+            is MediaPlayerEvent.SetVideoScale -> {
+                mutableState.update { it.copy(scale = event.scale) }
+                rememberSetting("video-scale", state.value.scale.name)
+            }
+            MediaPlayerEvent.ToggleRotationLock -> {
+                mutableState.update { it.copy(rotationLocked = !it.rotationLocked) }
+                rememberSetting("video-lock", state.value.rotationLocked.toString())
+            }
+            MediaPlayerEvent.ToggleControls -> {
+                if (state.value.sheet != null) mutableState.update { it.copy(sheet = null) }
+                else if (state.value.controlsVisible) hideControls() else showControls()
+                return
+            }
             MediaPlayerEvent.TouchControls -> showControls()
             is MediaPlayerEvent.OpenSheet -> mutableState.update {
                 it.copy(
@@ -235,6 +262,18 @@ internal class MediaPlayerViewModel @Inject constructor(
     private fun refreshTracks(exo: Player) {
         val names = loadedFiles.map { it.label() }.toSet()
         val set = tracks(exo.currentTracks, names)
+        if (exo is ExoPlayer) {
+            if (audioToRestore != null && set.audio.isNotEmpty()) {
+                val match = set.audio.firstOrNull { it.group.resumeKey() == audioToRestore && it.supported }
+                audioToRestore = null
+                match?.let { chooseAudio(exo, it) }
+            }
+            if (subtitleToRestore != null && set.text.isNotEmpty()) {
+                val match = set.text.firstOrNull { it.group.resumeKey() == subtitleToRestore && it.supported }
+                subtitleToRestore = null
+                match?.let { chooseSubtitle(exo, it) }
+            }
+        }
         val loadedUris = loadedFiles.map { it.uri }.toSet()
         mutableState.update {
             it.copy(
@@ -245,8 +284,14 @@ internal class MediaPlayerViewModel @Inject constructor(
         }
     }
 
+    private fun rememberSetting(key: String, value: String) {
+        media?.let { progress.write(it.uri.toString(), key, value) }
+    }
+
     private fun chooseAudio(exo: ExoPlayer?, track: MediaAudioTrack) {
         if (exo == null) return
+        audioToRestore = null
+        rememberSetting("media-audio", track.group.resumeKey())
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
             .setOverrideForType(TrackSelectionOverride(track.group.mediaTrackGroup, 0))
@@ -255,6 +300,10 @@ internal class MediaPlayerViewModel @Inject constructor(
 
     private fun chooseSubtitle(exo: ExoPlayer?, track: MediaTextTrack?) {
         exo ?: return
+        subtitleToRestore = null
+        rememberSetting("media-subtitle", track?.group?.resumeKey() ?: SUBTITLES_OFF)
+        val sidecar = loadedFiles.firstOrNull { it.label() == track?.group?.getTrackFormat(0)?.label }
+        rememberSetting("media-sidecar", sidecar?.uri?.toString().orEmpty())
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().apply {
             if (track == null) {
                 setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -267,9 +316,12 @@ internal class MediaPlayerViewModel @Inject constructor(
     }
 
     private fun loadSubtitle(uri: Uri) {
+        val active = player ?: return
         viewModelScope.launch {
             mutableState.update { it.copy(subtitleLoading = true) }
+            subtitleFiles.keepReadAccess(uri)
             val name = subtitleFiles.displayName(uri)
+            if (player !== active) return@launch
             addSubtitle(MediaSubtitleFile(uri, name))
             mutableState.update { it.copy(subtitleLoading = false) }
         }
@@ -285,6 +337,9 @@ internal class MediaPlayerViewModel @Inject constructor(
             }
             return
         }
+        subtitleToRestore = null
+        rememberSetting("media-subtitle", "")
+        rememberSetting("media-sidecar", file.uri.toString())
         if (loadedFiles.none { it.uri == file.uri }) loadedFiles += file
         val configurations = loadedFiles.map { sub ->
             MediaItem.SubtitleConfiguration.Builder(sub.uri)
@@ -346,10 +401,18 @@ internal class MediaPlayerViewModel @Inject constructor(
         /** How long the controls stay after the last touch while a video plays. */
         const val CONTROLS_HIDE_MS = 3_000L
         const val POLL_MS = 250L
+        const val SUBTITLES_OFF = "off"
         const val MAX_DELAY_MS = 5_000L
         /** Speed while a long press holds the picture. */
         const val BOOST_SPEED = 2f
     }
+}
+
+private fun androidx.media3.common.Tracks.Group.resumeKey(): String {
+    val format = getTrackFormat(0)
+    val description = listOf(mediaTrackGroup.id, format.id, format.language, format.label, format.sampleMimeType)
+        .joinToString("") { value -> "${value.orEmpty().length}:${value.orEmpty()}" }
+    return android.util.Base64.encodeToString(description.toByteArray(), android.util.Base64.NO_WRAP)
 }
 
 private fun VideoSize.displayAspect(): Float =

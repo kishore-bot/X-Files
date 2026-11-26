@@ -126,7 +126,12 @@ fun ArchiveBrowser(
                         modifier = Modifier.padding(vertical = 24.dp),
                     )
                 } else {
+                    val list = androidx.compose.runtime.key(view.folderPath, view.query) {
+                        if (view.query.isBlank()) rememberViewerList("archive:${view.folderPath}", listed.size)
+                        else androidx.compose.foundation.lazy.rememberLazyListState()
+                    }
                     LazyColumn(
+                        state = list,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp),
                     ) {

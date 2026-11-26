@@ -25,6 +25,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,60 +39,32 @@ import com.xfiles.design.glassBar
 import com.xfiles.design.rememberHaptics
 
 /**
- * The PDF's bottom controls, as the EzFiles reader lays them out: a page slider with the counter, a strip of
- * page thumbnails, then one bar with previous, "n / N" (opens the jump dialog through [onJump]), next, zoom
- * out, the zoom percentage, zoom in, and the view modes (single, two pages, grid).
+ * Compact PDF navigation. The page strip and scrubber open on demand in a sheet.
  */
 @Composable
 internal fun PdfToolbar(
     page: Int,
     pageCount: Int,
     zoom: Int,
-    twoUp: Boolean,
     grid: Boolean,
     busy: Boolean,
     thumbnail: suspend (Int) -> Bitmap?,
     onPage: (Int) -> Unit,
     onJump: () -> Unit,
     onZoom: (Int) -> Unit,
-    onTwoUp: (Boolean) -> Unit,
-    onGrid: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
     val previous = if (page > 0) page - 1 else null
     val next = if (page < pageCount - 1) page + 1 else null
+    var showPages by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     Column(
-        modifier
-            .fillMaxWidth()
-            .glassBar()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier.fillMaxWidth().glassBar().padding(horizontal = 4.dp),
     ) {
-        if (pageCount > 1) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                PdfPageSlider(
-                    page = page,
-                    pageCount = pageCount,
-                    enabled = !busy,
-                    onSeek = { target ->
-                        haptics.tick()
-                        onPage(target)
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    "${page + 1} / $pageCount",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-            PdfThumbnailStrip(pageCount, page, thumbnail, enabled = !busy, onPage = onPage)
-        }
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(0.dp, Alignment.CenterHorizontally),
         ) {
             IconButton(onClick = { haptics.tick(); previous?.let(onPage) }, enabled = !busy && previous != null) {
                 Icon(EzIcons.ChevronLeft, "Previous page")
@@ -120,32 +94,39 @@ internal fun PdfToolbar(
                 onClick = { haptics.tick(); onZoom(zoom + PDF_ZOOM_STEP) },
                 enabled = !grid && zoom < PDF_MAX_ZOOM,
             ) { Icon(EzIcons.Plus, "Zoom in") }
-            ModeButton(EzIcons.SinglePage, "Single page", selected = !twoUp && !grid) {
-                haptics.segment()
-                onGrid(false)
-                onTwoUp(false)
-            }
-            ModeButton(EzIcons.TwoPages, "Two pages", selected = twoUp && !grid) {
-                haptics.segment()
-                onGrid(false)
-                onTwoUp(true)
-            }
-            ModeButton(EzIcons.Grid, "Page grid", selected = grid) {
-                haptics.segment()
-                onGrid(true)
+            if (pageCount > 1 && !grid) {
+                IconButton(onClick = { showPages = true }) { Icon(EzIcons.ListLines, "Page thumbnails") }
             }
         }
     }
+    if (showPages && !grid) {
+        PdfPageSheet(page, pageCount, thumbnail, enabled = !busy, onPage = { target ->
+            showPages = false
+            onPage(target)
+        }, onDismiss = { showPages = false })
+    }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun ModeButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Icon(
-            icon,
-            label,
-            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        )
+private fun PdfPageSheet(
+    page: Int,
+    pageCount: Int,
+    thumbnail: suspend (Int) -> Bitmap?,
+    enabled: Boolean,
+    onPage: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text("Pages", style = MaterialTheme.typography.titleMedium)
+            PdfPageSlider(page, pageCount, enabled, onPage)
+            PdfThumbnailStrip(pageCount, page, thumbnail, enabled, onPage)
+        }
     }
 }
 

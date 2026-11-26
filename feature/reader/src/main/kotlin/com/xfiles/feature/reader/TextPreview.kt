@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -53,7 +52,7 @@ internal fun TextPreview(
     val query = if (showSearch) search.text.toString() else ""
     val matches = remember(content, query) { textMatches(content, query) }
     var current by remember(content, query) { mutableIntStateOf(0) }
-    val list = rememberLazyListState()
+    val list = rememberViewerList("text", sections.size + if (preview.truncated) 1 else 0)
     RegisterViewerScroll(list) { LazyScroll(list) }
     val selected = matches.getOrNull(current)
     LaunchedEffect(selected) {

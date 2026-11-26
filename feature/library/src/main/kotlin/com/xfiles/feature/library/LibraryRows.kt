@@ -123,6 +123,7 @@ internal fun FileRow(
     onToggle: () -> Unit,
     onLongPress: () -> Unit,
     actions: FileRowActions? = null,
+    marked: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     var menuOpen by remember { mutableStateOf(false) }
@@ -149,6 +150,13 @@ internal fun FileRow(
         Column(Modifier.weight(1f)) {
             Text(file.name, style = FileNameStyle, color = EzColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             detail?.let { Text(it, fontSize = 12.sp, color = EzColors.TextSecondary, modifier = Modifier.padding(top = 3.dp)) }
+        }
+        if (marked) {
+            Box(
+                Modifier.size(8.dp)
+                    .background(EzColors.Primary, androidx.compose.foundation.shape.CircleShape)
+                    .semantics { contentDescription = "Last viewed image" },
+            )
         }
         if (!selecting) {
             if (actions != null) {

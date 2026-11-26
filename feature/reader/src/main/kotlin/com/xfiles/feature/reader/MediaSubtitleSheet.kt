@@ -48,7 +48,11 @@ internal fun MediaSubtitleSheet(
     onPickFile: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
+    ) {
         AnimatedContent(
             targetState = state.subtitleLevel,
             transitionSpec = {

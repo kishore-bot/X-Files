@@ -44,6 +44,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class DocumentAnalysisViewModel @Inject constructor(
     private val documents: DocumentRepository,
+    private val progress: com.xfiles.core.documents.FileProgress,
     private val sharing: DocumentSharing,
     private val saved: SavedStateHandle,
     private val gallery: GalleryController,
@@ -71,6 +72,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     fun selectGalleryPage(index: Int) {
         val file = gallery.select(index) ?: return
         saved[OPEN_URI] = file.uri.toString()
+        progress.viewImage(file.uri.toString())
         rememberJob?.cancel()
         rememberJob = viewModelScope.launch {
             delay(REMEMBER_DELAY_MS)
@@ -89,11 +91,13 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     fun setGallerySort(sort: GallerySort) = gallery.setSort(sort)
 
-    fun rotationOf(uri: String): Int = rotations[uri] ?: 0
+    fun rotationOf(uri: String): Int = rotations[uri] ?: progress.read(uri, "rotation")?.toIntOrNull() ?: 0
 
     /** Turns the picture at [uri] a quarter clockwise; the turn is kept for that picture. */
     fun rotate(uri: String) {
-        rotations[uri] = (rotationOf(uri) + 90) % 360
+        val next = (rotationOf(uri) + 90) % 360
+        rotations[uri] = next
+        progress.write(uri, "rotation", next.toString())
     }
 
     /** Share original for the open file; false (shown as an error) when no app can take it. */
@@ -134,7 +138,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     // Main-thread only: viewers register from composition effects, the assistant reads on the main thread.
     private val scrollViewers = ArrayList<ViewerScroll>(2)
 
-    fun open(uri: Uri, page: Int = 0, password: String? = null) {
+    fun open(uri: Uri, page: Int? = null, password: String? = null) {
         if (markup.value.saving) return
         discardMarkup()
         clearPdfSearch()
@@ -142,15 +146,20 @@ class DocumentAnalysisViewModel @Inject constructor(
         pdfPages.clear()
         pdfPassword = null
         saved[OPEN_URI] = uri.toString()
-        saved[OPEN_PAGE] = page
+        val initialPage = page
+            ?: progress.read(uri.toString(), "pdf-position")?.substringBefore(':')?.toIntOrNull()
+            ?: progress.read(uri.toString(), "pdf-page")?.toIntOrNull() ?: 0
+        saved[OPEN_PAGE] = initialPage
         startReader(ReaderState.Loading) {
-            val opened = openDocument(uri, page, password)
+            val opened = openDocument(uri, initialPage, password)
             if (opened is ReaderState.Ready) {
                 val preview = opened.preview
                 if (preview is FilePreview.Pdf) {
                     pdfPassword = password
                     pdfPages.remember(preview)
+                    progress.write(uri.toString(), "pdf-page", preview.page.toString())
                 }
+                if (preview is FilePreview.Picture) progress.viewImage(uri.toString())
                 documents.remember(opened.file)
                 (preview as? FilePreview.Structured)?.let { structuredEdits.bind(opened.file.uri, opened.file.name, it) } ?: structuredEdits.close()
             }
@@ -205,6 +214,7 @@ class DocumentAnalysisViewModel @Inject constructor(
             val active = mutableState.value as? ReaderState.Ready ?: return@startReader
             mutableState.value = active.copy(preview = page, facing = facing, turningPage = false, pageError = false)
             saved[OPEN_PAGE] = index
+            progress.write(ready.file.uri.toString(), "pdf-page", index.toString())
             pdfPages.prefetch(viewModelScope, ready.file, index, pdf.pageCount, ready.twoPage, pdfPassword)
         }
     }

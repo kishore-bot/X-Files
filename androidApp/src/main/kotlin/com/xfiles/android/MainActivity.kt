@@ -305,9 +305,13 @@ class MainActivity : ComponentActivity() {
         val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) navigator.openDocument(uri)
         }
+        var reconnecting by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
         val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
-            if (tree != null) library.addFolder(tree)
+            val previous = reconnecting?.let(Uri::parse)
+            reconnecting = null
+            if (tree != null) library.addFolder(tree, previous)
         }
+        val lastImage by library.lastImage.collectAsStateWithLifecycle()
         val context = LocalContext.current
         LaunchedEffect(library) {
             library.prints.collect { request ->
@@ -323,10 +327,11 @@ class MainActivity : ComponentActivity() {
             recentFiles = recentFiles,
             listing = listing,
             category = category,
+            lastImage = lastImage,
             onCategory = library::setCategory,
             onQueryChange = library::setQuery,
             bookmarks = bookmarks,
-            onBookmark = { navigator.openDocument(it.file.uri, it.page ?: 0) },
+            onBookmark = { navigator.openDocument(it.file.uri, it.page) },
             library = folderLibrary,
             searchEnabled = searchEnabled,
             contentSearch = contentSearch,
@@ -341,6 +346,10 @@ class MainActivity : ComponentActivity() {
             onClear = library::clearRecents,
             onAddFolder = { folderPicker.launch(null) },
             onRemoveFolder = library::removeFolder,
+            onReconnectFolder = {
+                reconnecting = it.toString()
+                folderPicker.launch(it)
+            },
             onRefresh = library::refresh,
             onAbout = { navigator.show(Route.About) },
             onTools = { tool ->
@@ -526,6 +535,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         preferHighestRefreshRate()
+        library.refreshOnReturn()
     }
 
     override fun onStart() {

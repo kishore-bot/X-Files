@@ -17,7 +17,7 @@ internal class AppNavigator(
 ) {
     val top: NavKey? get() = stack.lastOrNull()
 
-    fun openDocument(uri: Uri, page: Int = 0) {
+    fun openDocument(uri: Uri, page: Int? = null) {
         analysis.open(uri, page)
         // An external open replaces whatever sat above the library; it never stacks readers.
         while (stack.size > 1 && stack.last() != Route.Library) stack.removeAt(stack.lastIndex)

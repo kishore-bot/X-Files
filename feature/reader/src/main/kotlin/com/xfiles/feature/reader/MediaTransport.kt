@@ -2,9 +2,10 @@ package com.xfiles.feature.reader
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -52,6 +52,8 @@ internal fun MediaTransport(
     onRepeat: () -> Unit,
     onScrub: (Float) -> Unit,
     onScrubFinished: () -> Unit,
+    fullscreen: Boolean?,
+    onFullscreen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberMediaHaptics()
@@ -61,9 +63,11 @@ internal fun MediaTransport(
     Column(
         modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.Black.copy(alpha = 0.78f))
+            .padding(horizontal = 14.dp, vertical = 6.dp),
     ) {
         Slider(
             value = shown,
@@ -88,7 +92,11 @@ internal fun MediaTransport(
             ),
             modifier = Modifier.semantics { contentDescription = "Seek" },
         )
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatTime(time), color = Color.White, fontSize = 12.sp)
+            Text("−${formatTime((duration - time).coerceAtLeast(0))}", color = Color.White, fontSize = 12.sp)
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
             RoundButton(EzIcons.Rewind, "Back 10 seconds", onBack, enabled = seekable)
             RoundButton(if (playing) EzIcons.Pause else EzIcons.Play, if (playing) "Pause" else "Play", onToggle, large = true)
             RoundButton(EzIcons.Forward, "Forward 10 seconds", onForward, enabled = seekable)
@@ -100,12 +108,13 @@ internal fun MediaTransport(
                     toggleOn = !repeatOne,
                 )
             }
-            Box(Modifier.weight(1f))
-            Text(
-                "${formatTime(time)} / ${formatTime(duration)}",
-                color = Color.White,
-                fontSize = 14.sp,
-            )
+            if (fullscreen != null) {
+                RoundButton(
+                    if (fullscreen) EzIcons.FullscreenExit else EzIcons.Fullscreen,
+                    if (fullscreen) "Exit fullscreen" else "Fullscreen",
+                    onFullscreen,
+                )
+            }
         }
     }
 }

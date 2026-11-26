@@ -6,11 +6,11 @@
 //! because only the owner password lifts the permission limits.
 
 use aes::cipher::block_padding::NoPadding;
-use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, StreamCipher, consts};
+use aes::cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use aes::{Aes128, Aes256};
 use document_core::{EngineError, ErrorKind, Result};
 use md5::Md5;
-use rc4::{KeyInit, Rc4};
+use rc4::{KeyInit, Rc4, StreamCipher};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -518,7 +518,7 @@ fn hash_r6(password: &[u8], salt: &[u8], extra: &[u8]) -> Result<Zeroizing<[u8; 
         let encrypted_len = e.len();
         cbc::Encryptor::<Aes128>::new_from_slices(&k[..16], &k[16..32])
             .map_err(|_| internal())?
-            .encrypt_padded_mut::<NoPadding>(&mut e, encrypted_len)
+            .encrypt_padded::<NoPadding>(&mut e, encrypted_len)
             .map_err(|_| internal())?;
         let remainder = e[..16].iter().map(|b| u32::from(*b)).sum::<u32>() % 3;
         k = Zeroizing::new(match remainder {
@@ -539,7 +539,7 @@ fn hash_r6(password: &[u8], salt: &[u8], extra: &[u8]) -> Result<Zeroizing<[u8; 
 fn aes256_cbc_no_iv_decrypt(key: &[u8], data: &mut [u8]) -> Result<()> {
     cbc::Decryptor::<Aes256>::new_from_slices(key, &[0u8; AES_BLOCK])
         .map_err(|_| internal())?
-        .decrypt_padded_mut::<NoPadding>(data)
+        .decrypt_padded::<NoPadding>(data)
         .map_err(|_| damaged())?;
     Ok(())
 }
@@ -548,7 +548,7 @@ fn aes256_cbc_no_iv_encrypt(key: &[u8], data: &mut [u8]) -> Result<()> {
     let len = data.len();
     cbc::Encryptor::<Aes256>::new_from_slices(key, &[0u8; AES_BLOCK])
         .map_err(|_| internal())?
-        .encrypt_padded_mut::<NoPadding>(data, len)
+        .encrypt_padded::<NoPadding>(data, len)
         .map_err(|_| internal())?;
     Ok(())
 }
@@ -846,13 +846,13 @@ fn aes_encrypt_data(key: &[u8], plain: &[u8]) -> Result<Vec<u8>> {
         16 => {
             cbc::Encryptor::<Aes128>::new_from_slices(key, iv)
                 .map_err(|_| internal())?
-                .encrypt_padded_mut::<NoPadding>(body, len)
+                .encrypt_padded::<NoPadding>(body, len)
                 .map_err(|_| internal())?;
         }
         32 => {
             cbc::Encryptor::<Aes256>::new_from_slices(key, iv)
                 .map_err(|_| internal())?
-                .encrypt_padded_mut::<NoPadding>(body, len)
+                .encrypt_padded::<NoPadding>(body, len)
                 .map_err(|_| internal())?;
         }
         _ => return Err(internal()),
@@ -874,12 +874,12 @@ fn aes_decrypt_data(key: &[u8], data: &[u8]) -> Result<Vec<u8>> {
     match key.len() {
         16 => cbc::Decryptor::<Aes128>::new_from_slices(key, iv)
             .map_err(|_| damaged())?
-            .decrypt_padded_mut::<NoPadding>(&mut out)
+            .decrypt_padded::<NoPadding>(&mut out)
             .map(|_| ())
             .map_err(|_| damaged())?,
         32 => cbc::Decryptor::<Aes256>::new_from_slices(key, iv)
             .map_err(|_| damaged())?
-            .decrypt_padded_mut::<NoPadding>(&mut out)
+            .decrypt_padded::<NoPadding>(&mut out)
             .map(|_| ())
             .map_err(|_| damaged())?,
         _ => return Err(damaged()),
@@ -926,21 +926,12 @@ fn rc4_rounds(key: &[u8], data: &mut [u8], revision: i64) -> Result<()> {
     Ok(())
 }
 
-/// RC4, for reading old files only. The crate fixes the key size in a type.
+/// RC4 is limited to legacy PDF algorithms, including explicit preservation of existing protection.
 fn rc4(key: &[u8], data: &mut [u8]) -> Result<()> {
-    macro_rules! with_size {
-        ($($len:literal => $size:ty),* $(,)?) => {
-            match key.len() {
-                $($len => Rc4::<$size>::new_from_slice(key).map_err(|_| damaged())?.apply_keystream(data),)*
-                _ => return Err(damaged()),
-            }
-        };
+    if !(5..=16).contains(&key.len()) {
+        return Err(damaged());
     }
-    with_size!(
-        5 => consts::U5, 6 => consts::U6, 7 => consts::U7, 8 => consts::U8,
-        9 => consts::U9, 10 => consts::U10, 11 => consts::U11, 12 => consts::U12,
-        13 => consts::U13, 14 => consts::U14, 15 => consts::U15, 16 => consts::U16,
-    );
+    Rc4::new_from_slice(key).map_err(|_| damaged())?.apply_keystream(data);
     Ok(())
 }
 

@@ -27,8 +27,13 @@ class TextToSpeech(context: Context) {
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) { _state.value = TtsState.Speaking }
             override fun onDone(utteranceId: String?) { _state.value = TtsState.Idle }
-            @Deprecated("Deprecated") override fun onError(utteranceId: String?) { _state.value = TtsState.Error }
-            override fun onError(utteranceId: String?, errorCode: Int) { _state.value = TtsState.Error }
+            // Android still requires this abstract callback. Route both API variants through one handler.
+            @Deprecated("Use onError(utteranceId, errorCode)")
+            override fun onError(utteranceId: String?) = onError(utteranceId, AndroidTts.ERROR)
+
+            override fun onError(utteranceId: String?, errorCode: Int) {
+                _state.value = TtsState.Error
+            }
         })
     }
 

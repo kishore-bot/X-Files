@@ -7,8 +7,12 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
+import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
+import java.io.FileNotFoundException
+import java.io.IOException
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.documentKind
 import kotlinx.coroutines.CancellationException
@@ -18,7 +22,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
-data class LinkedFolder(val uri: Uri, val name: String)
+enum class FolderAccess { Available, Reconnect, Retry }
+
+data class LinkedFolder(val uri: Uri, val name: String, val access: FolderAccess = FolderAccess.Available)
 
 data class FolderLibrary(
     val folders: List<LinkedFolder> = emptyList(),
@@ -31,20 +37,22 @@ data class FolderLibrary(
 @Singleton
 class FolderRepository @Inject constructor(@ApplicationContext context: Context) {
     private val resolver = context.contentResolver
+    private val storage = context.getSystemService(StorageManager::class.java)
     private val preferences = context.getSharedPreferences("library_folders", Context.MODE_PRIVATE)
     private val io = Dispatchers.IO.limitedParallelism(1)
 
-    suspend fun link(uri: Uri) = withContext(io) {
+    suspend fun link(uri: Uri, replacing: Uri? = null) = withContext(io) {
         require(DocumentsContract.isTreeUri(uri))
         val stored = linkedUris()
-        require(uri in stored || stored.size < MAX_FOLDERS) { "Too many folders" }
+        require(uri in stored || (replacing != null && replacing in stored) || stored.size < MAX_FOLDERS) { "Too many folders" }
         // Write lets Tidy up delete a duplicate the user confirmed; keep read-only when the picker gave only that.
         try {
             resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         } catch (_: SecurityException) {
             resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        saveUris((stored + uri).distinct())
+        if (replacing != null && replacing != uri) unlink(replacing)
+        saveUris((linkedUris() + uri).distinct())
     }
 
     suspend fun unlink(uri: Uri) = withContext(io) {
@@ -63,27 +71,80 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
         val folders = mutableListOf<LinkedFolder>()
         val found = LinkedHashMap<String, FileEntry>()
         var remaining = MAX_SCAN_ENTRIES
-        var error: String? = null
-
+        val missing = mutableSetOf<Uri>()
+        val grants = resolver.persistedUriPermissions.filter { it.isReadPermission }.map { it.uri }.toSet()
         for (tree in linkedUris()) {
             currentCoroutineContext().ensureActive()
             val rootId = DocumentsContract.getTreeDocumentId(tree)
             val rootUri = DocumentsContract.buildDocumentUriUsingTree(tree, rootId)
             val fallback = rootId.substringAfterLast('/').substringAfterLast(':').ifBlank { "Folder" }
+            if (tree !in grants) {
+                folders.add(LinkedFolder(tree, fallback, FolderAccess.Reconnect))
+                continue
+            }
+            var name = fallback
             try {
-                val name = resolver.query(rootUri, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)
-                    ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-                folders.add(LinkedFolder(tree, name ?: fallback))
-                if (remaining > 0) remaining = scanFolder(tree, rootId, found, remaining)
+                val root = try {
+                    rootName(rootUri, fallback)
+                } catch (_: FileNotFoundException) {
+                    null
+                }
+                if (root == null) {
+                    if (volumeAvailable(tree, rootId)) missing.add(tree)
+                    else folders.add(LinkedFolder(tree, fallback, FolderAccess.Retry))
+                    continue
+                }
+                name = root
+                val entries = LinkedHashMap<String, FileEntry>()
+                if (remaining > 0) remaining = scanFolder(tree, rootId, entries, remaining)
+                entries.forEach { (id, file) -> found.putIfAbsent(id, file) }
+                folders.add(LinkedFolder(tree, name))
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (_: SecurityException) {
+                folders.add(LinkedFolder(tree, name, FolderAccess.Reconnect))
             } catch (_: Exception) {
-                if (folders.none { it.uri == tree }) folders.add(LinkedFolder(tree, fallback))
-                error = "Some folders could not be read. Refresh or add them again."
+                folders.add(LinkedFolder(tree, name, FolderAccess.Retry))
             }
         }
 
+        missing.forEach { unlink(it) }
+        val error = "Some folders could not be read. Retry or reconnect the affected folders."
+            .takeIf { folders.any { it.access != FolderAccess.Available } }
         FolderLibrary(folders, found.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }), reachedLimit = remaining == 0, error = error)
+    }
+
+    private fun volumeAvailable(tree: Uri, rootId: String): Boolean {
+        if (tree.authority != "com.android.externalstorage.documents") return true
+        val volumeId = rootId.substringBefore(':')
+        return storage?.storageVolumes.orEmpty().any { volume ->
+            val matches = if (volumeId == "primary" || volumeId == "home") volume.isPrimary
+            else volume.uuid.equals(volumeId, ignoreCase = true)
+            matches && volume.state in setOf(Environment.MEDIA_MOUNTED, Environment.MEDIA_MOUNTED_READ_ONLY)
+        }
+    }
+
+    private fun rootName(uri: Uri, fallback: String): String? {
+        val columns = arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE)
+        val result = resolver.query(uri, columns, null, null, null)
+        if (result != null) {
+            return result.use { cursor ->
+                if (cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING) || cursor.extras.containsKey(DocumentsContract.EXTRA_ERROR)) {
+                    throw IOException("Folder provider unavailable")
+                }
+                if (!cursor.moveToFirst()) return@use null
+                val mimeColumn = cursor.getColumnIndex(Document.COLUMN_MIME_TYPE)
+                val mime = if (mimeColumn >= 0) cursor.getString(mimeColumn) else null
+                if (mime == null) throw IOException("Folder provider did not report a document type")
+                if (mime != Document.MIME_TYPE_DIR) return@use null
+                val nameColumn = cursor.getColumnIndex(Document.COLUMN_DISPLAY_NAME)
+                if (nameColumn >= 0) cursor.getString(nameColumn).orEmpty().ifBlank { fallback } else fallback
+            }
+        }
+        // DocumentsProvider can swallow FileNotFoundException from query(). A path lookup can report
+        // it explicitly. Providers without path support remain in the retry state.
+        DocumentsContract.findDocumentPath(resolver, uri)
+        throw IOException("Folder provider unavailable")
     }
 
     private suspend fun scanFolder(
@@ -100,7 +161,12 @@ class FolderRepository @Inject constructor(@ApplicationContext context: Context)
         while (queue.isNotEmpty() && remaining > 0) {
             currentCoroutineContext().ensureActive()
             val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, queue.removeFirst())
-            resolver.query(children, CHILD_COLUMNS, null, null, null)?.use { cursor ->
+            val result = resolver.query(children, CHILD_COLUMNS, null, null, null)
+                ?: throw IOException("Folder provider unavailable")
+            result.use { cursor ->
+                if (cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING) || cursor.extras.containsKey(DocumentsContract.EXTRA_ERROR)) {
+                    throw IOException("Folder provider unavailable")
+                }
                 while (remaining > 0 && cursor.moveToNext()) {
                     currentCoroutineContext().ensureActive()
                     remaining--

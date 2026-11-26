@@ -228,6 +228,7 @@ internal fun FolderRow(
     onSearchEnabled: (Boolean) -> Unit,
     onRefresh: () -> Unit,
     onRemove: (String) -> Unit,
+    onReconnect: (android.net.Uri) -> Unit,
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = EzSpacing.Gutter, vertical = 4.dp),
@@ -260,6 +261,11 @@ internal fun FolderRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                when (folder.access) {
+                    com.xfiles.core.documents.FolderAccess.Available -> Unit
+                    com.xfiles.core.documents.FolderAccess.Reconnect -> EzTextButton("Reconnect", { onReconnect(folder.uri) })
+                    com.xfiles.core.documents.FolderAccess.Retry -> EzTextButton("Retry", onRefresh)
+                }
                 BarIconButton(EzIcons.Close, "Remove ${folder.name}", { onRemove(folder.uri.toString()) }, tint = EzColors.TextSecondary)
             }
         }

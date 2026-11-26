@@ -50,11 +50,13 @@ data class LibraryListing(
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val documents: DocumentRepository,
+    private val progress: com.xfiles.core.documents.FileProgress,
     private val folders: FolderRepository,
     private val search: LibrarySearchRepository,
     private val conversions: ConversionRepository,
 ) : ViewModel() {
     val recents = documents.recents
+    val lastImage = progress.lastImage
     private val printRequests = Channel<PrintRequest>(Channel.BUFFERED)
     /** Print previews ready for the system print screen, or refusals to show; collected while the library is shown. */
     val prints = printRequests.receiveAsFlow()
@@ -70,10 +72,12 @@ class LibraryViewModel @Inject constructor(
     private val mutableSearchEnabled = MutableStateFlow(false)
     val searchEnabled = mutableSearchEnabled.asStateFlow()
     private var scan: Job? = null
+    private var resumedOnce = false
+    private var refreshAfterScan = false
     private var queryJob: Job? = null
 
     private val query = MutableStateFlow("")
-    private val mutableCategory = MutableStateFlow(LibraryCategory.All)
+    private val mutableCategory = MutableStateFlow(LibraryCategory.entries.firstOrNull { it.name == progress.read("library", "category") } ?: LibraryCategory.All)
     /** The selected filter chip. */
     val category = mutableCategory.asStateFlow()
 
@@ -98,7 +102,12 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun refresh() = updateFolders()
-    fun addFolder(uri: Uri) = updateFolders { folders.link(uri) }
+    fun refreshOnReturn() {
+        if (scan?.isActive != true) refresh()
+        else if (resumedOnce) refreshAfterScan = true
+        resumedOnce = true
+    }
+    fun addFolder(uri: Uri, replacing: Uri? = null) = updateFolders { folders.link(uri, replacing) }
     fun removeFolder(uri: Uri) = updateFolders { folders.unlink(uri) }
 
     fun clearRecents() {
@@ -130,6 +139,7 @@ class LibraryViewModel @Inject constructor(
 
     fun setCategory(value: LibraryCategory) {
         mutableCategory.value = value
+        progress.write("library", "category", value.name)
     }
 
     /** Files shared into Xfiles beyond the first one: they go to Recent, so they can be opened from the library. */
@@ -207,6 +217,10 @@ class LibraryViewModel @Inject constructor(
                 mutableLibrary.value.copy(scanning = false, error = "The folder could not be updated. Try selecting it again.")
             }
             documents.loadRecents()
+            if (refreshAfterScan) {
+                refreshAfterScan = false
+                refresh()
+            }
         }
     }
 

@@ -42,7 +42,11 @@ internal fun MediaDetailsSheet(file: FileEntry, player: Player, onDismiss: () ->
         if (size.width > 0 && size.height > 0) add("Resolution" to "${size.width} × ${size.height}")
         codecsOf(player).takeIf { it.isNotEmpty() }?.let { add("Codecs" to it.joinToString(", ")) }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
+    ) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

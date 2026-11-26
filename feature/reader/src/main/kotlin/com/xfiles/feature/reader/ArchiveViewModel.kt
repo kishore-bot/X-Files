@@ -65,6 +65,7 @@ data class PasswordPrompt(val wrong: Boolean)
 @HiltViewModel
 class ArchiveViewModel @Inject constructor(
     private val archives: ArchiveRepository,
+    private val progress: com.xfiles.core.documents.FileProgress,
     private val saved: SavedStateHandle,
 ) : ViewModel() {
 
@@ -94,6 +95,7 @@ class ArchiveViewModel @Inject constructor(
         get() = saved[KEY_FOLDER] ?: ""
         set(value) {
             saved[KEY_FOLDER] = value
+            archive?.let { progress.write(it.toString(), "archive-folder", value) }
         }
 
     private var savedQuery: String
@@ -109,12 +111,15 @@ class ArchiveViewModel @Inject constructor(
             return
         }
         archive = uri
+        saved[KEY_FOLDER] = progress.read(uri.toString(), "archive-folder").orEmpty()
         tree = null
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             mutableState.value = ArchiveUiState.Loading
             try {
-                tree = archives.index(uri)
+                val indexed = archives.index(uri)
+                tree = indexed
+                if (indexed.find(folder)?.isDirectory != true) folder = ""
                 browse()
             } catch (failure: ArchiveException) {
                 mutableState.value = ArchiveUiState.Failed(messageFor(failure.reason))

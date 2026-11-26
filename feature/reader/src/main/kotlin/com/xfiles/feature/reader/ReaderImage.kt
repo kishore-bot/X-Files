@@ -75,11 +75,24 @@ internal fun ReaderImage(
     marks: List<PdfBox> = emptyList(),
     /** Filter for the page's pixels (the page style's dark or sepia tone); null draws the page as it is. */
     colorFilter: ColorFilter? = null,
+    pictureKey: String? = null,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    var zoom by remember(bitmap, rotation) { mutableFloatStateOf(1f) }
-    var offset by remember(bitmap, rotation) { mutableStateOf(Offset.Zero) }
+    val progress = LocalViewerProgress.current
+    val settings = remember(progress?.store, pictureKey, rotation) {
+        pictureKey?.let { progress?.store?.read(it, "image-transform:$rotation") }?.split(':').orEmpty()
+    }
+    fun component(index: Int, fallback: Float) = settings.getOrNull(index)?.toFloatOrNull()?.takeIf { it.isFinite() } ?: fallback
+    var zoom by remember(bitmap, rotation) { mutableFloatStateOf(component(0, 1f).coerceIn(1f, 5f)) }
+    var offset by remember(bitmap, rotation) { mutableStateOf(Offset(component(1, 0f), component(2, 0f))) }
+    if (pictureKey != null && progress != null) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalViewerProgress provides remember(progress.store, pictureKey) { ViewerProgress(progress.store, pictureKey) },
+        ) {
+            SaveViewerProgress("image-transform:$rotation") { "$zoom:${offset.x}:${offset.y}" }
+        }
+    }
 
     val turned = rotation % 180 != 0
     val width = if (turned) bitmap.height else bitmap.width
@@ -112,6 +125,12 @@ internal fun ReaderImage(
         return Offset(pan.x.coerceIn(-horizontal, horizontal), pan.y.coerceIn(-vertical, vertical))
     }
 
+    androidx.compose.runtime.LaunchedEffect(viewport, rotation) {
+        if (viewport != IntSize.Zero) {
+            offset = clamp(offset, zoom)
+            onZoomChanged(zoom > 1.001f)
+        }
+    }
     Box(
         modifier.clipToBounds().onSizeChanged { viewport = it }
             .pointerInput(bitmap, rotation, viewport) {

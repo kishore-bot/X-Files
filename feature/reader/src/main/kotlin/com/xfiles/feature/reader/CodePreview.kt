@@ -1,6 +1,5 @@
 package com.xfiles.feature.reader
 
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -15,8 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
@@ -102,10 +101,19 @@ internal fun CodePreview(text: String, fileName: String) {
                     }) { Text("Collapse all") }
                 }
             }
-            val codeList = rememberLazyListState()
+            val progress = LocalViewerProgress.current
+            val saved = remember(progress) { progress?.read("code")?.split(':').orEmpty() }
+            val line = (saved.getOrNull(0)?.toIntOrNull() ?: 0).coerceIn(0, lines.lastIndex)
+            val index = visible.binarySearch(line).let { if (it >= 0) it else (-it - 2).coerceAtLeast(0) }
+            val codeList = rememberLazyListState(index, saved.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0) ?: 0)
+            SaveViewerProgress("code") {
+                visible.getOrNull(codeList.firstVisibleItemIndex)?.let { "$it:${codeList.firstVisibleItemScrollOffset}" }
+                    .takeIf { codeList.layoutInfo.totalItemsCount > 0 }
+            }
+            val horizontal = rememberViewerScroll("code-x")
             RegisterViewerScroll(codeList) { LazyScroll(codeList) }
             SelectionContainer(Modifier.weight(1f)) {
-                LazyColumn(state = codeList, modifier = Modifier.horizontalScroll(rememberScrollState()), contentPadding = PaddingValues(vertical = 12.dp)) {
+                LazyColumn(state = codeList, modifier = Modifier.horizontalScroll(horizontal), contentPadding = PaddingValues(vertical = 12.dp)) {
                     items(visible, key = { it }) { index ->
                         val fold: CodeFold? = folds[index]
                         val isCollapsed = index in collapsed

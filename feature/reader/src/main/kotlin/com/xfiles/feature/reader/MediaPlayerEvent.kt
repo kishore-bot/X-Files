@@ -24,7 +24,7 @@ internal sealed interface MediaPlayerEvent {
     /** Long press: double speed while held. */
     data class Boost(val on: Boolean) : MediaPlayerEvent
     data object ToggleRepeat : MediaPlayerEvent
-    data object CycleScale : MediaPlayerEvent
+    data class SetVideoScale(val scale: VideoScale) : MediaPlayerEvent
     data object ToggleRotationLock : MediaPlayerEvent
     data object ToggleControls : MediaPlayerEvent
 

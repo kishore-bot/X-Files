@@ -149,7 +149,7 @@ private fun GalleryPage(
                 modifier = Modifier.padding(24.dp),
             )
             is GalleryPageState.Shown ->
-                // Keyed on [settled]: a page that stops being the current one drops its zoom, so it returns at 1x.
+                // Only the settled page reads and writes its durable zoom and pan.
                 key(settled) {
                     ReaderImage(
                         bitmap = shown.bitmap,
@@ -160,6 +160,7 @@ private fun GalleryPage(
                         regions = if (settled) regions else null,
                         animated = animation,
                         animating = settled,
+                        pictureKey = entry.uri.toString().takeIf { settled },
                     )
                 }
         }

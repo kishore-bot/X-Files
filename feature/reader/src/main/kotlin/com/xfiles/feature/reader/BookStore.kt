@@ -33,10 +33,11 @@ class BookStore @Inject constructor(@ApplicationContext context: Context) {
         write(SETTINGS_FILE, ReadingSettings.encode(settings))
     }
 
-    suspend fun loadReadingMode(): BookReadingMode = BookReadingMode.fromStored(read(MODE_FILE))
+    suspend fun loadReadingMode(key: String): BookReadingMode =
+        BookReadingMode.fromStored(read("$key-mode.txt") ?: read(MODE_FILE))
 
-    suspend fun saveReadingMode(mode: BookReadingMode) {
-        write(MODE_FILE, mode.name)
+    suspend fun saveReadingMode(key: String, mode: BookReadingMode) {
+        write("$key-mode.txt", mode.name)
     }
 
     private suspend fun read(name: String): String? = withContext(lane) {

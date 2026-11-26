@@ -1,6 +1,5 @@
 package com.xfiles.feature.reader
 
-import androidx.compose.foundation.lazy.rememberLazyListState
 import android.graphics.BitmapFactory
 import android.text.format.Formatter
 import androidx.compose.foundation.Image
@@ -87,7 +86,7 @@ private fun DocumentBlocks(document: StructuredDocument) {
     // Consecutive table rows form one table item, so a table scrolls and aligns as a single unit.
     val items = remember(document) { documentItems(document.blocks) }
     val page = Modifier.fillMaxSize().pagePanel()
-    val blocksList = rememberLazyListState()
+    val blocksList = rememberViewerList("blocks", items.size + if (document.truncated) 1 else 0)
     RegisterViewerScroll(blocksList) { LazyScroll(blocksList) }
     Box(page, contentAlignment = Alignment.TopCenter) {
         LazyColumn(

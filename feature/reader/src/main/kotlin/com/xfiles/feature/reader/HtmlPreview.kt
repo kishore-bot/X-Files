@@ -8,6 +8,7 @@ import android.net.Uri
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import androidx.compose.runtime.mutableIntStateOf
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -61,6 +62,11 @@ internal fun HtmlPreview(
     val pageUrl = "about:blank"
     var pendingLink by rememberSaveable(html) { mutableStateOf<String?>(null) }
     val siblingHandler by rememberUpdatedState(onOpenSibling)
+    val progress = LocalViewerProgress.current
+    var readingOffset by remember(progress) { mutableIntStateOf(progress?.number("html-y")?.coerceAtLeast(0) ?: 0) }
+    var restoring by remember { mutableStateOf(true) }
+    var restoreGeneration by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    SaveViewerProgress("html-y") { readingOffset.toString().takeUnless { restoring } }
     // The assistant pages this web view through the handle while it is on screen.
     val webHandle = remember { WebViewHandle() }
     val registerScroll = LocalViewerScroll.current
@@ -94,7 +100,23 @@ internal fun HtmlPreview(
                         loadWithOverviewMode = true
                         useWideViewPort = true
                     }
+                    setOnScrollChangeListener { _, _, y, _, _ ->
+                        if (!restoring) readingOffset = y
+                    }
                     webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView, url: String?) {
+                            val generation = restoreGeneration
+                            view.postVisualStateCallback(generation, object : WebView.VisualStateCallback() {
+                                override fun onComplete(requestId: Long) {
+                                    if (requestId == restoreGeneration) {
+                                        view.scrollTo(0, readingOffset)
+                                        readingOffset = view.scrollY
+                                        restoring = false
+                                    }
+                                }
+                            })
+                        }
+
                         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                             if (request.url.scheme == "data") null else WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
 
@@ -121,6 +143,8 @@ internal fun HtmlPreview(
             update = { view ->
                 if (view.tag != pageHtml.hashCode()) {
                     view.tag = pageHtml.hashCode()
+                    restoring = true
+                    restoreGeneration++
                     view.loadDataWithBaseURL(pageUrl, pageHtml, "text/html", "utf-8", null)
                 }
             },

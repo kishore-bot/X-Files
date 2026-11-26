@@ -15,7 +15,7 @@
 //! the format specifies.
 
 use aes::cipher::block_padding::NoPadding;
-use aes::cipher::{BlockCipher, BlockDecrypt, BlockDecryptMut, KeyInit, KeyIvInit, consts::U16};
+use aes::cipher::{Block, BlockCipherDecrypt, BlockModeDecrypt, KeyInit, KeyIvInit, consts::U16};
 use aes::{Aes128, Aes192, Aes256};
 use document_core::{CancelToken, EngineError, ErrorKind, Result};
 use sha1::Sha1;
@@ -170,7 +170,7 @@ fn fit(bytes: &[u8], len: usize) -> Secret {
     out
 }
 
-fn ecb<C: BlockDecrypt + KeyInit + BlockCipher<BlockSize = U16>>(
+fn ecb<C: BlockCipherDecrypt<BlockSize = U16> + KeyInit>(
     key: &[u8],
     data: &mut [u8],
     cancel: &CancelToken,
@@ -178,7 +178,11 @@ fn ecb<C: BlockDecrypt + KeyInit + BlockCipher<BlockSize = U16>>(
     let cipher = C::new_from_slice(key).map_err(|_| damaged("the key size is not valid"))?;
     for chunk in data.chunks_mut(1024 * 1024) {
         cancel.check()?;
-        cipher.decrypt_padded::<NoPadding>(chunk).map_err(|_| damaged("the data is not whole blocks"))?;
+        let (blocks, remainder) = chunk.as_chunks_mut::<BLOCK>();
+        if !remainder.is_empty() {
+            return Err(damaged("the data is not whole blocks"));
+        }
+        cipher.decrypt_blocks(Block::<C>::cast_slice_from_core_mut(blocks));
     }
     Ok(())
 }
@@ -192,13 +196,13 @@ fn ecb_decrypt(key: &[u8], data: &mut [u8], cancel: &CancelToken) -> Result<()> 
     }
 }
 
-fn cbc<C: BlockDecryptMut + KeyInit + BlockCipher<BlockSize = U16>>(
+fn cbc<C: BlockCipherDecrypt<BlockSize = U16> + KeyInit>(
     key: &[u8],
     iv: &[u8],
     data: &mut [u8],
 ) -> Result<()> {
     let decryptor = cbc::Decryptor::<C>::new_from_slices(key, iv).map_err(|_| damaged("the key size is not valid"))?;
-    decryptor.decrypt_padded_mut::<NoPadding>(data).map_err(|_| damaged("the data is not whole blocks"))?;
+    decryptor.decrypt_padded::<NoPadding>(data).map_err(|_| damaged("the data is not whole blocks"))?;
     Ok(())
 }
 
@@ -498,7 +502,7 @@ pub(crate) mod testing {
     //! Encrypts fixtures with the same primitives. This shows the two halves
     //! agree with each other and with the spec as read; it is not a file saved
     //! by Office.
-    use aes::cipher::{BlockEncrypt, BlockEncryptMut};
+    use aes::cipher::{BlockCipherEncrypt, BlockModeEncrypt};
 
     use super::*;
     use crate::cfb::testing::cfb;
@@ -522,8 +526,10 @@ pub(crate) mod testing {
     }
 
     fn ecb_encrypt(key: &[u8], data: &mut [u8]) {
-        fn run<C: BlockEncrypt + KeyInit + BlockCipher<BlockSize = U16>>(key: &[u8], data: &mut [u8]) {
-            C::new_from_slice(key).unwrap().encrypt_padded_mut::<NoPadding>(data, data.len()).unwrap();
+        fn run<C: BlockCipherEncrypt<BlockSize = U16> + KeyInit>(key: &[u8], data: &mut [u8]) {
+            let (blocks, remainder) = data.as_chunks_mut::<BLOCK>();
+            assert!(remainder.is_empty());
+            C::new_from_slice(key).unwrap().encrypt_blocks(Block::<C>::cast_slice_from_core_mut(blocks));
         }
         match key.len() {
             16 => run::<Aes128>(key, data),
@@ -533,9 +539,9 @@ pub(crate) mod testing {
     }
 
     fn cbc_encrypt(key: &[u8], iv: &[u8], data: &mut [u8]) {
-        fn run<C: BlockEncryptMut + KeyInit + BlockCipher<BlockSize = U16>>(key: &[u8], iv: &[u8], data: &mut [u8]) {
+        fn run<C: BlockCipherEncrypt<BlockSize = U16> + KeyInit>(key: &[u8], iv: &[u8], data: &mut [u8]) {
             let len = data.len();
-            cbc::Encryptor::<C>::new_from_slices(key, iv).unwrap().encrypt_padded_mut::<NoPadding>(data, len).unwrap();
+            cbc::Encryptor::<C>::new_from_slices(key, iv).unwrap().encrypt_padded::<NoPadding>(data, len).unwrap();
         }
         match key.len() {
             16 => run::<Aes128>(key, iv, data),

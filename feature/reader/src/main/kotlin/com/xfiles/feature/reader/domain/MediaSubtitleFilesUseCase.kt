@@ -29,6 +29,25 @@ class MediaSubtitleFilesUseCase @Inject constructor(
         }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Subtitles"
     }
 
+    suspend fun keepReadAccess(uri: Uri) = withContext(Dispatchers.IO) {
+        try {
+            resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Some providers allow the subtitle only for the current session.
+        }
+    }
+
+    suspend fun readable(uri: Uri): MediaSubtitleFile? = withContext(Dispatchers.IO) {
+        val readable = try {
+            resolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+        } catch (_: SecurityException) {
+            false
+        } catch (_: java.io.FileNotFoundException) {
+            false
+        }
+        if (readable) MediaSubtitleFile(uri, displayName(uri)).takeIf { subtitleMimeFor(it.name) != null } else null
+    }
+
     /** Subtitle files beside [video], found through the document provider's folder listing. */
     suspend fun nearby(video: Uri): List<MediaSubtitleFile> = withContext(Dispatchers.IO) {
         val authority = video.authority ?: return@withContext emptyList()

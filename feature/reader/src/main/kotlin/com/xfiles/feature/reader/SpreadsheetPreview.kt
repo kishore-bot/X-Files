@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -102,9 +100,13 @@ internal fun SpreadsheetPreview(
     onEdited: () -> Unit = {},
 ) {
     val workbook = remember(document.blocks) { toWorkbook(document.blocks) }
-    var selected by rememberSaveable { mutableIntStateOf(0) }
-    var freezeRow by rememberSaveable { mutableStateOf(false) }
-    var freezeColumn by rememberSaveable { mutableStateOf(false) }
+    val progress = LocalViewerProgress.current
+    var selected by rememberSaveable { mutableIntStateOf(progress?.number("sheet") ?: 0) }
+    var freezeRow by rememberSaveable { mutableStateOf(progress?.read("sheet-freeze-row") == "true") }
+    var freezeColumn by rememberSaveable { mutableStateOf(progress?.read("sheet-freeze-column") == "true") }
+    SaveViewerProgress("sheet") { selected.coerceIn(0, workbook.sheets.lastIndex.coerceAtLeast(0)).toString() }
+    SaveViewerProgress("sheet-freeze-row") { freezeRow.toString() }
+    SaveViewerProgress("sheet-freeze-column") { freezeColumn.toString() }
     val sheet = workbook.sheets.getOrNull(selected) ?: workbook.sheets.firstOrNull()
     if (sheet == null) {
         Text("This workbook has no readable rows.")
@@ -160,19 +162,21 @@ private fun ColumnScope.SheetGrid(
     onEdited: () -> Unit,
 ) {
     val columns = sheet.columnCount()
-    var firstColumn by rememberSaveable { mutableIntStateOf(0) }
+    val progress = LocalViewerProgress.current
+    val field = "sheet:${sheet.title}"
+    var firstColumn by rememberSaveable { mutableIntStateOf(progress?.number("$field:column") ?: 0) }
+    SaveViewerProgress("$field:column") { firstColumn.coerceIn(0, (columns - frozenColumns - 1).coerceAtLeast(0)).toString() }
     val scrollable = (columns - frozenColumns).coerceAtLeast(0)
     val start = (frozenColumns + firstColumn.coerceIn(0, maxOf(scrollable - 1, 0)))
     val end = (start + COLUMNS_PER_VIEW).coerceAtMost(columns)
     val haptics = rememberHaptics()
-    val horizontal = rememberScrollState()
-    val vertical = rememberLazyListState()
+    val horizontal = androidx.compose.runtime.key(start) { rememberViewerScroll("$field:x:$start") }
+    val vertical = rememberViewerList("$field:rows", (sheet.rows.size - frozenRows).coerceAtLeast(0))
     val leftWidth = (LABEL_WIDTH + CELL_WIDTH * frozenColumns).dp
     val rightWidth = (CELL_WIDTH * (end - start).coerceAtLeast(0)).dp
     val header = remember(sheet, frozenRows) { sheet.rows.take(frozenRows) }
     val body = remember(sheet, frozenRows) { sheet.rows.drop(frozenRows) }
     var editing by remember { mutableStateOf<EditTarget?>(null) }
-    LaunchedEffect(start) { horizontal.scrollTo(0) }
     // The assistant's scroll commands move the rows of this sheet while it is on screen.
     val registerScroll = LocalViewerScroll.current
     DisposableEffect(vertical, registerScroll) {

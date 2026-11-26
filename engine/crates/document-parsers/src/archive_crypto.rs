@@ -17,8 +17,7 @@
 
 use std::io::{self, BufReader, Read};
 
-use aes::cipher::generic_array::GenericArray;
-use aes::cipher::{BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 use document_core::{CancelToken, EngineError, ErrorKind, Limits, ReadSeek};
 use flate2::read::DeflateDecoder;
@@ -240,11 +239,10 @@ impl AesKey {
     }
 
     fn encrypt(&self, block: &mut [u8; 16]) {
-        let b = GenericArray::from_mut_slice(&mut block[..]);
         match self {
-            Self::A128(c) => c.encrypt_block(b),
-            Self::A192(c) => c.encrypt_block(b),
-            Self::A256(c) => c.encrypt_block(b),
+            Self::A128(c) => c.encrypt_block(block.into()),
+            Self::A192(c) => c.encrypt_block(block.into()),
+            Self::A256(c) => c.encrypt_block(block.into()),
         }
     }
 }

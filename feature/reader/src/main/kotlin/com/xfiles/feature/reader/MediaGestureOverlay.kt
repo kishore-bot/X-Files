@@ -60,12 +60,12 @@ internal fun GestureLevelPill(kind: MediaDrag, level: Float, modifier: Modifier 
  * recompose the whole player, only this layer.
  */
 @Composable
-internal fun BoxScope.GestureOverlay(drag: State<MediaDragState?>, total: Long, position: Long) {
+internal fun BoxScope.GestureOverlay(drag: State<MediaDragState?>, total: Long) {
     val gesture = drag.value ?: return
     when (gesture.kind) {
         MediaDrag.Brightness -> GestureLevelPill(gesture.kind, gesture.level, Modifier.align(Alignment.CenterStart).padding(start = 16.dp))
         MediaDrag.Volume -> GestureLevelPill(gesture.kind, gesture.level, Modifier.align(Alignment.CenterEnd).padding(end = 16.dp))
-        MediaDrag.Seek -> if (total > 0L) ScrubBubble(gesture.positionMs, total, position)
+        MediaDrag.Seek -> if (total > 0L) ScrubBubble(gesture.positionMs, total, gesture.startMs)
     }
 }
 

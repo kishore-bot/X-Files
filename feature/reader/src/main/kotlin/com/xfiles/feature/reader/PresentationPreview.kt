@@ -151,7 +151,9 @@ internal fun PresentationPreview(document: StructuredDocument, slideEditor: Slid
     val slides = remember(document.blocks) { groupSlides(document.blocks) }
     val scope = rememberCoroutineScope()
     // The deck position is shared by the viewer and the presenter, so either can hand over to the other.
-    var current by rememberSaveable { mutableIntStateOf(0) }
+    val progress = LocalViewerProgress.current
+    var current by rememberSaveable { mutableIntStateOf(progress?.number("slide") ?: 0) }
+    SaveViewerProgress("slide") { current.coerceIn(0, slides.lastIndex.coerceAtLeast(0)).toString() }
     var step by rememberSaveable { mutableIntStateOf(0) }
     var presenting by rememberSaveable { mutableStateOf(false) }
     var sorting by rememberSaveable { mutableStateOf(false) }

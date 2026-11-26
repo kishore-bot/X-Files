@@ -37,7 +37,11 @@ internal fun MediaPlaybackSheet(
     val haptics = rememberMediaHaptics()
     var volume by remember { mutableFloatStateOf(device.volume()) }
     var brightness by remember { mutableFloatStateOf(device.brightness()) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
+    ) {
         Column(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

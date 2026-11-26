@@ -62,10 +62,15 @@ internal fun BookPreview(document: StructuredDocument, onClose: () -> Unit = {},
     val selection = remember(key, hapticFeedback) { BookSelectionController(probes, selectionState, hapticFeedback) }
 
     // The block the reader is at; set by whichever view is showing, and saved as the position.
-    var current by remember(key) { mutableIntStateOf(annotations.position) }
+    val viewerProgress = LocalViewerProgress.current
+    val initial = remember(key) {
+        (viewerProgress?.number("epub-block", annotations.position) ?: annotations.position).coerceIn(0, blocks.lastIndex)
+    }
+    var current by remember(key) { mutableIntStateOf(initial) }
+    SaveViewerProgress("epub-block") { current.toString() }
     val currentBlock by rememberUpdatedState(current)
     // A block to bring into view; cleared once it is shown.
-    var jumpTo by remember(key) { mutableStateOf<Int?>(annotations.position.takeIf { it > 0 }) }
+    var jumpTo by remember(key) { mutableStateOf<Int?>(initial.takeIf { it > 0 && state.mode == BookReadingMode.Paged }) }
     val nav = remember(key) { BookPageNav() }
     val onBlock: (Int) -> Unit = { block ->
         current = block

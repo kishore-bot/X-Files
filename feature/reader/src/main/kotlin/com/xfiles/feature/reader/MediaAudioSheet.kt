@@ -28,7 +28,11 @@ internal fun MediaAudioSheet(
     onChoose: (MediaAudioTrack) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
+    ) {
         Column(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),

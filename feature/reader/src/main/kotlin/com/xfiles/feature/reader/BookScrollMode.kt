@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +41,13 @@ internal fun BookScroll(
     onJumpHandled: () -> Unit,
     onBlock: (Int) -> Unit,
 ) {
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initial.coerceIn(0, blocks.lastIndex))
+    val progress = LocalViewerProgress.current
+    val saved = remember(progress) { progress?.read("epub-scroll")?.split(':').orEmpty() }
+    val offset = if (saved.getOrNull(0)?.toIntOrNull() == initial) saved.getOrNull(1)?.toIntOrNull() ?: 0 else 0
+    val listState = rememberLazyListState(initial.coerceIn(0, blocks.lastIndex), offset.coerceAtLeast(0))
+    SaveViewerProgress("epub-scroll") {
+        "${listState.firstVisibleItemIndex}:${listState.firstVisibleItemScrollOffset}"
+    }
     RegisterViewerScroll(listState) { LazyScroll(listState) }
     LaunchedEffect(jumpTo) {
         val target = jumpTo ?: return@LaunchedEffect

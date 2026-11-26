@@ -24,18 +24,14 @@ data class ReaderUiState(
     val showOffice: Boolean = false,
     val showGrid: Boolean = false,
     val showPageStyle: Boolean = false,
-    /** The floating action button's menu is expanded. */
+    /** The toolbar settings popup is expanded. */
     val actionsOpen: Boolean = false,
-    /** The floating action button is shown; it hides while the reader scrolls down and returns on scroll up or tap. */
-    val actionsVisible: Boolean = true,
     /** PDF continuous view: two pages side by side (false = one column). */
     val pdfTwoUp: Boolean = false,
     /** PDF zoom in percent, from [PDF_MIN_ZOOM] to [PDF_MAX_ZOOM]; 100 fits a page to the width. */
     val pdfZoom: Int = 100,
-) {
-    /** This state for [key], or a fresh one when [key] is another document. Read before the document's first event. */
-    fun forDocument(key: String?): ReaderUiState = if (key == documentKey) this else ReaderUiState(documentKey = key)
-}
+    val visiblePdfPage: Int? = null,
+)
 
 /** Everything the reader screen can ask its state holder to change. */
 sealed interface ReaderUiEvent {
@@ -54,11 +50,9 @@ sealed interface ReaderUiEvent {
     data class SetGrid(val shown: Boolean) : ReaderUiEvent
     data class SetPageStyleSheet(val shown: Boolean) : ReaderUiEvent
     data class SetActionsOpen(val open: Boolean) : ReaderUiEvent
-    data class SetActionsVisible(val shown: Boolean) : ReaderUiEvent
-    /** A tap on the content: shows the action button if hidden, hides it if shown. Reads the current state, not a stale copy. */
-    data object ToggleActionsVisible : ReaderUiEvent
     data class SetPdfTwoUp(val shown: Boolean) : ReaderUiEvent
     data class SetPdfZoom(val percent: Int) : ReaderUiEvent
+    data class SetVisiblePdfPage(val page: Int?) : ReaderUiEvent
 }
 
 /** Applies [event] to this state. Pure: the same inputs always give the same copy. */
@@ -75,9 +69,8 @@ internal fun ReaderUiState.reduce(event: ReaderUiEvent): ReaderUiState = when (e
     is ReaderUiEvent.SetOffice -> copy(showOffice = event.shown)
     is ReaderUiEvent.SetGrid -> copy(showGrid = event.shown)
     is ReaderUiEvent.SetPageStyleSheet -> copy(showPageStyle = event.shown, actionsOpen = false)
-    is ReaderUiEvent.SetActionsOpen -> copy(actionsOpen = event.open, actionsVisible = true)
-    is ReaderUiEvent.SetActionsVisible -> copy(actionsVisible = event.shown, actionsOpen = if (event.shown) actionsOpen else false)
-    ReaderUiEvent.ToggleActionsVisible -> copy(actionsVisible = !actionsVisible, actionsOpen = false)
+    is ReaderUiEvent.SetActionsOpen -> copy(actionsOpen = event.open)
     is ReaderUiEvent.SetPdfTwoUp -> copy(pdfTwoUp = event.shown)
+    is ReaderUiEvent.SetVisiblePdfPage -> copy(visiblePdfPage = event.page)
     is ReaderUiEvent.SetPdfZoom -> copy(pdfZoom = event.percent.coerceIn(PDF_MIN_ZOOM, PDF_MAX_ZOOM))
 }

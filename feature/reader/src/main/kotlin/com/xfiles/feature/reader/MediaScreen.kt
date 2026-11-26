@@ -5,6 +5,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +18,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import kotlinx.coroutines.delay
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -28,14 +31,15 @@ import com.xfiles.core.documents.FileEntry
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit) {
+internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit, onFily: (() -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val activity = LocalActivity.current
     val pip = LocalMediaPip.current
+    val progress = LocalViewerProgress.current
     var player by remember(file.uri) { mutableStateOf<ExoPlayer?>(null) }
     // Survives rotation and process death, so the video picks up where it was instead of restarting.
-    var resumeAt by rememberSaveable(file.uri) { mutableLongStateOf(0L) }
+    var resumeAt by rememberSaveable(file.uri) { mutableLongStateOf(progress?.read("media-at")?.toLongOrNull()?.coerceAtLeast(0) ?: 0L) }
     var resumePlaying by rememberSaveable(file.uri) { mutableStateOf(false) }
 
     // The orientation the reader had comes back when the player closes.
@@ -57,6 +61,16 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit) {
             .setSeekBackIncrementMs(SKIP_MS)
             .setSeekForwardIncrementMs(SKIP_MS)
             .build()
+        val clampResume = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                val duration = player.duration
+                if (player.isCurrentMediaItemSeekable && duration > 0L) {
+                    player.removeListener(this)
+                    if (player.currentPosition > duration) player.seekTo(duration)
+                }
+            }
+        }
+        activePlayer.addListener(clampResume)
         activePlayer.setAudioAttributes(AudioAttributes.DEFAULT, true)
         activePlayer.setHandleAudioBecomingNoisy(true)
         activePlayer.setMediaItem(MediaItem.fromUri(file.uri), resumeAt)
@@ -64,7 +78,10 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit) {
         activePlayer.prepare()
         player = activePlayer
         fun keepPlace() {
-            resumeAt = activePlayer.currentPosition.coerceAtLeast(0)
+            if (activePlayer.playerError == null) {
+                resumeAt = activePlayer.resumePosition()
+                progress?.save("media-at", resumeAt.toString())
+            }
             // Rotation keeps playing; leaving the app comes back paused.
             resumePlaying = activePlayer.playWhenReady && activity?.isChangingConfigurations == true
         }
@@ -79,17 +96,32 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit) {
         onDispose {
             lifecycle.removeObserver(observer)
             keepPlace()
+            activePlayer.removeListener(clampResume)
             activePlayer.release()
             player = null
         }
     }
 
     val activePlayer = player
+    LaunchedEffect(activePlayer, progress) {
+        if (activePlayer == null || progress == null) return@LaunchedEffect
+        while (true) {
+            delay(4_000)
+            if (activePlayer.playerError == null && activePlayer.playbackState != Player.STATE_IDLE) {
+                progress.save("media-at", activePlayer.resumePosition().toString())
+            }
+        }
+    }
     if (activePlayer == null) {
         CircularProgressIndicator()
     } else {
-        MediaPlayerContent(activePlayer, video, file, onClose)
+        MediaPlayerContent(activePlayer, video, file, onClose, onFily)
     }
+}
+
+private fun Player.resumePosition(): Long {
+    val position = currentPosition.coerceAtLeast(0L)
+    return if (duration > 0L) position.coerceAtMost(duration) else position
 }
 
 private const val SKIP_MS = 10_000L

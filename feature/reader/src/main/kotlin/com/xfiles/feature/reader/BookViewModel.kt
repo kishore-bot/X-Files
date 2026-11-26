@@ -142,7 +142,7 @@ class BookViewModel @Inject constructor(
         viewModelScope.launch {
             val defaults = store.loadSettings()
             val annotations = store.loadAnnotations(key)
-            val mode = store.loadReadingMode()
+            val mode = store.loadReadingMode(key)
             mutableState.update {
                 BookUiState(key = key, defaults = defaults, annotations = annotations, sheet = it.sheet, mode = mode)
             }
@@ -160,11 +160,12 @@ class BookViewModel @Inject constructor(
         }
     }
 
-    /** Changes the reading mode for every book, and writes it to the store. */
+    /** Saves the reading mode for the current book. */
     fun setMode(mode: BookReadingMode) {
+        val key = mutableState.value.key ?: return
         if (mutableState.value.mode == mode) return
         mutableState.update { it.copy(mode = mode) }
-        viewModelScope.launch { store.saveReadingMode(mode) }
+        viewModelScope.launch { store.saveReadingMode(key, mode) }
     }
 
     /**

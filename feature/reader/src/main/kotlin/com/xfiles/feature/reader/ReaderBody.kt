@@ -217,6 +217,7 @@ private fun ReaderPreview(
                 regions = rememberPictureRegions(state.file.uri),
                 animated = animation,
                 animating = true,
+                pictureKey = state.file.uri.toString(),
             )
         }
         is FilePreview.Pdf -> ReaderPdfPage(
@@ -224,7 +225,6 @@ private fun ReaderPreview(
             preview = preview,
             ui = ui,
             onEvent = onEvent,
-            rotation = rotation,
             markup = markup,
             pdfFind = pdfFind,
             pdfText = pdfText,

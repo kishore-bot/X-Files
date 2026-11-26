@@ -1,6 +1,5 @@
 package com.xfiles.feature.reader
 
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +66,11 @@ internal enum class JsonView(val label: String) {
 @Composable
 internal fun JsonTreePreview(root: JsonElement, raw: String) {
     val haptics = rememberHaptics()
-    var view by rememberSaveable { mutableStateOf(JsonView.Tree) }
+    val progress = LocalViewerProgress.current
+    var view by rememberSaveable {
+        mutableStateOf(JsonView.entries.firstOrNull { it.name == progress?.read("json-view") } ?: JsonView.Tree)
+    }
+    SaveViewerProgress("json-view") { view.name }
     // The expanded paths are an immutable set held in state, so every change is a new value to draw from.
     var expanded by remember(root) { mutableStateOf(setOf("$")) }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -106,9 +109,9 @@ internal fun JsonTreePreview(root: JsonElement, raw: String) {
                 expanded = if (path in expanded) expanded - path else expanded + path
                 haptics.tick()
             })
-            JsonView.Pretty -> JsonText(remember(root) { prettyJson(root) })
-            JsonView.Minified -> JsonText(remember(root) { root.toString() })
-            JsonView.Raw -> JsonText(raw)
+            JsonView.Pretty -> JsonText(remember(root) { prettyJson(root) }, JsonView.Pretty)
+            JsonView.Minified -> JsonText(remember(root) { root.toString() }, JsonView.Minified)
+            JsonView.Raw -> JsonText(raw, JsonView.Raw)
         }
     }
 }
@@ -117,7 +120,7 @@ internal fun JsonTreePreview(root: JsonElement, raw: String) {
 private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String) -> Unit) {
     val rows = remember(root, expanded) { jsonRows(root, expanded).take(MAX_ROWS).toList() }
     val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp)
-    val jsonList = rememberLazyListState()
+    val jsonList = rememberViewerList("json-tree", rows.size)
     RegisterViewerScroll(jsonList) { LazyScroll(jsonList) }
     Box(Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)) {
         LazyColumn(Modifier.fillMaxSize(), state = jsonList, contentPadding = PaddingValues(12.dp)) {
@@ -151,10 +154,10 @@ private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String
 
 /** Pretty, minified, or raw text: scrolls vertically and horizontally over the whole panel. */
 @Composable
-private fun JsonText(text: String) {
+private fun JsonText(text: String, view: JsonView) {
     val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
-    val vertical = rememberScrollState()
-    val horizontal = rememberScrollState()
+    val vertical = androidx.compose.runtime.key(view) { rememberViewerScroll("json-y:${view.name}") }
+    val horizontal = androidx.compose.runtime.key(view) { rememberViewerScroll("json-x:${view.name}") }
     RegisterViewerScroll(vertical) { ColumnScroll(vertical) }
     Box(
         Modifier.fillMaxSize()

@@ -24,7 +24,6 @@ internal fun ReaderPdfPage(
     preview: FilePreview.Pdf,
     ui: ReaderUiState,
     onEvent: (ReaderUiEvent) -> Unit,
-    rotation: Int,
     markup: PdfMarkupState,
     pdfFind: PdfFindState,
     pdfText: suspend (Int) -> PdfPageText?,
@@ -72,6 +71,7 @@ internal fun ReaderPdfPage(
                 textSource = ::textSource,
                 colorFilter = LocalPageStyle.current.pageFilter(),
                 onPage = onPage,
+                onVisiblePage = { onEvent(ReaderUiEvent.SetVisiblePdfPage(it)) },
                 onZoom = { onEvent(ReaderUiEvent.SetPdfZoom(it)) },
             )
         }

@@ -1,15 +1,11 @@
 package com.xfiles.feature.reader
 
-import kotlinx.coroutines.delay
 import android.graphics.Bitmap
 import android.graphics.drawable.AnimatedImageDrawable
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -133,15 +129,18 @@ fun ReaderScreen(
 
     val chromeVm: ReaderUiViewModel = hiltViewModel()
     val chromeState by chromeVm.state.collectAsStateWithLifecycle()
-    val ui = chromeState.forDocument(documentKey)
+    val initialUi = remember(chromeVm, documentKey) { chromeVm.restoreDocument(documentKey) }
+    val ui = if (chromeState.documentKey == documentKey) chromeState else initialUi
+    val progress = remember(chromeVm, documentKey) { documentKey?.let { ViewerProgress(chromeVm.progress, it) } }
     LaunchedEffect(documentKey) { chromeVm.onEvent(ReaderUiEvent.DocumentChanged(documentKey)) }
     val onEvent: (ReaderUiEvent) -> Unit = chromeVm::onEvent
 
-    // The page style is chosen per file type (its extension) and remembered in preferences.
-    var pageStyle by rememberSaveable(documentKey) { mutableStateOf(readPageStyle(context, pageStyleKey(fileName))) }
-    // The text size of plain and code views is remembered per kind of viewer, not per file.
+    // Per-file settings fall back to the previous defaults for the file type.
+    var pageStyle by rememberSaveable(documentKey) { mutableStateOf(PageStyle.entries.firstOrNull { it.name == progress?.read("style") } ?: readPageStyle(context, pageStyleKey(fileName))) }
     val textKind = if (isSourceCode(fileName) || isSvgName(fileName)) "code" else "text"
-    var textScale by rememberSaveable(textKind) { mutableStateOf(readTextScale(context, textKind)) }
+    var textScale by rememberSaveable(documentKey, textKind) {
+        mutableStateOf(progress?.read("text-scale")?.toFloatOrNull()?.coerceIn(TEXT_SCALE_MIN, TEXT_SCALE_MAX) ?: readTextScale(context, textKind))
+    }
     val saveVm: SaveToDownloadsViewModel = hiltViewModel()
     val saveState by saveVm.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -177,10 +176,12 @@ fun ReaderScreen(
     // Video and audio take the whole screen, with their own close button, as in EzFiles.
     val media = ready?.preview as? FilePreview.Media
     if (ready != null && media != null) {
-        MediaScreen(ready.file, media.video, onClose = closeReader)
+        CompositionLocalProvider(LocalViewerProgress provides progress) {
+            MediaScreen(ready.file, media.video, onClose = closeReader, onFily = onFily)
+        }
         return
     }
-    // An EPUB book has its own chrome (with Fily), so the reader's bar and action button stay away from it.
+    // An EPUB book has its own chrome (with Fily), so the parent reader bar stays hidden.
     val epub = (ready?.preview as? FilePreview.Structured)?.document?.info?.format == DocumentFormat.Epub
     val preview = ready?.preview
     val textOf = when (preview) {
@@ -189,7 +190,6 @@ fun ReaderScreen(
         is FilePreview.Html -> preview.text
         else -> null
     }
-    val bottomInset = if (preview is FilePreview.Pdf || (preview is FilePreview.Structured && preview.document.info.kind == com.xfiles.documents.structure.DocumentKind.Presentation)) 96.dp else 20.dp
 
     val actions = buildList {
         if (ready != null && !ui.editingMarkup) {
@@ -227,9 +227,13 @@ fun ReaderScreen(
                     onEvent(ReaderUiEvent.SetEditingMarkup(true))
                     onClosePdfFind()
                 })
-                add(ReaderAction("Page grid", EzIcons.Grid) { onEvent(ReaderUiEvent.SetGrid(true)) })
+                add(ReaderAction("Page grid", EzIcons.Grid) { onEvent(ReaderUiEvent.SetGrid(!ui.showGrid)) })
+                add(ReaderAction(if (ui.pdfTwoUp) "Single column" else "Two-page spread", if (ui.pdfTwoUp) EzIcons.SinglePage else EzIcons.TwoPages) {
+                    onEvent(ReaderUiEvent.SetGrid(false))
+                    onEvent(ReaderUiEvent.SetPdfTwoUp(!ui.pdfTwoUp))
+                })
             }
-            if (preview is FilePreview.Picture || preview is FilePreview.Pdf) {
+            if (preview is FilePreview.Picture) {
                 add(ReaderAction("Rotate", EzIcons.Rotate) { documentKey?.let(onRotate) })
             }
             if (paged != null) {
@@ -252,16 +256,17 @@ fun ReaderScreen(
                 add(ReaderAction("Larger text ($percent%)", EzIcons.TextT) {
                     val next = (textScale + TEXT_SCALE_STEP).coerceAtMost(TEXT_SCALE_MAX)
                     textScale = next
-                    writeTextScale(context, textKind, next)
+                    progress?.save("text-scale", next.toString())
                 })
                 add(ReaderAction("Smaller text ($percent%)", EzIcons.TextT) {
                     val next = (textScale - TEXT_SCALE_STEP).coerceAtLeast(TEXT_SCALE_MIN)
                     textScale = next
-                    writeTextScale(context, textKind, next)
+                    progress?.save("text-scale", next.toString())
                 })
             }
-            add(ReaderAction("Ask Fily", EzIcons.Mic) { onFily() })
-            add(ReaderAction("Page style: ${pageStyle.label}", EzIcons.Eye) { onEvent(ReaderUiEvent.SetPageStyleSheet(true)) })
+            if (preview is FilePreview.Pdf || preview is FilePreview.Structured || preview is FilePreview.Text || preview is FilePreview.Html) {
+                add(ReaderAction("Page style: ${pageStyle.label}", EzIcons.Theme) { onEvent(ReaderUiEvent.SetPageStyleSheet(true)) })
+            }
             val printable = ready.file.kind !in setOf(DocumentKind.Audio, DocumentKind.Video, DocumentKind.Unknown)
             if (printable) add(ReaderAction("Print", EzIcons.Print) { onPrint() })
             add(ReaderAction("Share original", EzIcons.Share) { onShare() })
@@ -272,7 +277,11 @@ fun ReaderScreen(
         }
     }
 
-    CompositionLocalProvider(LocalViewerScroll provides onAttachScroll, LocalTextScale provides textScale) {
+    CompositionLocalProvider(
+        LocalViewerScroll provides onAttachScroll,
+        LocalTextScale provides textScale,
+        LocalViewerProgress provides progress,
+    ) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(horizontal = if (inPip) 0.dp else 12.dp, vertical = if (inPip) 0.dp else 8.dp)) {
                 if (!inPip && !epub) {
@@ -281,6 +290,10 @@ fun ReaderScreen(
                         title = fileName.ifEmpty { "Reader" } + galleryCounter,
                         backEnabled = !markup.saving,
                         onBack = closeReader,
+                        onFily = onFily.takeIf { ready != null && !ui.editingMarkup },
+                        actions = actions,
+                        settingsOpen = ui.actionsOpen,
+                        onSettingsOpen = { onEvent(ReaderUiEvent.SetActionsOpen(it)) },
                     )
                 }
                 if (!inPip) SensitiveFileHint(documentKey, sensitive, Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally))
@@ -309,14 +322,7 @@ fun ReaderScreen(
                     })
                 }
                 ReaderBody(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .chromeGestures(
-                            onScrollDown = { onEvent(ReaderUiEvent.SetActionsVisible(false)) },
-                            onScrollUp = { onEvent(ReaderUiEvent.SetActionsVisible(true)) },
-                            onTap = { onEvent(ReaderUiEvent.ToggleActionsVisible) },
-                        ),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
                     state = state,
                     ui = ui,
                     onEvent = onEvent,
@@ -352,18 +358,15 @@ fun ReaderScreen(
                     if (ready.turningPage) LinearProgressIndicator(Modifier.fillMaxWidth())
                     if (ready.pageError) Text("This page could not be opened.", color = MaterialTheme.colorScheme.error)
                     if (!ui.editingMarkup) PdfToolbar(
-                        page = pdf.page,
+                        page = (ui.visiblePdfPage ?: pdf.page).coerceIn(0, (pdf.pageCount - 1).coerceAtLeast(0)),
                         pageCount = pdf.pageCount,
                         zoom = ui.pdfZoom,
-                        twoUp = ui.pdfTwoUp,
                         grid = ui.showGrid,
                         busy = ready.turningPage,
                         thumbnail = pdfThumbnail,
                         onPage = onPage,
                         onJump = { onEvent(ReaderUiEvent.SetJump(true)) },
                         onZoom = { onEvent(ReaderUiEvent.SetPdfZoom(it)) },
-                        onTwoUp = { onEvent(ReaderUiEvent.SetPdfTwoUp(it)) },
-                        onGrid = { onEvent(ReaderUiEvent.SetGrid(it)) },
                     )
                     if (ui.showJump) {
                         PdfJumpDialog(pdf.page, pdf.pageCount, onJump = onPage, onDismiss = { onEvent(ReaderUiEvent.SetJump(false)) })
@@ -376,29 +379,7 @@ fun ReaderScreen(
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.CenterHorizontally))
             }
-            if (ready != null && !inPip && !epub) {
-                // Hidden while reading, the button comes back by itself once the content has been still for a moment.
-                LaunchedEffect(ui.actionsVisible) {
-                    if (!ui.actionsVisible) {
-                        delay(ACTIONS_RETURN_MS)
-                        onEvent(ReaderUiEvent.SetActionsVisible(true))
-                    }
-                }
-                if (ui.actionsOpen) ReaderActionScrim(onClose = { onEvent(ReaderUiEvent.SetActionsOpen(false)) })
-                AnimatedVisibility(
-                    visible = ui.actionsVisible || ui.actionsOpen,
-                    modifier = Modifier.align(Alignment.BottomEnd),
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                ) {
-                    ReaderActionButton(
-                        actions = actions,
-                        open = ui.actionsOpen,
-                        onOpenChange = { onEvent(ReaderUiEvent.SetActionsOpen(it)) },
-                        modifier = Modifier.padding(end = 16.dp, bottom = bottomInset),
-                    )
-                }
-            }
+
         }
     }
     val summaryState = ready?.summary
@@ -423,7 +404,7 @@ fun ReaderScreen(
             current = pageStyle,
             onPick = { style ->
                 pageStyle = style
-                writePageStyle(context, pageStyleKey(fileName), style)
+                progress?.save("style", style.name)
                 onEvent(ReaderUiEvent.SetPageStyleSheet(false))
             },
             onDismiss = { onEvent(ReaderUiEvent.SetPageStyleSheet(false)) },
@@ -438,6 +419,3 @@ fun ReaderScreen(
         )
     }
 }
-
-/** How long the hidden action button stays away before it returns. */
-private const val ACTIONS_RETURN_MS = 2_500L

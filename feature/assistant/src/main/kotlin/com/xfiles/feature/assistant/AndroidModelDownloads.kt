@@ -191,7 +191,7 @@ internal class AndroidModelDownloads @javax.inject.Inject constructor(
     }
 
     private suspend fun copyModel(
-        input: InputStream, target: File, limit: Long, append: Boolean = false, onBytes: (Int) -> Unit,
+        input: InputStream, target: File, limit: Long, append: Boolean = false, onBytes: suspend (Int) -> Unit,
     ) {
         var total = if (append) target.length() else 0L
         java.io.FileOutputStream(target, append).use { output ->

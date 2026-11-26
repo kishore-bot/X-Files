@@ -44,11 +44,7 @@ internal val BookInsetTop = 72.dp
 /** Space below a page or the last row of the scroll, where the bottom bar floats when shown. */
 internal val BookInsetBottom = 120.dp
 
-/**
- * The top bar, as the EzFiles reader's: one floating glass menu with Contents and Aa on the left,
- * the book's title, then find, bookmark and hide. It is the reader's only bar; it floats over the
- * page and never moves the text.
- */
+/** The floating book toolbar uses format-specific options in the shared viewer menu. */
 @Composable
 internal fun BookTopBar(
     title: String,
@@ -62,56 +58,27 @@ internal fun BookTopBar(
     modifier: Modifier = Modifier,
     onFily: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .padding(10.dp)
-            .floatingGlass(EzShapes.Menu, 0.85f)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ChromeButton(EzIcons.Back, "Back to library", onClose)
-        ChromeButton(EzIcons.ListLines, "Contents", onContents)
-        ChromeButton(EzIcons.TextT, "Reading settings", onSettings, label = "Aa")
-        Text(
-            title,
-            style = MaterialTheme.typography.labelLarge,
-            color = EzColors.Text,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
-        )
-        ChromeButton(EzIcons.Search, "Find in book", onSearch)
-        if (onFily != null) ChromeButton(EzIcons.Mic, "Ask Fily", onFily)
-        ChromeButton(
-            if (bookmarked) EzIcons.Bookmark else EzIcons.BookmarkOutline,
-            if (bookmarked) "Remove bookmark" else "Bookmark this page",
-            onBookmark,
-        )
-        ChromeButton(EzIcons.Close, "Hide menu", onHide)
-    }
-}
-
-/** One item of the top bar: an icon, with its label beside it when it has one. */
-@Composable
-private fun ChromeButton(icon: ImageVector, description: String, onClick: () -> Unit, label: String? = null) {
-    val haptics = rememberHaptics()
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button, onClickLabel = description) {
-                haptics.tick()
-                onClick()
-            }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = if (label == null) description else null, tint = EzColors.Text, modifier = Modifier.size(22.dp))
-        if (label != null) {
-            Text(label, style = MaterialTheme.typography.labelLarge, color = EzColors.Text, modifier = Modifier.padding(start = 6.dp))
-        }
-    }
+    var settingsOpen by remember { mutableStateOf(false) }
+    ReaderTopBar(
+        title = title,
+        backEnabled = true,
+        onBack = onClose,
+        onFily = onFily,
+        actions = listOf(
+            ReaderAction("Contents", EzIcons.ListLines, onContents),
+            ReaderAction("Typography and theme", EzIcons.TextT, onSettings),
+            ReaderAction("Find in book", EzIcons.Search, onSearch),
+            ReaderAction(
+                if (bookmarked) "Remove bookmark" else "Bookmark this page",
+                if (bookmarked) EzIcons.Bookmark else EzIcons.BookmarkOutline,
+                onBookmark,
+            ),
+            ReaderAction("Hide controls", EzIcons.Close, onHide),
+        ),
+        settingsOpen = settingsOpen,
+        onSettingsOpen = { settingsOpen = it },
+        modifier = modifier.padding(10.dp),
+    )
 }
 
 /**

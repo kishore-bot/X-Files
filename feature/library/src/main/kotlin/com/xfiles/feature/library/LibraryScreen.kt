@@ -133,6 +133,7 @@ fun LibraryScreen(
     recentFiles: List<FileEntry>,
     listing: LibraryListing,
     category: LibraryCategory,
+    lastImage: String? = null,
     onCategory: (LibraryCategory) -> Unit,
     onQueryChange: (String) -> Unit,
     bookmarks: List<FileBookmark>,
@@ -151,6 +152,7 @@ fun LibraryScreen(
     onClear: () -> Unit,
     onAddFolder: () -> Unit,
     onRemoveFolder: (Uri) -> Unit,
+    onReconnectFolder: (Uri) -> Unit = {},
     onRefresh: () -> Unit,
     onAbout: () -> Unit,
     onTools: (LibraryTool) -> Unit,
@@ -159,7 +161,12 @@ fun LibraryScreen(
 ) {
     val search = rememberTextFieldState()
     val query = search.text.toString().trim()
-    var tab by rememberSaveable { mutableStateOf(HomeTab.Library) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val tabPreferences = remember(context) { context.getSharedPreferences("library_view", 0) }
+    var tab by rememberSaveable {
+        mutableStateOf(HomeTab.entries.firstOrNull { it.name == tabPreferences.getString("tab", null) } ?: HomeTab.Library)
+    }
+    LaunchedEffect(tab) { tabPreferences.edit().putString("tab", tab.name).apply() }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var removingFolder by rememberSaveable { mutableStateOf<String?>(null) }
     // The multi-select set. It is cleared when the tab changes, and by the back gesture.
@@ -245,8 +252,22 @@ fun LibraryScreen(
     val startClearance = if (landscape) 112.dp else 0.dp
     val showsAssistant = tab == HomeTab.Library && (query.isNotEmpty() || !noFolders)
 
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val imageIndex = remember(matching, lastImage) {
+        val id = lastImage?.let { com.xfiles.core.documents.FileProgress.identity(it) }
+        if (id == null) -1 else matching.indexOfFirst { com.xfiles.core.documents.FileProgress.identity(it.uri.toString()) == id }
+    }
+    val markedImage = matching.getOrNull(imageIndex)?.uri
+    val imageTab = tab == HomeTab.Library && category == LibraryCategory.Images
+    // Header, search, filters, folders, and list title precede the file rows.
+    val imageStart = 5 + (if (landscape) 0 else 1) + (if (noFolders) 1 else 0) +
+        (if (library.error != null) 1 else 0) + (if (library.reachedLimit) 1 else 0)
+    LaunchedEffect(imageTab, imageIndex, imageStart, lastImage, query) {
+        if (imageTab && query.isEmpty() && imageIndex >= 0) listState.scrollToItem(imageStart + imageIndex)
+    }
     Box(Modifier.fillMaxSize().imePadding()) {
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize().padding(start = startClearance),
             contentPadding = PaddingValues(top = if (landscape) 4.dp else 12.dp, bottom = bottomClearance),
             verticalArrangement = Arrangement.spacedBy(if (landscape) 4.dp else 8.dp),
@@ -288,6 +309,7 @@ fun LibraryScreen(
                         onSearchEnabled = onSearchEnabled,
                         onRefresh = onRefresh,
                         onRemove = { removingFolder = it },
+                        onReconnect = onReconnectFolder,
                     )
                 }
                 if (noFolders) item(key = "no-folders", contentType = "card") {
@@ -368,6 +390,7 @@ fun LibraryScreen(
                         onToggle = { toggle(file) },
                         onLongPress = { longPress(file) },
                         actions = actionsFor(file),
+                        marked = imageTab && file.uri == markedImage,
                     )
                 }
             }

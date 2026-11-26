@@ -4,14 +4,26 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,9 +31,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.xfiles.core.documents.FileEntry
+import com.xfiles.design.rememberHaptics
 
 /** The password prompt for an encrypted document; a wrong password keeps it open with an error. */
 @Composable
@@ -104,4 +120,45 @@ internal fun SummaryDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun PageStyleSheet(current: PageStyle, onPick: (PageStyle) -> Unit, onDismiss: () -> Unit) {
+    val haptics = rememberHaptics()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        scrimColor = Color.Black.copy(alpha = 0.22f),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Page style", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                PageStyle.entries.forEach { style ->
+                    val selected = style == current
+                    val fixed = style.colors()
+                    val ring = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+                    Column(
+                        modifier = Modifier.selectable(selected, role = Role.RadioButton) {
+                            haptics.segment()
+                            onPick(style)
+                        }.padding(4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            Modifier.size(52.dp).clip(CircleShape)
+                                .background(fixed?.page ?: MaterialTheme.colorScheme.surfaceVariant)
+                                .border(2.dp, ring, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("Aa", color = fixed?.text ?: MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+                        }
+                        Text(style.label, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
 }
