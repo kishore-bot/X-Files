@@ -13,16 +13,23 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /**
  * On-device OCR with ML Kit's bundled Latin model: nothing is uploaded. ML Kit runs recognition on its
- * own worker threads; this suspends until it finishes and closes the task's result on cancellation.
+ * own worker threads. A PDF bitmap stays owned by its caller until recognition finishes.
  */
 @Singleton
 class TextRecognitionRepository @Inject constructor(@ApplicationContext context: Context) {
+    private val bitmapTask = Mutex()
     private val app = context.applicationContext
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
@@ -37,14 +44,21 @@ class TextRecognitionRepository @Inject constructor(@ApplicationContext context:
      * The caller keeps the bitmap alive until this returns.
      */
     suspend fun lines(bitmap: Bitmap): List<RecognizedLine> =
-        process(InputImage.fromBitmap(bitmap, 0)).textBlocks.flatMap { block ->
-            block.lines.mapNotNull { line -> line.boundingBox?.let { RecognizedLine(line.text, it) } }
+        bitmapTask.withLock {
+            currentCoroutineContext().ensureActive()
+            val result = withContext(NonCancellable) { process(InputImage.fromBitmap(bitmap, 0)) }
+            currentCoroutineContext().ensureActive()
+            result.textBlocks.flatMap { block ->
+                block.lines.mapNotNull { line -> line.boundingBox?.let { RecognizedLine(line.text, it) } }
+            }
         }
 
     private suspend fun process(input: InputImage): Text = suspendCancellableCoroutine { continuation ->
         recognizer.process(input)
-            .addOnSuccessListener { result -> continuation.resume(result) }
-            .addOnFailureListener { error -> continuation.resumeWithException(error) }
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) continuation.resume(task.result)
+                else continuation.resumeWithException(task.exception ?: CancellationException("OCR task cancelled"))
+            }
     }
 }
 

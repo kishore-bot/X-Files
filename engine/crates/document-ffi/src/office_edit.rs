@@ -166,6 +166,10 @@ impl NativeOfficeEditor {
                 std::fs::remove_file(&target_path).ok();
                 Err(error)
             }
+            Ok(_) if token.is_cancelled() => {
+                std::fs::remove_file(&target_path).ok();
+                Err(ReadError::Cancelled { detail: "the office edit was cancelled".into() })
+            }
             Ok(result) => {
                 if result.replaced > 0 {
                     *lock(&self.path) = target_path.clone();

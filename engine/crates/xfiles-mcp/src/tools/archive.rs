@@ -95,7 +95,6 @@ pub async fn extract(svc: Arc<Services>, args: ExtractArchiveEntryArgs) -> Resul
             let scratch = ScratchDir::create(folder)?;
             let progress = ExtractProgress::default();
             index.extract_to_dir(std::slice::from_ref(&entry), scratch.path(), &progress, password.as_deref())?;
-            ctx.check()?;
 
             let relative = safe_relative(&entry)
                 .ok_or_else(|| ToolError::invalid("the entry name is not a safe relative path"))?;
@@ -103,6 +102,7 @@ pub async fn extract(svc: Arc<Services>, args: ExtractArchiveEntryArgs) -> Resul
             if !produced.is_file() {
                 return Err(ToolError::invalid(format!("{entry} is a folder, so there is no single file to extract")));
             }
+            ctx.check()?;
             fs::rename(&produced, &output)?;
             let bytes = fs::metadata(&output)?.len();
             Ok(json!({

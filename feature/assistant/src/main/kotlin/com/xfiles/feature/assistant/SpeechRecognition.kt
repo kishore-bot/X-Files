@@ -35,9 +35,9 @@ class SpeechRecognition(
     private val _pack = MutableStateFlow<SpeechPack>(SpeechPack.None)
     val pack: StateFlow<SpeechPack> = _pack
 
-    /** No recognizer at all: Google's speech services are missing or disabled on this phone. */
+    /** Android cannot supply an on-device speech recognizer to Fily. */
     val engineMissing: Boolean
-        get() = !onDevice && !SpeechRecognizer.isRecognitionAvailable(context)
+        get() = !onDevice
 
     private var recognizer: SpeechRecognizer? = null
     /** Kept alive while the system downloads a language pack for us. */
@@ -50,21 +50,24 @@ class SpeechRecognition(
     private var language: String? = null
 
     /**
-     * The system's default recognizer may stream audio to a server. Xfiles is offline, so the
-     * on-device recognizer is used wherever the phone has one, and the default one is told to
-     * stay offline otherwise.
+     * Only Android's dedicated on-device recognizer is eligible for Fily.
      */
     private val onDevice: Boolean
-        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+        get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
     fun start() {
         cancel()
-        val local = onDevice
-        if (!local && !SpeechRecognizer.isRecognitionAvailable(context)) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !onDevice) {
             _state.value = SpeechState.Error
             return
         }
-        val sr = if (local) SpeechRecognizer.createOnDeviceSpeechRecognizer(context) else SpeechRecognizer.createSpeechRecognizer(context)
+        val sr = try {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not start on-device recognition", error)
+            _state.value = SpeechState.Error
+            return
+        }
         recognizer = sr
         // Listening from now on, so the overlay doesn't start us again while the language is checked.
         _state.value = SpeechState.Listening
@@ -72,11 +75,11 @@ class SpeechRecognition(
         if (chosen != null) {
             // The user's pick wins over the phone's English; a missing pack comes back as NeedsLanguage.
             language = chosen
-            listen(sr, local)
-        } else if (local && language == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            listen(sr)
+        } else if (language == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             checkLanguage(sr)
         } else {
-            listen(sr, local)
+            listen(sr)
         }
     }
 
@@ -92,7 +95,7 @@ class SpeechRecognition(
                     needsLanguage()
                 } else {
                     language = chosen
-                    listen(sr, local = true)
+                    listen(sr)
                 }
             }
 
@@ -100,7 +103,7 @@ class SpeechRecognition(
                 if (recognizer !== sr) return
                 Log.w(TAG, "Language check failed ($error); trying the phone's language")
                 language = Locale.getDefault().toLanguageTag()
-                listen(sr, local = true)
+                listen(sr)
             }
         }
         try {
@@ -108,11 +111,11 @@ class SpeechRecognition(
         } catch (e: RuntimeException) {
             Log.w(TAG, "Language check unavailable: ${e.message}")
             language = Locale.getDefault().toLanguageTag()
-            listen(sr, local = true)
+            listen(sr)
         }
     }
 
-    private fun listen(sr: SpeechRecognizer, local: Boolean) {
+    private fun listen(sr: SpeechRecognizer) {
         sr.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) { _state.value = SpeechState.Listening }
             override fun onBeginningOfSpeech() {}
@@ -121,13 +124,12 @@ class SpeechRecognition(
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() { _level.value = 0f }
             override fun onError(error: Int) {
-                Log.w(TAG, "Recognition error $error (on-device=$local, language=$language)")
-                if (local && (error == ERROR_LANGUAGE_NOT_SUPPORTED || error == ERROR_LANGUAGE_UNAVAILABLE)) needsLanguage()
+                Log.w(TAG, "Recognition error $error")
+                if (error == ERROR_LANGUAGE_NOT_SUPPORTED || error == ERROR_LANGUAGE_UNAVAILABLE) needsLanguage()
                 else _state.value = SpeechState.Error
             }
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().filter(String::isNotBlank)
-                Log.i(TAG, "Heard (on-device=$local): $matches")
                 if (matches.isNotEmpty()) onResult(SpeechResult(matches.first(), true, matches))
                 _state.value = SpeechState.Idle
             }
@@ -145,12 +147,17 @@ class SpeechRecognition(
             // Room for a short pause mid-sentence ("open the... resume").
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
-            if (local && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(hints().take(MAX_HINTS)))
             }
         }
-        sr.startListening(intent)
-        _state.value = SpeechState.Listening
+        try {
+            sr.startListening(intent)
+            _state.value = SpeechState.Listening
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "On-device speech recognition could not listen", error)
+            _state.value = SpeechState.Error
+        }
     }
 
     private fun needsLanguage() {

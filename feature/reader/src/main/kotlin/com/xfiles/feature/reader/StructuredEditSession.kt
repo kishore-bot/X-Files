@@ -1,6 +1,7 @@
 package com.xfiles.feature.reader
 
 import android.net.Uri
+import com.xfiles.core.documents.IncompleteOfficeCopyException
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.OfficeDocumentEditor
 import com.xfiles.documentengine.EditValue
@@ -95,7 +96,7 @@ class StructuredEditSession(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                mutable.update { it.copy(message = "The copy could not be saved.") }
+                mutable.update { it.copy(message = (error as? IncompleteOfficeCopyException)?.message ?: "The copy could not be saved.") }
             }
         }
     }

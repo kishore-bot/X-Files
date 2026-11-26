@@ -74,7 +74,8 @@ class LibrarySearchRepository @Inject constructor(
                         } catch (error: CancellationException) {
                             throw error
                         } catch (_: Exception) {
-                            ""
+                            // Keep this entry stale so a later search retries a transient read failure.
+                            continue
                         }
                         currentCoroutineContext().ensureActive()
                         if (!index.add(entries[position], text)) break

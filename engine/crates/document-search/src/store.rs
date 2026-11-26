@@ -16,7 +16,8 @@ use std::collections::BTreeMap;
 use crate::index::{Doc, Inner, Posting};
 
 const MAGIC: &[u8; 4] = b"EZSI";
-const VERSION: u32 = 1;
+// Rebuild version 1, which could persist extraction failures as fresh empty documents.
+const VERSION: u32 = 2;
 /// Larger files are not read; the budgets keep real ones far smaller.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_STR: usize = 64 * 1024;
@@ -246,7 +247,7 @@ mod tests {
     fn rejects_other_versions_even_with_a_valid_checksum() {
         let mut bytes = encode(&sample());
         bytes.truncate(bytes.len() - 8);
-        bytes[4] = 2;
+        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
         let sum = fnv1a(&bytes);
         bytes.extend_from_slice(&sum.to_le_bytes());
         assert!(decode(&bytes).is_none());

@@ -111,11 +111,10 @@ impl Inner {
         self.next_file = self.next_file.max(self.docs.iter().map(|d| d.file).max().unwrap_or(0) + 1);
     }
 
-    fn kill(&mut self, slot: u32) -> Option<u64> {
-        let doc = self.docs.get_mut(slot as usize)?;
-        if !doc.live {
-            return None;
-        }
+    fn kill(&mut self, slot: u32) {
+        let Some(doc) = self.docs.get_mut(slot as usize).filter(|doc| doc.live) else {
+            return;
+        };
         doc.live = false;
         self.by_key.remove(&doc.key);
         self.live -= 1;
@@ -123,7 +122,6 @@ impl Inner {
         self.total_len -= u64::from(doc.len);
         self.text_bytes -= u64::from(doc.text_bytes);
         self.dirty = true;
-        (doc.file != 0).then_some(doc.file)
     }
 
     /// Drops dead documents and their postings, renumbering the rest.
@@ -259,9 +257,7 @@ impl SearchIndex {
         let gone: Vec<u32> =
             inner.by_key.iter().filter(|(k, _)| !keep.contains(k.as_str())).map(|(_, &slot)| slot).collect();
         for &slot in &gone {
-            if let Some(file) = inner.kill(slot) {
-                fs::remove_file(self.text_path(file)).ok();
-            }
+            inner.kill(slot);
         }
         self.maybe_compact(&mut inner);
         gone.len()
@@ -270,9 +266,7 @@ impl SearchIndex {
     pub fn remove(&self, key: &str) -> bool {
         let mut inner = self.lock();
         let Some(&slot) = inner.by_key.get(key) else { return false };
-        if let Some(file) = inner.kill(slot) {
-            fs::remove_file(self.text_path(file)).ok();
-        }
+        inner.kill(slot);
         self.maybe_compact(&mut inner);
         true
     }
@@ -288,8 +282,7 @@ impl SearchIndex {
 
     /// Indexes `text` as the document `key`, replacing an earlier version.
     /// `page_starts` are where PDF pages start, in UTF-16 units of `text`.
-    /// Empty text is recorded too, so an unreadable file isn't retried until it
-    /// changes.
+    /// A successfully read document with empty text is indexed as fresh.
     pub fn add(&self, key: &str, size: u64, mtime: i64, text: &str, page_starts: &[u32]) -> io::Result<Added> {
         // Analysis before the lock: queries keep running meanwhile.
         let stored = truncate_at_char(text, self.config.max_text_bytes_per_doc);
@@ -315,9 +308,7 @@ impl SearchIndex {
             file
         };
         if let Some(slot) = old {
-            if let Some(old_file) = inner.kill(slot) {
-                fs::remove_file(self.text_path(old_file)).ok();
-            }
+            inner.kill(slot);
         }
         let slot = inner.docs.len() as u32;
         for (term, tf) in counts {
@@ -467,6 +458,8 @@ impl SearchIndex {
         fs::write(&temp, &bytes)?;
         fs::rename(&temp, self.dir.join(INDEX_FILE))?;
         inner.dirty = false;
+        // Older snippets are collected on the next open. Until then, queries that
+        // already selected those snippets can still read them after this commit.
         Ok(())
     }
 
@@ -687,6 +680,21 @@ mod tests {
         index.add("more", 1, 1, "Paris again", &[]).unwrap();
         assert_eq!(index.query("paris", 10).len(), 2);
         assert_eq!(index.query("hotels", 10)[0].key, "trip");
+    }
+
+    #[test]
+    fn unsaved_replacement_keeps_the_committed_snippet() {
+        let dir = TempDir::new();
+        let expected = {
+            let index = sample(&dir.0);
+            index.save().unwrap();
+            let hits = index.query("hotels", 10);
+            assert!(!hits.is_empty());
+            index.add("trip", 2, 2, "different text", &[]).unwrap();
+            hits
+        };
+        let reopened = SearchIndex::open(&dir.0, IndexConfig::default());
+        assert_eq!(reopened.query("hotels", 10), expected);
     }
 
     #[test]

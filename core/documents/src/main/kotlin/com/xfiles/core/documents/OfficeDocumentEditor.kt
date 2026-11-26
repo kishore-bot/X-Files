@@ -111,10 +111,8 @@ class OfficeDocumentEditor @Inject constructor(
     suspend fun preview(copy: WorkingCopy): FilePreview.Structured = office.preview(copy.working, copy.name)
 
     /** Writes the working copy to [destination], the location the user picked. */
-    suspend fun saveCopy(copy: WorkingCopy, destination: Uri) = withContext(io) {
-        val output = resolver.openOutputStream(destination, "wt") ?: throw IOException("The copy could not be written.")
-        output.use { stream -> copy.working.inputStream().use { it.copyTo(stream) } }
-    }
+    suspend fun saveCopy(copy: WorkingCopy, destination: Uri) =
+        office.saveCopy(copy.working, destination)
 
     /** Deletes this copy's workspace files. The user's original is never touched. */
     suspend fun discard(copy: WorkingCopy): Unit = withContext(io) {

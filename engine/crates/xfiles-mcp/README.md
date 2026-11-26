@@ -37,7 +37,7 @@ Standard output carries protocol messages only. Diagnostics go to stderr.
 | `search_document` | Case-insensitive search with total count, page number and snippets. |
 | `glance` | Key sentences, keywords, dates, amounts, emails, phones, links, reference numbers, reading time, language. |
 | `pdf_merge` | Join 2 to 50 PDFs. |
-| `pdf_split` | Split by `ranges`, every N pages, or per page, into an existing folder. |
+| `pdf_split` | Split by `ranges`, every N pages, or per page, into an existing folder. A publication failure after some parts are saved returns those parts with `complete: false`. |
 | `pdf_compress` | `lossless`, `balanced` or `strong` image quality. |
 | `pdf_reorder` | Reorder every page once, with optional turns. |
 | `pdf_rotate` | Turn selected pages by multiples of 90 degrees. |

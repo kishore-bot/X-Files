@@ -220,6 +220,7 @@ pub async fn merge(svc: Arc<Services>, args: PdfMergeArgs) -> Result<Value> {
                 writer.flush()?;
                 report
             };
+            ctx.check()?;
             let path = pending.commit()?;
             Ok(output_json(&path, &report))
         })
@@ -257,8 +258,17 @@ pub async fn split(svc: Arc<Services>, args: PdfSplitArgs) -> Result<Value> {
 
             let mut outputs = Vec::with_capacity(pending.len());
             for (out, report) in pending.into_iter().zip(reports.iter()) {
-                let path = out.commit()?;
-                outputs.push(output_json(&path, report));
+                match ctx.check().and_then(|()| out.commit()) {
+                    Ok(path) => outputs.push(output_json(&path, report)),
+                    Err(error) if outputs.is_empty() => return Err(error),
+                    Err(error) => return Ok(json!({
+                        "source_pages": page_count,
+                        "part_count": outputs.len(),
+                        "parts": outputs,
+                        "complete": false,
+                        "error": error.to_string(),
+                    })),
+                }
             }
             Ok(json!({ "source_pages": page_count, "part_count": outputs.len(), "parts": outputs }))
         })
@@ -284,6 +294,7 @@ pub async fn compress(svc: Arc<Services>, args: PdfCompressArgs) -> Result<Value
                 writer.flush()?;
                 report
             };
+            ctx.check()?;
             let path = pending.commit()?;
             let saved = report.before.saturating_sub(report.after);
             let percent = if report.before == 0 { 0.0 } else { saved as f64 * 100.0 / report.before as f64 };
@@ -316,6 +327,7 @@ pub async fn reorder(svc: Arc<Services>, args: PdfReorderArgs) -> Result<Value> 
             let mut pending = PendingOutput::create(output, overwrite)?;
             let sources = vec![PdfToolSource { reader: File::open(&input)?, password: None }];
             let report = write_document(&ctx, sources, &op, &mut pending)?;
+            ctx.check()?;
             let path = pending.commit()?;
             Ok(output_json(&path, &report))
         })
@@ -349,6 +361,7 @@ pub async fn rotate(svc: Arc<Services>, args: PdfRotateArgs) -> Result<Value> {
             let mut pending = PendingOutput::create(output, overwrite)?;
             let sources = vec![PdfToolSource { reader: File::open(&input)?, password: None }];
             let report = write_document(&ctx, sources, &op, &mut pending)?;
+            ctx.check()?;
             let path = pending.commit()?;
             Ok(output_json(&path, &report))
         })
@@ -387,6 +400,7 @@ pub async fn watermark(svc: Arc<Services>, args: PdfWatermarkArgs) -> Result<Val
                 apply_overlay(File::open(&input)?, &mut writer, &overlay, &mut Progress(&ctx))?;
                 writer.flush()?;
             }
+            ctx.check()?;
             let path = pending.commit()?;
             Ok(json!({ "output": display(&path), "bytes": fs::metadata(&path)?.len() }))
         })
@@ -411,6 +425,7 @@ pub async fn protect(svc: Arc<Services>, args: PdfProtectArgs) -> Result<Value> 
             let mut pending = PendingOutput::create(output, overwrite)?;
             let sources = vec![PdfToolSource { reader: File::open(&input)?, password: None }];
             let report = write_document(&ctx, sources, &op, &mut pending)?;
+            ctx.check()?;
             let path = pending.commit()?;
             Ok(output_json(&path, &report))
         })

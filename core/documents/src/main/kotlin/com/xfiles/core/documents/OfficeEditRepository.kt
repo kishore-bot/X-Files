@@ -14,7 +14,10 @@ import java.io.IOException
 import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.DisposableHandle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -26,6 +29,9 @@ import kotlinx.coroutines.withContext
 
 /** The session's working copy after a replacement, and what it replaced. */
 data class OfficeEdit(val file: File?, val report: OfficeReplaceReport)
+
+class IncompleteOfficeCopyException(cause: IOException) :
+    IOException("The copy could not be completed. The destination may contain a partial file.", cause)
 
 /**
  * Find and replace for DOCX, PPTX, ODT, ODP and ODS. The engine reads files by
@@ -45,25 +51,32 @@ class OfficeEditRepository @Inject constructor(@ApplicationContext context: Cont
     private val reader = StructuredDocumentReader(resolver)
 
     /** Copies [uri] into the workspace, refusing anything over [MAX_INPUT_BYTES]. */
-    suspend fun stage(uri: Uri, name: String): File = withContext(io) {
-        val extension = extensionOf(name)
-        val target = File(workspace, "source-${System.nanoTime()}.$extension")
-        ensureWorkspace()
+    suspend fun stage(uri: Uri, name: String): File {
+        val target = File(workspace, "source-${System.nanoTime()}.${extensionOf(name)}")
         try {
-            val input = resolver.openInputStream(uri) ?: throw OfficeEditException(UNREADABLE)
-            input.use { copyBounded(it, target) }
-        } catch (error: IOException) {
-            target.delete()
-            throw OfficeEditException(UNREADABLE)
-        } catch (error: OfficeEditException) {
-            target.delete()
+            return withContext(io) {
+                ensureWorkspace()
+                val input = resolver.openInputStream(uri) ?: throw OfficeEditException(UNREADABLE)
+                input.use { copyBounded(it, target) }
+                target
+            }
+        } catch (error: Exception) {
+            withContext(NonCancellable + io) { target.delete() }
+            if (error is IOException) throw OfficeEditException(UNREADABLE)
             throw error
         }
-        target
     }
 
     /** A session on [source]. Close it when the document goes away. */
-    suspend fun open(source: File): OfficeEditSession = withContext(io) { OfficeEditSession(source) }
+    suspend fun open(source: File): OfficeEditSession {
+        var opened: OfficeEditSession? = null
+        try {
+            return withContext(io) { OfficeEditSession(source).also { opened = it } }
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable + io) { opened?.close() }
+            throw cancelled
+        }
+    }
 
     /** Releases a session's native handle. */
     suspend fun close(session: OfficeEditSession): Unit = withContext(io) { session.close() }
@@ -110,8 +123,23 @@ class OfficeEditRepository @Inject constructor(@ApplicationContext context: Cont
 
     /** Writes [file] to a location the user picked (Storage Access Framework). */
     suspend fun saveCopy(file: File, destination: Uri) = withContext(io) {
-        val output = resolver.openOutputStream(destination, "wt") ?: throw IOException("The copy could not be written.")
-        output.use { stream -> file.inputStream().use { it.copyTo(stream) } }
+        file.inputStream().use { input ->
+            currentCoroutineContext().ensureActive()
+            val output = resolver.openOutputStream(destination, "wt") ?: throw IOException("The copy could not be written.")
+            try {
+                output.use { stream ->
+                    val buffer = ByteArray(COPY_BUFFER)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        stream.write(buffer, 0, count)
+                    }
+                }
+            } catch (error: IOException) {
+                throw IncompleteOfficeCopyException(error)
+            }
+        }
     }
 
     /** Deletes workspace files. Files outside the workspace, such as the user's original, are never touched. */
@@ -137,8 +165,9 @@ class OfficeEditRepository @Inject constructor(@ApplicationContext context: Cont
     }
 
     /** Cancels the native work when the coroutine is cancelled, and detaches once the work returns. */
+    @OptIn(InternalCoroutinesApi::class)
     private suspend fun <T> cancelWith(session: OfficeEditSession, block: () -> T): T {
-        val handle: DisposableHandle? = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+        val handle: DisposableHandle? = currentCoroutineContext()[Job]?.invokeOnCompletion(onCancelling = true) { cause ->
             if (cause != null) session.cancel()
         }
         try {

@@ -14,6 +14,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.ext.SdkExtensions
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
@@ -67,6 +69,7 @@ class AndroidPdfDocument @Inject constructor(
     fun trim() {
         ocrCache.evictAll()
         thumbnails.evictAll()
+        textCache.evictAll()
     }
 
     /** Every PDF can be searched: through the text layer, or through OCR where there is none. */
@@ -148,11 +151,11 @@ class AndroidPdfDocument @Inject constructor(
         maxPages: Int,
         page: suspend (Int, List<PdfTextLine>) -> Boolean,
     ) {
-        val key = uri.toString()
+        val key = revisionKey(uri, password)
         openRenderer(uri, password).use { pdf ->
             val count = minOf(pdf.pageCount, maxPages)
-            val known = ocrCache[key]?.takeIf { it.size == pdf.pageCount } ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount)
-            ocrCache.put(key, known)
+            val known = key?.let(ocrCache::get)?.takeIf { it.size == pdf.pageCount } ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount)
+            if (key != null) ocrCache.put(key, known)
             for (index in 0 until count) {
                 currentCoroutineContext().ensureActive()
                 val lines = known[index] ?: recognizePage(pdf, index).also { known[index] = it }
@@ -243,11 +246,10 @@ class AndroidPdfDocument @Inject constructor(
      */
     suspend fun thumbnail(uri: Uri, index: Int, password: String?, maxEdge: Int): Bitmap {
         val edge = maxEdge.coerceIn(32, MAX_THUMBNAIL_EDGE)
-        val key = "$uri|$index|$edge"
-        thumbnails.get(key)?.let { return it }
         return withContext(io) {
             currentCoroutineContext().ensureActive()
-            thumbnails.get(key)?.let { return@withContext it }
+            val key = revisionKey(uri, password)?.let { "$it|$index|$edge" }
+            key?.let(thumbnails::get)?.let { return@withContext it }
             openRenderer(uri, password).use { pdf ->
                 if (pdf.pageCount <= 0) throw IOException("PDF has no pages")
                 pdf.openPage(index.coerceIn(0, pdf.pageCount - 1)).use { page ->
@@ -259,7 +261,7 @@ class AndroidPdfDocument @Inject constructor(
                     )
                     bitmap.eraseColor(Color.WHITE)
                     page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    bitmap.also { thumbnails.put(key, it) }
+                    bitmap.also { if (key != null) thumbnails.put(key, it) }
                 }
             }
         }
@@ -271,8 +273,8 @@ class AndroidPdfDocument @Inject constructor(
      * built on the IO lane, so a second selection on the page is instant. Scanned pages are OCR'd once.
      */
     suspend fun pageText(uri: Uri, password: String?, index: Int): PdfPageText = withContext(io) {
-        val key = "$uri|$index"
-        textCache.get(key)?.let { return@withContext it }
+        val key = revisionKey(uri, password)?.let { "$it|$index" }
+        key?.let(textCache::get)?.let { return@withContext it }
         currentCoroutineContext().ensureActive()
         val layer = if (hasTextLayer) layerRuns(uri, password, index) else emptyList()
         val built = if (layer.any { it.text.isNotBlank() }) {
@@ -280,8 +282,28 @@ class AndroidPdfDocument @Inject constructor(
         } else {
             PdfPageText.build(ocrLines(uri, password, index).map { PdfTextRun(it.text, listOf(it.box)) })
         }
-        textCache.put(key, built)
+        if (key != null) textCache.put(key, built)
         built
+    }
+
+    /** Reuse derived data only when the provider can identify the current readable revision. */
+    private fun revisionKey(uri: Uri, password: String?): String? {
+        if (password != null) return null
+        val columns = arrayOf(OpenableColumns.SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+        return try {
+            resolver.query(uri, columns, null, null, null)?.use { cursor ->
+                val sizeColumn = cursor.getColumnIndex(columns[0])
+                val modifiedColumn = cursor.getColumnIndex(columns[1])
+                if (!cursor.moveToFirst() || sizeColumn < 0 || modifiedColumn < 0 ||
+                    cursor.isNull(sizeColumn) || cursor.isNull(modifiedColumn)
+                ) return@use null
+                val size = cursor.getLong(sizeColumn)
+                val modified = cursor.getLong(modifiedColumn)
+                if (size <= 0L || modified <= 0L) null else "$uri|$size|$modified"
+            }
+        } catch (_: RuntimeException) {
+            null
+        }
     }
 
     /** One page's text runs from the platform text layer; empty when the platform has none. */
@@ -305,11 +327,11 @@ class AndroidPdfDocument @Inject constructor(
 
     /** OCR lines of one page, through the same per-document cache as the page-by-page reads. */
     private suspend fun ocrLines(uri: Uri, password: String?, index: Int): List<PdfTextLine> {
-        val key = uri.toString()
+        val key = revisionKey(uri, password)
         return openRenderer(uri, password).use { pdf ->
             if (index !in 0 until pdf.pageCount) return@use emptyList()
-            val known = ocrCache[key]?.takeIf { it.size == pdf.pageCount }
-                ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount).also { ocrCache.put(key, it) }
+            val known = key?.let(ocrCache::get)?.takeIf { it.size == pdf.pageCount }
+                ?: arrayOfNulls<List<PdfTextLine>>(pdf.pageCount).also { if (key != null) ocrCache.put(key, it) }
             known[index] ?: recognizePage(pdf, index).also { known[index] = it }
         }
     }

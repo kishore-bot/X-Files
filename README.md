@@ -90,7 +90,7 @@ Every tool follows the same visual flow: **Pick → Adjust → Save**, with live
 
 <img align="right" src="docs/assets/xfiles-logo.svg" width="96" alt="" />
 
-Fily is a voice assistant running a **350M-parameter model locally** through llama.cpp. It answers questions about your files, with page citations, and drives the app through 45 tools: open documents, run PDF tools, scroll and turn pages, tidy storage and more. It speaks its answers back on-device.
+Fily is a voice assistant running a **350M-parameter model locally** through llama.cpp. It answers questions about your files, with page citations, and drives the app through 45 tools: open documents, run PDF tools, scroll and turn pages, tidy storage and more. It speaks its answers back on-device. Voice input requires an on-device recognizer on Android 12 or later. Spoken replies require an installed offline TTS voice.
 
 | 🧠 Technique | 🎯 Why | ⚙️ How |
 |---|---|---|

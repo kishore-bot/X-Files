@@ -114,6 +114,7 @@ pub async fn find_replace(svc: Arc<Services>, args: OfficeFindReplaceArgs) -> Re
                 cancel,
             )?;
             office_edit::verify_reopens(File::open(pending.temp_path())?, cancel)?;
+            ctx.check()?;
             let path = pending.commit()?;
             Ok(json!({
                 "path": shown,

@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.xfiles.core.documents.DocumentRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -28,10 +29,14 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
     private val mutableState = MutableStateFlow<EditorState?>(null)
     val state = mutableState.asStateFlow()
     private var baseline = ""
+    private var baselineFormat = TextEncoding.Utf8 to LineEnding.Lf
+    private var loadJob: Job? = null
 
     /** Opens text that the caller already decoded (UTF-8, LF). */
     fun open(name: String, source: String) {
         if (mutableState.value?.saving == true) return
+        loadJob?.cancel()
+        baselineFormat = TextEncoding.Utf8 to LineEnding.Lf
         val overCap = source.toByteArray(Charsets.UTF_8).size > TextCodec.EDIT_CAP_BYTES
         baseline = if (overCap) "" else source
         text.setTextAndPlaceCursorAtEnd(baseline)
@@ -45,23 +50,32 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
      */
     fun openBytes(name: String, bytes: ByteArray) {
         if (mutableState.value?.saving == true) return
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch { decode(name, bytes) }
+    }
+
+    private suspend fun decode(name: String, bytes: ByteArray) {
         if (bytes.size > TextCodec.EDIT_CAP_BYTES) {
-            baseline = ""
-            text.setTextAndPlaceCursorAtEnd("")
-            mutableState.value = EditorState(name, blocked = OVER_CAP)
+            openBlocked(name, OVER_CAP)
             return
         }
-        viewModelScope.launch {
-            val decoded = withContext(Dispatchers.Default) { TextCodec.decode(bytes) }
-            baseline = decoded.text
-            text.setTextAndPlaceCursorAtEnd(decoded.text)
-            mutableState.value = EditorState(
-                name = name,
-                encoding = decoded.encoding,
-                lineEnding = decoded.lineEnding,
-                blocked = if (decoded.mixedLineEndings) MIXED_LINE_ENDINGS else null,
-            )
-        }
+        val decoded = withContext(Dispatchers.Default) { TextCodec.decode(bytes) }
+        baseline = decoded.text
+        baselineFormat = decoded.encoding to decoded.lineEnding
+        text.setTextAndPlaceCursorAtEnd(decoded.text)
+        mutableState.value = EditorState(
+            name = name,
+            encoding = decoded.encoding,
+            lineEnding = decoded.lineEnding,
+            blocked = if (decoded.mixedLineEndings) MIXED_LINE_ENDINGS else null,
+        )
+    }
+
+    private fun openBlocked(name: String, reason: String) {
+        baseline = ""
+        baselineFormat = TextEncoding.Utf8 to LineEnding.Lf
+        text.setTextAndPlaceCursorAtEnd("")
+        mutableState.value = EditorState(name, blocked = reason)
     }
 
     /**
@@ -70,17 +84,18 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
      */
     fun openFile(name: String, uri: Uri) {
         if (mutableState.value?.saving == true) return
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             val bytes = try {
                 documents.readBoundedBytes(uri, TextCodec.EDIT_CAP_BYTES + 1)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
                 Log.w("XfilesEditor", "Could not read file for editing", error)
-                mutableState.value = EditorState(name, blocked = READ_FAILED)
+                openBlocked(name, READ_FAILED)
                 return@launch
             }
-            openBytes(name, bytes)
+            decode(name, bytes)
         }
     }
 
@@ -88,10 +103,14 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
 
     fun chooseLineEnding(lineEnding: LineEnding) = updateState { it.copy(lineEnding = lineEnding, saved = false) }
 
-    fun hasChanges(): Boolean = text.text.toString() != baseline
+    fun hasChanges(): Boolean {
+        val current = mutableState.value ?: return false
+        return text.text.toString() != baseline || (current.encoding to current.lineEnding) != baselineFormat
+    }
 
     fun close() {
         if (mutableState.value?.saving == true) return
+        loadJob?.cancel()
         mutableState.value = null
         baseline = ""
         text.setTextAndPlaceCursorAtEnd("")
@@ -158,6 +177,7 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
     fun save(uri: Uri) {
         val current = mutableState.value ?: return
         if (current.saving || current.blocked != null) return
+        loadJob?.cancel()
         val content = text.text.toString()
         mutableState.value = current.copy(saving = true, saved = false, error = null)
         viewModelScope.launch {
@@ -165,6 +185,7 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
                 val bytes = withContext(Dispatchers.Default) { TextCodec.encode(content, current.encoding, current.lineEnding) }
                 documents.saveBytesCopy(uri, bytes)
                 baseline = content
+                baselineFormat = current.encoding to current.lineEnding
                 updateState { it.copy(saving = false, saved = true, error = null) }
             } catch (cancelled: CancellationException) {
                 throw cancelled

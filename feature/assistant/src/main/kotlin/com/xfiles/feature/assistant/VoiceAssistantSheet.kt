@@ -237,9 +237,10 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
         pack == SpeechPack.Ready -> "Speech pack ready" to Color(0xFF30A46C)
         pack == SpeechPack.Failed -> "Speech pack download failed" to Color(0xFFE5484D)
         needsLanguage -> "Speech pack needed" to Color(0xFFF5A524)
-        engineMissing -> "Google speech services needed" to Color(0xFFF5A524)
+        engineMissing -> "On-device speech recognition needed" to Color(0xFFF5A524)
         recognition == SpeechState.Error -> "Speech recognition unavailable" to Color(0xFFE5484D)
         ui.working -> "Thinking…" to Color(0xFF3E63DD)
+        speaking == TtsState.Error -> "Offline speech playback unavailable" to Color(0xFFE5484D)
         speaking == TtsState.Speaking -> "Speaking · tap to interrupt" to Color(0xFF8E4EC6)
         recognition == SpeechState.Listening -> "Listening · speak now" to Color(0xFF30A46C)
         wantsToListen -> "Starting the mic…" to Color(0xFFF5A524)
@@ -254,7 +255,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
             packBusy -> "Fetching the offline speech pack from Google. Fily starts listening as soon as it's ready."
             pack == SpeechPack.Failed -> "The speech pack didn't download. Check your connection and try again."
             needsLanguage -> "To hear you offline, your phone needs a speech pack for this language. Download it, then tap Fily."
-            engineMissing -> "Fily listens with Google's on-device speech recognition, which isn't on this phone. Install it, then tap Fily."
+            engineMissing -> "Fily needs an on-device speech recognizer. On Android 12 or later, install or enable a compatible speech service, then tap Fily."
             ui.working -> "Thinking…"
             ui.error != null -> ui.error.orEmpty()
             else -> ui.reply.orEmpty()

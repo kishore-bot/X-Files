@@ -28,6 +28,7 @@ class TextToSpeech(context: Context) {
             override fun onStart(utteranceId: String?) { _state.value = TtsState.Speaking }
             override fun onDone(utteranceId: String?) { _state.value = TtsState.Idle }
             @Deprecated("Deprecated") override fun onError(utteranceId: String?) { _state.value = TtsState.Error }
+            override fun onError(utteranceId: String?, errorCode: Int) { _state.value = TtsState.Error }
         })
     }
 
@@ -38,11 +39,18 @@ class TextToSpeech(context: Context) {
     fun speak(text: String, language: String? = null) {
         if (!ready) return
         val engine = tts ?: return
-        if (language != null) {
-            val result = engine.setLanguage(Locale.forLanguageTag(language))
-            if (result == AndroidTts.LANG_MISSING_DATA || result == AndroidTts.LANG_NOT_SUPPORTED) engine.setLanguage(Locale.getDefault())
+        val preferred = language?.let(Locale::forLanguageTag) ?: Locale.getDefault()
+        val voices = engine.voices.orEmpty().filter {
+            !it.isNetworkConnectionRequired && "notInstalled" !in it.features.orEmpty()
         }
-        engine.speak(text, AndroidTts.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        val voice = voices.firstOrNull { it.locale == preferred }
+            ?: voices.firstOrNull { it.locale.language == preferred.language }
+            ?: voices.firstOrNull { it.locale == Locale.getDefault() }
+        if (voice == null || engine.setVoice(voice) != AndroidTts.SUCCESS ||
+            engine.speak(text, AndroidTts.QUEUE_FLUSH, null, UUID.randomUUID().toString()) != AndroidTts.SUCCESS
+        ) {
+            _state.value = TtsState.Error
+        }
     }
 
     fun stop() {

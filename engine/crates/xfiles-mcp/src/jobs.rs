@@ -48,6 +48,15 @@ impl PdfToolObserver for Progress<'_> {
     }
 }
 
+// Dropping the awaiting request also signals the worker. The worker owns its slot until it exits.
+struct CancelOnDrop(CancelToken);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
 pub struct Jobs {
     timeout: Duration,
     slots: Arc<Semaphore>,
@@ -74,6 +83,7 @@ impl Jobs {
             deadline: Instant::now() + self.timeout,
             timeout_secs: self.timeout.as_secs(),
         };
+        let _cancel_on_drop = CancelOnDrop(ctx.cancel.clone());
         let for_worker = ctx.clone();
         let handle = tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -82,10 +92,35 @@ impl Jobs {
         match tokio::time::timeout(self.timeout, handle).await {
             Ok(Ok(result)) => result,
             Ok(Err(join)) => Err(ToolError::Internal(format!("the operation stopped unexpectedly ({join})"))),
-            Err(_) => {
-                ctx.cancel.cancel();
-                Err(ToolError::Timeout(self.timeout.as_secs()))
-            }
+            Err(_) => Err(ToolError::Timeout(self.timeout.as_secs())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn dropping_the_request_signals_the_blocking_worker() {
+        let jobs = Jobs::new(Duration::from_secs(2), 1);
+        let (started, running) = oneshot::channel();
+        let (finished, stopped) = oneshot::channel();
+        let request = tokio::spawn(async move {
+            jobs.run(move |ctx| {
+                let _ = started.send(());
+                while !ctx.is_stopped() {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let _ = finished.send(ctx.cancel_token().is_cancelled());
+                Ok(())
+            })
+            .await
+        });
+
+        running.await.unwrap();
+        request.abort();
+        assert!(tokio::time::timeout(Duration::from_secs(1), stopped).await.unwrap().unwrap());
     }
 }

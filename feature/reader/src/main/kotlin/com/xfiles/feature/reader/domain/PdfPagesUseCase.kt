@@ -28,6 +28,7 @@ class PdfPagesUseCase @Inject constructor(
             size > CACHED_PAGES
     }
     private var prefetchJob: Job? = null
+    private var generation = 0L
 
     /** Keeps a page that was just opened, so turning back to it is instant. */
     fun remember(page: FilePreview.Pdf) {
@@ -37,7 +38,11 @@ class PdfPagesUseCase @Inject constructor(
     /** Page bitmap from the small cache, or rendered once and kept while recent. */
     suspend fun page(file: FileEntry, index: Int, password: String?): FilePreview.Pdf {
         cache[index]?.let { return it }
-        return documents.page(file, index, password).also { cache[index] = it }
+        val session = generation
+        val rendered = documents.page(file, index, password)
+        if (session != generation) throw CancellationException("PDF session changed")
+        cache[index] = rendered
+        return rendered
     }
 
     /** Warms the neighbours of what is shown, so the next turn is already rendered. Failures are silent. */
@@ -64,6 +69,7 @@ class PdfPagesUseCase @Inject constructor(
     }
 
     fun clear() {
+        generation++
         prefetchJob?.cancel()
         prefetchJob = null
         cache.clear()

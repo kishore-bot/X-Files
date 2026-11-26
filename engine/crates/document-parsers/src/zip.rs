@@ -20,6 +20,7 @@ const EOCD_SIGNATURE: u32 = 0x0605_4b50;
 const CENTRAL_SIGNATURE: u32 = 0x0201_4b50;
 const LOCAL_SIGNATURE: u32 = 0x0403_4b50;
 const EOCD_MIN_LEN: usize = 22;
+const MAX_CENTRAL_DIRECTORY_BYTES: u64 = 32 * 1024 * 1024;
 /// The end record may be followed by a comment of up to 65535 bytes.
 const EOCD_SEARCH_LEN: u64 = EOCD_MIN_LEN as u64 + 65_535;
 /// Ratio checks start once an entry has produced this much output, so small
@@ -60,7 +61,10 @@ impl ZipArchive {
         reader.seek(SeekFrom::Start(byte_size - tail_len))?;
         let mut tail = vec![0; tail_len as usize];
         reader.read_exact(&mut tail)?;
-        let eocd = (0..=tail.len().saturating_sub(EOCD_MIN_LEN))
+        if tail.len() < EOCD_MIN_LEN {
+            return Err(malformed("the ZIP end-of-directory record is truncated"));
+        }
+        let eocd = (0..=tail.len() - EOCD_MIN_LEN)
             .rev()
             .find(|&i| le32(&tail[i..]) == EOCD_SIGNATURE)
             .ok_or_else(|| malformed("the ZIP end-of-directory record is missing"))?;
@@ -79,6 +83,9 @@ impl ZipArchive {
         let (cd_size, cd_offset) = (u64::from(cd_size), u64::from(cd_offset));
         if cd_offset + cd_size > eocd_offset {
             return Err(malformed("the ZIP central directory lies outside the file"));
+        }
+        if cd_size > MAX_CENTRAL_DIRECTORY_BYTES {
+            return Err(EngineError::limit("the ZIP central directory exceeds the 32 MiB limit"));
         }
         if usize::from(entry_count) > limits.max_archive_entries {
             return Err(EngineError::limit(format!(
@@ -500,6 +507,14 @@ mod tests {
     fn open(bytes: Vec<u8>, limits: Limits) -> Result<ZipArchive> {
         let len = bytes.len() as u64;
         ZipArchive::open(Box::new(Cursor::new(bytes)), len, limits, CancelToken::default())
+    }
+
+    #[test]
+    fn empty_and_truncated_inputs_return_malformed() {
+        for length in 0..EOCD_MIN_LEN {
+            let error = open(vec![0; length], Limits::default()).err().unwrap();
+            assert_eq!(error.kind, ErrorKind::Malformed);
+        }
     }
 
     #[test]

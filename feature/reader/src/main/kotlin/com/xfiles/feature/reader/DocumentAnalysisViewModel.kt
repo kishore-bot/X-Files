@@ -123,6 +123,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     fun dismissPrintError() = printController.dismiss()
 
     private var readerJob: Job? = null
+    private var spreadJob: Job? = null
     private var summaryJob: Job? = null
     private var pdfPassword: String? = null
     /** Archives left by [openNested], innermost last; [popNested] returns to them. */
@@ -137,6 +138,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         if (markup.value.saving) return
         discardMarkup()
         clearPdfSearch()
+        spreadJob?.cancel()
         pdfPages.clear()
         pdfPassword = null
         saved[OPEN_URI] = uri.toString()
@@ -182,6 +184,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         discardMarkup()
         pdfPassword = null
         clearPdfSearch()
+        spreadJob?.cancel()
         pdfPages.clear()
         readerJob?.cancel()
         summaryJob?.cancel()
@@ -211,13 +214,14 @@ class DocumentAnalysisViewModel @Inject constructor(
         val ready = state.value as? ReaderState.Ready ?: return
         val pdf = ready.preview as? FilePreview.Pdf ?: return
         if (ready.turningPage || ready.twoPage == enabled) return
+        spreadJob?.cancel()
         val partner = if (enabled) pdfPartner(pdf.page, pdf.pageCount) else null
         mutableState.value = ready.copy(twoPage = enabled, facing = null)
         if (!enabled) {
             pdfPages.prefetch(viewModelScope, ready.file, pdf.page, pdf.pageCount, false, pdfPassword)
             return
         }
-        viewModelScope.launch {
+        spreadJob = viewModelScope.launch {
             val facing = partner?.let {
                 try {
                     pdfPages.page(ready.file, it, pdfPassword)

@@ -3,6 +3,7 @@ package com.xfiles.feature.reader
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.xfiles.core.documents.IncompleteOfficeCopyException
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.OfficeEditRepository
 import com.xfiles.documentengine.OfficeEditException
@@ -175,7 +176,7 @@ class OfficeFindReplaceViewModel @Inject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                updateReady { it.copy(message = "The copy could not be saved.") }
+                updateReady { it.copy(message = (error as? IncompleteOfficeCopyException)?.message ?: "The copy could not be saved.") }
             }
         }
     }
