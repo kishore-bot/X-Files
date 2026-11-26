@@ -29,7 +29,7 @@ internal fun ReaderPdfPage(
     pdfText: suspend (Int) -> PdfPageText?,
     loadPage: suspend (Int) -> FilePreview.Pdf?,
     onAddMarkup: (PdfMarkup) -> Unit,
-    onPage: (Int) -> Unit,
+    onPdfPageSettled: (Int) -> Unit,
     onPdfQuery: (String) -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -63,6 +63,8 @@ internal fun ReaderPdfPage(
             PdfContinuousView(
                 pageCount = preview.pageCount,
                 currentPage = preview.page,
+                jump = ready.pdfJump,
+                turningPage = ready.turningPage,
                 twoUp = ui.pdfTwoUp,
                 zoom = ui.pdfZoom,
                 loadPage = loadPage,
@@ -70,7 +72,7 @@ internal fun ReaderPdfPage(
                 marks = ::marksOn,
                 textSource = ::textSource,
                 colorFilter = LocalPageStyle.current.pageFilter(),
-                onPage = onPage,
+                onPageSettled = onPdfPageSettled,
                 onVisiblePage = { onEvent(ReaderUiEvent.SetVisiblePdfPage(it)) },
                 onZoom = { onEvent(ReaderUiEvent.SetPdfZoom(it)) },
             )

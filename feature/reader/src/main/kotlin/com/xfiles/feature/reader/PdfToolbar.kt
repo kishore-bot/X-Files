@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -35,6 +36,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzIcons
+import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.glassBar
 import com.xfiles.design.rememberHaptics
 
@@ -47,17 +49,22 @@ internal fun PdfToolbar(
     pageCount: Int,
     zoom: Int,
     grid: Boolean,
-    busy: Boolean,
     thumbnail: suspend (Int) -> Bitmap?,
     onPage: (Int) -> Unit,
     onJump: () -> Unit,
     onZoom: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    settingsOpen: Boolean = false,
+    onEngage: () -> Unit = {},
 ) {
     val haptics = rememberHaptics()
     val previous = if (page > 0) page - 1 else null
     val next = if (page < pageCount - 1) page + 1 else null
     var showPages by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val filyOpen = LocalFilyOpen.current
+    LaunchedEffect(filyOpen, settingsOpen) {
+        if (filyOpen || settingsOpen) showPages = false
+    }
     Column(
         modifier.fillMaxWidth().glassBar().padding(horizontal = 4.dp),
     ) {
@@ -66,7 +73,7 @@ internal fun PdfToolbar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(0.dp, Alignment.CenterHorizontally),
         ) {
-            IconButton(onClick = { haptics.tick(); previous?.let(onPage) }, enabled = !busy && previous != null) {
+            IconButton(onClick = { haptics.tick(); previous?.let(onPage) }, enabled = previous != null) {
                 Icon(EzIcons.ChevronLeft, "Previous page")
             }
             Row(
@@ -74,6 +81,7 @@ internal fun PdfToolbar(
                     .clip(RoundedCornerShape(12.dp))
                     .clickable(onClickLabel = "Go to page") {
                         haptics.tick()
+                        onEngage()
                         onJump()
                     }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -82,7 +90,7 @@ internal fun PdfToolbar(
                 Text("${page + 1} / $pageCount", style = MaterialTheme.typography.labelLarge)
                 Icon(EzIcons.DropDown, "Go to page")
             }
-            IconButton(onClick = { haptics.tick(); next?.let(onPage) }, enabled = !busy && next != null) {
+            IconButton(onClick = { haptics.tick(); next?.let(onPage) }, enabled = next != null) {
                 Icon(EzIcons.ChevronRight, "Next page")
             }
             IconButton(
@@ -95,12 +103,12 @@ internal fun PdfToolbar(
                 enabled = !grid && zoom < PDF_MAX_ZOOM,
             ) { Icon(EzIcons.Plus, "Zoom in") }
             if (pageCount > 1 && !grid) {
-                IconButton(onClick = { showPages = true }) { Icon(EzIcons.ListLines, "Page thumbnails") }
+                IconButton(onClick = { onEngage(); showPages = true }) { Icon(EzIcons.ListLines, "Page thumbnails") }
             }
         }
     }
-    if (showPages && !grid) {
-        PdfPageSheet(page, pageCount, thumbnail, enabled = !busy, onPage = { target ->
+    if (showPages && !grid && !filyOpen && !settingsOpen) {
+        PdfPageSheet(page, pageCount, thumbnail, enabled = true, onPage = { target ->
             showPages = false
             onPage(target)
         }, onDismiss = { showPages = false })

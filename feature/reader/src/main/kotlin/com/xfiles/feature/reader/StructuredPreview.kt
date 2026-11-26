@@ -97,10 +97,10 @@ private fun DocumentBlocks(document: StructuredDocument) {
         ) {
             if (document.truncated) item { Text("Showing the beginning of this file.", color = pageSecondary(EzColors.TextSecondary)) }
             if (document.blocks.isEmpty()) item { Text("This file has no readable content.") }
-            itemsIndexed(items, key = { index, _ -> index }) { _, item ->
+            itemsIndexed(items, key = { index, _ -> index }) { index, item ->
                 when (item) {
                     is DocumentItem.Single -> DocumentBlock(item.block)
-                    is DocumentItem.Table -> DocumentTable(item.rows)
+                    is DocumentItem.Table -> DocumentTable(item.rows, progressField = "table:$index:x")
                 }
             }
         }

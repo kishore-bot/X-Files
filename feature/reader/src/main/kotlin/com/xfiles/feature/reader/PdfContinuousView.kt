@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +48,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -54,20 +57,23 @@ import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfMatchBox
 import com.xfiles.documents.PdfBox
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private const val PAPER_ASPECT = 1f / 1.414f
 
 /**
  * The PDF as one continuous column of pages (EzFiles' single-page view), or two pages per row when [twoUp].
- * Pages render as they come into view through [loadPage] (the reader's bitmap cache). The top page reports
- * through [onPage] once scrolling rests; a page changed elsewhere (find, the toolbar) scrolls into view.
+ * Pages render as they come into view through [loadPage]. Scrolling reports the most visible page, and
+ * [jump] carries explicit page navigation from controls and search.
  * Pinch zooms in steps and reports through [onZoom].
  */
 @Composable
 internal fun PdfContinuousView(
     pageCount: Int,
     currentPage: Int,
+    jump: PdfPageJump?,
+    turningPage: Boolean,
     twoUp: Boolean,
     zoom: Int,
     loadPage: suspend (Int) -> FilePreview.Pdf?,
@@ -75,7 +81,7 @@ internal fun PdfContinuousView(
     marks: (Int) -> List<PdfBox>,
     textSource: (Int) -> PdfTextSource,
     colorFilter: ColorFilter?,
-    onPage: (Int) -> Unit,
+    onPageSettled: (Int) -> Unit,
     onVisiblePage: (Int) -> Unit,
     onZoom: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -92,13 +98,22 @@ internal fun PdfContinuousView(
     RegisterViewerScroll(listState) { LazyScroll(listState) }
     val scrollX = rememberViewerScroll("pdf-x")
     val currentZoom by rememberUpdatedState(zoom)
-    val reportPage by rememberUpdatedState(onPage)
+    val reportPage by rememberUpdatedState(onPageSettled)
     val showPage by rememberUpdatedState(onVisiblePage)
     val selectedPage by rememberUpdatedState(currentPage)
     var pinch by remember { mutableFloatStateOf(1f) }
-    var lastNavigation by remember { androidx.compose.runtime.mutableStateOf(currentPage to perRow) }
-    var reportedPage by remember { androidx.compose.runtime.mutableStateOf<Int?>(null) }
-    var movingToPage by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var handledJump by rememberSaveable { mutableStateOf<Long?>(null) }
+    var layoutColumns by rememberSaveable { mutableStateOf(perRow) }
+    var movingToPage by remember { mutableStateOf(false) }
+    var settledPosition by remember { mutableStateOf<String?>(null) }
+    val requestedJump by rememberUpdatedState(jump)
+    val loadingPage by rememberUpdatedState(turningPage)
+    var viewportWidth by remember { mutableIntStateOf(0) }
+    val spreadGap by rememberUpdatedState(with(LocalDensity.current) { 8.dp.roundToPx() })
+
+    fun spreadWidth(): Int = (viewportWidth * (currentZoom / 100f)).roundToInt()
+
+    fun secondPageStart(): Int = (spreadWidth() + spreadGap) / 2
 
     fun visiblePage(): Int? {
         val layout = listState.layoutInfo
@@ -106,44 +121,63 @@ internal fun PdfContinuousView(
             minOf(item.offset + item.size, layout.viewportEndOffset) - maxOf(item.offset, layout.viewportStartOffset)
         }?.index ?: return null
         val first = (row * perRow).coerceIn(0, (pageCount - 1).coerceAtLeast(0))
-        return selectedPage.takeIf { it / perRow == row } ?: first
+        val preferred = requestedJump?.page?.takeIf { movingToPage || loadingPage } ?: selectedPage
+        if (perRow == 2 && first + 1 < pageCount && viewportWidth > 0 && currentZoom > 100) {
+            val start = scrollX.value
+            val end = start + viewportWidth
+            val left = (minOf(end, secondPageStart() - spreadGap) - start).coerceAtLeast(0)
+            val right = (minOf(end, spreadWidth()) - maxOf(start, secondPageStart())).coerceAtLeast(0)
+            if (left != right) return if (right > left) first + 1 else first
+        }
+        return preferred.takeIf { it / perRow == row } ?: first
     }
 
-    // Only explicit page selections move the viewport. A settled scroll also updates the reader's page model.
-    LaunchedEffect(currentPage, perRow) {
-        val previous = lastNavigation
-        lastNavigation = currentPage to perRow
-        if (previous == lastNavigation) return@LaunchedEffect
-        if (reportedPage == currentPage && previous.second == perRow) {
-            reportedPage = null
-            return@LaunchedEffect
-        }
-        reportedPage = null
-        val target = (currentPage / perRow).coerceIn(0, (rows - 1).coerceAtLeast(0))
+    LaunchedEffect(jump, perRow) {
+        val newJump = jump?.takeIf { it.id != handledJump }
+        if (newJump == null && layoutColumns == perRow) return@LaunchedEffect
+        val target = ((newJump?.page ?: selectedPage) / perRow).coerceIn(0, (rows - 1).coerceAtLeast(0))
         movingToPage = true
         try {
-            if (target != listState.firstVisibleItemIndex) listState.animateScrollToItem(target)
+            listState.scrollToItem(target)
+            if (newJump != null) {
+                if (perRow == 2 && currentZoom > 100) {
+                    snapshotFlow { viewportWidth > 0 && scrollX.maxValue != Int.MAX_VALUE }.first { it }
+                    scrollX.scrollTo(if (newJump.page % 2 == 0) 0 else secondPageStart())
+                }
+                handledJump = newJump.id
+            }
+            layoutColumns = perRow
         } finally {
             movingToPage = false
         }
     }
     LaunchedEffect(listState, perRow, pageCount) {
-        snapshotFlow { visiblePage() to (listState.isScrollInProgress || movingToPage) }
-            .collect { (page, moving) ->
-                if (page != null) {
-                    showPage(page)
-                    if (!moving && page != selectedPage) {
+        var reportedPage: Int? = null
+        snapshotFlow {
+            val page = visiblePage()
+            val moving = listState.isScrollInProgress || scrollX.isScrollInProgress || movingToPage || layoutColumns != perRow ||
+                (requestedJump?.id != null && requestedJump?.id != handledJump)
+            val anchor = if (page != null && !moving) {
+                "$page:${listState.firstVisibleItemIndex}:${listState.firstVisibleItemScrollOffset}:$perRow"
+            } else null
+            Triple(page, anchor, loadingPage)
+        }.collect { (page, anchor, loading) ->
+            if (page != null) {
+                showPage(page)
+                if (anchor == null) reportedPage = null
+                if (anchor != null) {
+                    settledPosition = anchor
+                    if (!loading && page != reportedPage) {
                         reportedPage = page
-                        reportPage(page)
+                        if (page != selectedPage) reportPage(page)
                     }
                 }
             }
+        }
     }
-    SaveViewerProgress("pdf-position") {
-        visiblePage()?.let { "$it:${listState.firstVisibleItemIndex}:${listState.firstVisibleItemScrollOffset}:$perRow" }
-    }
+    SaveViewerProgress("pdf-position") { settledPosition }
 
-    BoxWithConstraints(modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier.fillMaxSize().onSizeChanged { viewportWidth = it.width }) {
         val contentWidth: Dp = maxWidth * (zoom / 100f)
         val rowWidth = if (zoom > 100) contentWidth else maxWidth
         val slotWidth = (rowWidth - 8.dp * (perRow - 1)) / perRow

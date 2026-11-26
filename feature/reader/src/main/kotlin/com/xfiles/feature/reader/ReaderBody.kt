@@ -50,6 +50,7 @@ internal fun ReaderBody(
     onFily: () -> Unit,
     onPassword: (String) -> Unit,
     onPage: (Int) -> Unit,
+    onPdfPageSettled: (Int) -> Unit,
     onPdfQuery: (String) -> Unit,
     onAddMarkup: (PdfMarkup) -> Unit,
     pdfThumbnail: suspend (Int) -> Bitmap?,
@@ -68,7 +69,7 @@ internal fun ReaderBody(
         if (ui.showGrid && gridPdf != null) {
             PdfPageGrid(
                 pageCount = gridPdf.pageCount,
-                current = gridPdf.page,
+                current = ui.visiblePdfPage ?: gridPdf.page,
                 load = pdfThumbnail,
                 onOpen = { index ->
                     onEvent(ReaderUiEvent.SetGrid(false))
@@ -103,7 +104,7 @@ internal fun ReaderBody(
                         markup = markup,
                         pdfFind = pdfFind,
                         structuredEdits = structuredEdits,
-                        onPage = onPage,
+                        onPdfPageSettled = onPdfPageSettled,
                         onPdfQuery = onPdfQuery,
                         onAddMarkup = onAddMarkup,
                         pdfText = pdfText,
@@ -136,7 +137,7 @@ private fun ReaderPreview(
     markup: PdfMarkupState,
     pdfFind: PdfFindState,
     structuredEdits: StructuredEditSession?,
-    onPage: (Int) -> Unit,
+    onPdfPageSettled: (Int) -> Unit,
     onPdfQuery: (String) -> Unit,
     onAddMarkup: (PdfMarkup) -> Unit,
     pdfText: suspend (Int) -> PdfPageText?,
@@ -230,7 +231,7 @@ private fun ReaderPreview(
             pdfText = pdfText,
             loadPage = pagePreview,
             onAddMarkup = onAddMarkup,
-            onPage = onPage,
+            onPdfPageSettled = onPdfPageSettled,
             onPdfQuery = onPdfQuery,
         )
         is FilePreview.Media -> MediaScreen(state.file, preview.video, onBack)

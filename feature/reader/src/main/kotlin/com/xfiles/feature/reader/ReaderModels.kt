@@ -25,8 +25,11 @@ sealed interface ReaderState {
         /** Two-page view: the spread's other page (null for single view, or when there is none). */
         val twoPage: Boolean = false,
         val facing: FilePreview.Pdf? = null,
+        val pdfJump: PdfPageJump? = null,
     ) : ReaderState
 }
+
+data class PdfPageJump(val id: Long, val page: Int)
 
 sealed interface SummaryState {
     data object Loading : SummaryState

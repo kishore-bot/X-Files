@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import com.xfiles.design.EzIcons
+import com.xfiles.design.LocalFilyOpen
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.graphics.Color
@@ -121,8 +122,9 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
     }
     if (video) PipRemoteControls(player)
     // Sheets can't be used in the small Picture-in-Picture window, so they close as it opens.
-    LaunchedEffect(inPip) {
-        if (inPip) {
+    val filyOpen = LocalFilyOpen.current
+    LaunchedEffect(inPip, filyOpen) {
+        if (inPip || filyOpen) {
             menuOpen = false
             viewModel.onEvent(MediaPlayerEvent.OpenSheet(null))
         }
@@ -318,5 +320,5 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
             }
         }
     }
-    MediaSheetHost(state, file, player, device, viewModel::onEvent)
+    if (!filyOpen) MediaSheetHost(state, file, player, device, viewModel::onEvent)
 }

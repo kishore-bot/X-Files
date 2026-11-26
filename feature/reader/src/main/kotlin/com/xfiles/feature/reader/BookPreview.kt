@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.book.BookManifest
 import com.xfiles.documents.book.TextMark
@@ -41,6 +42,8 @@ internal fun BookPreview(document: StructuredDocument, onClose: () -> Unit = {},
     val manifest = document.book
     val key = remember(document) { bookKey(document.info.name, document.info.byteSize, manifest) }
     val vm: BookViewModel = hiltViewModel()
+    val filyOpen = LocalFilyOpen.current
+    LaunchedEffect(filyOpen) { if (filyOpen) vm.dismissSheet() }
     LaunchedEffect(key) { vm.open(key) }
     val state by vm.state.collectAsStateWithLifecycle()
     if (state.key != key) {
@@ -153,7 +156,7 @@ internal fun BookPreview(document: StructuredDocument, onClose: () -> Unit = {},
     )
 
     BookSheetHost(
-        sheet = state.sheet,
+        sheet = state.sheet.takeUnless { filyOpen },
         vm = vm,
         state = state,
         annotations = annotations,

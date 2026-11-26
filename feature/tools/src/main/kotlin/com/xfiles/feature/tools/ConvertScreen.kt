@@ -46,7 +46,7 @@ internal class ConvertLaunch(
 @Composable
 internal fun ConvertToolScreen(viewModel: ConvertViewModel, onBack: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val text = rememberTextFieldState()
+    val text = rememberTextFieldState(initialText = state.typedText)
     val position = rememberTextFieldState()
     val password = remember(state.pdf) { TextFieldState() }
     var scanning by rememberSaveable { mutableStateOf(false) }
@@ -207,6 +207,7 @@ private fun ConvertBottomBar(
     val output = state.output
     val pages = state.pictures.size
     val label = when {
+        state.busy && state.tool == ConvertTool.TextToPdf && output == null -> "Making PDF…"
         output is ConvertOutput.Pdf -> "Save PDF · ${output.pdf.pages} ${if (output.pdf.pages == 1) "page" else "pages"}"
         output is ConvertOutput.Text -> "Save text"
         else -> when (state.tool) {

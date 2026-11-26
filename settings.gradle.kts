@@ -11,6 +11,26 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "LazyMatrix"
+                    val local = providers.gradleProperty("lazyMatrixLocalRepo").orNull
+                        ?.let { file(it) } ?: file("../../CustomCompose/LazyMatrix/lazymatrix/build/maven")
+                    val remote = providers.gradleProperty("lazyMatrixMavenUrl").orNull
+                    if (remote == null && local.resolve("dev/lazymatrix/lazymatrix/0.1.1/lazymatrix-0.1.1.aar").isFile) {
+                        url = local.toURI()
+                    } else {
+                        url = uri(remote ?: "https://maven.pkg.github.com/kishore-bot/lazymatrix")
+                        credentials {
+                            username = providers.environmentVariable("LAZYMATRIX_MAVEN_USER").orNull
+                            password = providers.environmentVariable("LAZYMATRIX_MAVEN_TOKEN").orNull
+                        }
+                    }
+                }
+            }
+            filter { includeModule("dev.lazymatrix", "lazymatrix") }
+        }
     }
 }
 

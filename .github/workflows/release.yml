@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  packages: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -91,6 +92,8 @@ jobs:
 
       - name: Build the release APK
         env:
+          LAZYMATRIX_MAVEN_USER: ${{ vars.LAZYMATRIX_MAVEN_USER || github.actor }}
+          LAZYMATRIX_MAVEN_TOKEN: ${{ secrets.LAZYMATRIX_MAVEN_TOKEN || github.token }}
           XFILES_KEYSTORE_PASSWORD: ${{ secrets.XFILES_KEYSTORE_PASSWORD }}
           XFILES_KEY_ALIAS: ${{ secrets.XFILES_KEY_ALIAS }}
           XFILES_KEY_PASSWORD: ${{ secrets.XFILES_KEY_PASSWORD }}

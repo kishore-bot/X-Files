@@ -4,13 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
-import java.util.ServiceLoader
 
-/**
- * Draws a sheet's grid. The reader has a built-in grid; a build can supply another renderer through
- * [java.util.ServiceLoader] (a `META-INF/services` entry naming an implementation with a public no-arg
- * constructor). With none present, the built-in grid is used.
- */
+/** Draws a sheet and exposes its scroll commands to the reader. */
 interface SheetGridRenderer {
     @Composable
     fun Grid(spec: SheetGridSpec, modifier: Modifier)
@@ -22,7 +17,8 @@ interface SheetGridRenderer {
  * and [rowLabel], and [corner] fills the space where they meet.
  */
 @Immutable
-class SheetGridSpec(
+data class SheetGridSpec(
+    val progressField: String,
     val rowCount: Int,
     val columnCount: Int,
     val frozenRows: Int,
@@ -51,17 +47,6 @@ interface SheetGridScroller {
     suspend fun scrollToTop()
 
     suspend fun scrollToBottom()
-}
-
-/** The supplied renderer, looked up once; null keeps the built-in grid. */
-internal object SheetGrids {
-    val renderer: SheetGridRenderer? by lazy {
-        try {
-            ServiceLoader.load(SheetGridRenderer::class.java, SheetGridRenderer::class.java.classLoader).firstOrNull()
-        } catch (_: Throwable) {
-            null
-        }
-    }
 }
 
 /** Adapts a [SheetGridScroller] to the assistant's scroll commands. */

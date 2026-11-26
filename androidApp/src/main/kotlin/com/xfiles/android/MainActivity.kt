@@ -53,6 +53,7 @@ import com.xfiles.design.LocalEzPalette
 import com.xfiles.design.LocalHapticsEnabled
 import android.graphics.drawable.ColorDrawable
 import androidx.compose.ui.graphics.toArgb
+import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.ReducedMotionMonitor
 import com.xfiles.design.glassScreen
@@ -193,12 +194,12 @@ class MainActivity : ComponentActivity() {
             }
             val reducedMotion by motion.reduced.collectAsStateWithLifecycle()
 
-            CompositionLocalProvider(LocalHapticsEnabled provides haptics, LocalReducedMotion provides reducedMotion, LocalMediaPip provides mediaPip) {
+            CompositionLocalProvider(LocalHapticsEnabled provides haptics, LocalReducedMotion provides reducedMotion, LocalMediaPip provides mediaPip, LocalFilyOpen provides showFily) {
                 EzTheme(darkTheme = darkTheme) {
                     // The window behind the Compose tree follows the (animated) palette, so bars and gaps never flash.
                     val windowColor = LocalEzPalette.current.background.toArgb()
                     SideEffect { window.setBackgroundDrawable(ColorDrawable(windowColor)) }
-                    sharedLink?.let { link ->
+                    sharedLink?.takeUnless { showFily }?.let { link ->
                         SharedLinkSheet(
                             link = link,
                             onSaveNote = { navigator.openEditor("Shared link.txt", link); sharedLink = null },
@@ -221,9 +222,9 @@ class MainActivity : ComponentActivity() {
                             onBack = navigator::back,
                             entryProvider = entryProvider {
                                 entry<Route.Library> {
-                                    LibraryRoute(navigator, onFily = { showFily = true }, onListedFiles = { displayedFiles = it; StartupGate.markDataReady() })
+                                    LibraryRoute(navigator, onFily = { showFily = !showFily }, onListedFiles = { displayedFiles = it; StartupGate.markDataReady() })
                                 }
-                                entry<Route.Reader> { ReaderRoute(navigator, onFily = { showFily = true }) }
+                                entry<Route.Reader> { ReaderRoute(navigator, onFily = { showFily = !showFily }) }
                                 entry<Route.Editor> { draft?.let { TextEditorScreen(it, editor) } }
                                 entry<Route.Tools> {
                                     PdfToolsScreen(pdfTools, onBack = navigator::back)
@@ -255,8 +256,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                         )
-                        if (showFily && !inPip) FilyOverlay(navigator, { displayedFiles }, onDismiss = { showFily = false })
-                        if (!inPip) CrashReportPrompt(crashReports)
+                        if (showFily && !inPip && !introVisible) FilyOverlay(navigator, { displayedFiles }, onDismiss = { showFily = false })
+                        if (!inPip && !showFily) CrashReportPrompt(crashReports)
                         // The screen name only (never a file name), for the crash report.
                         SideEffect(navigator.top) { CrashBreadcrumbs.screen = (navigator.top as? Route)?.toString() }
                     }
@@ -403,6 +404,7 @@ class MainActivity : ComponentActivity() {
             structuredEdits = analysis.structuredEdits,
             onBack = navigator::back,
             onPage = analysis::changePage,
+            onPdfPageSettled = analysis::reportPdfPage,
             onSummary = analysis::showSummary,
             onDismissSummary = analysis::dismissSummary,
             onPassword = analysis::unlock,

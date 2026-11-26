@@ -29,6 +29,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -72,7 +73,9 @@ class ConversionRepository @Inject constructor(
     private val cache = File(app.cacheDir, "conversions")
     private val lane = Dispatchers.IO.limitedParallelism(1)
 
-    /** The last text laid out, kept so paging through a preview and then exporting doesn't redo the layout. Lane-only. */
+    private val textPreviewLane = Dispatchers.Default.limitedParallelism(1)
+
+    /** The last preview layout, accessed only from the preview lane. */
     private var textLayout: TextPdfLayout? = null
 
     // --- Create ---------------------------------------------------------------------------------
@@ -199,21 +202,38 @@ class ConversionRepository @Inject constructor(
     }.flowOn(lane)
 
     /** The text as a PDF in [style]: one page per [TextPdfLayout] page, with the template's decoration. */
-    suspend fun textToPdf(text: String, style: TextPdfStyle): PreparedPdf = withContext(lane) {
+    suspend fun textToPdf(
+        text: String,
+        style: TextPdfStyle,
+        onProgress: (Float) -> Unit = {},
+    ): PreparedPdf {
         require(text.isNotBlank()) { "Type some text first." }
         require(text.length <= MAX_TEXT) { "Text to PDF takes up to ${MAX_TEXT / 1000}k characters." }
-        val target = workFile(".pdf")
+        var temporary: File? = null
         try {
-            val pages = target.outputStream().buffered().use { PdfComposer.writeText(layoutFor(text, style), it) }
-            PreparedPdf(target, pages, false, false, false)
+            return withContext(lane) {
+                val job = currentCoroutineContext()
+                val target = workFile(".pdf").also { temporary = it }
+                val layout = TextPdfLayout(text, style)
+                job.ensureActive()
+                val pages = target.outputStream().buffered().use { output ->
+                    PdfComposer.writeText(layout, output) { page ->
+                        job.ensureActive()
+                        onProgress(0.95f * page / layout.pages.size)
+                    }
+                }
+                PreparedPdf(target, pages, false, false, false)
+            }
         } catch (error: Throwable) {
-            target.delete()
+            temporary?.let { file ->
+                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+            }
             throw error
         }
     }
 
     /** One page of the text as [style] draws it, [widthPx] wide, for the live preview. */
-    suspend fun textPreview(text: String, style: TextPdfStyle, pageIndex: Int, widthPx: Int): TextPagePreview = withContext(lane) {
+    suspend fun textPreview(text: String, style: TextPdfStyle, pageIndex: Int, widthPx: Int): TextPagePreview = withContext(textPreviewLane) {
         val layout = layoutFor(text, style)
         val index = pageIndex.coerceIn(0, layout.pages.lastIndex)
         TextPagePreview(layout.render(index, widthPx.coerceIn(1, MAX_PREVIEW_WIDTH_PX)), index, layout.pages.size)
@@ -337,7 +357,7 @@ class ConversionRepository @Inject constructor(
 
     // --- Shared ---------------------------------------------------------------------------------
 
-    /** The layout for [text] in [style], reused while both stay the same. Lane-only. */
+    /** The layout for [text] in [style], reused while both stay the same. Preview lane only. */
     private fun layoutFor(text: String, style: TextPdfStyle): TextPdfLayout {
         textLayout?.takeIf { it.style == style && it.text == text }?.let { return it }
         return TextPdfLayout(text, style).also { textLayout = it }

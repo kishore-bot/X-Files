@@ -6,7 +6,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +23,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -47,7 +45,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -63,8 +60,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -99,15 +94,11 @@ import com.xfiles.design.EzSpacing
 import com.xfiles.design.EzTextButton
 import com.xfiles.design.FileNameStyle
 import com.xfiles.design.FileTypeTile
-import com.xfiles.design.FilyMascot
-import com.xfiles.design.FilyMascotCallToAction
+import com.xfiles.design.FilyButton
 import com.xfiles.design.GlassIconButton
-import com.xfiles.design.LocalHapticsEnabled
 import com.xfiles.design.PrimaryActionButton
-import com.xfiles.design.floatingGlass
 import com.xfiles.design.glass
 import com.xfiles.design.glassCard
-import com.xfiles.design.pressScale
 import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.library.LibraryCategory
@@ -135,30 +126,8 @@ internal fun Header(
             color = EzColors.Text,
             modifier = Modifier.weight(1f).semantics { heading() },
         )
-        if (onVoice != null) MicButton(onVoice)
+        if (onVoice != null) FilyButton(onVoice)
         if (onAbout != null) GlassIconButton(EzIcons.Info, "About Xfiles", onAbout)
-    }
-}
-
-/** The round glass button that opens Fily; Fily's mascot sits inside it. */
-@Composable
-internal fun MicButton(onVoice: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    val haptics = rememberHaptics()
-    val hapticsOn = LocalHapticsEnabled.current
-    Box(
-        Modifier
-            .size(48.dp)
-            .pressScale(interaction, 0.9f)
-            .floatingGlass(CircleShape)
-            .clickable(interaction, indication = null, role = Role.Button) {
-                if (hapticsOn) haptics.confirm() 
-                onVoice()
-            }
-            .semantics { contentDescription = "Voice assistant" },
-        contentAlignment = Alignment.Center,
-    ) {
-        FilyMascot(size = 40.dp)
     }
 }
 

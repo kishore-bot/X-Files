@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,8 +22,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzIcons
+import com.xfiles.design.FilyButton
+import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.glassBar
 
 internal class ReaderAction(val label: String, val icon: ImageVector, val onClick: () -> Unit)
@@ -50,7 +54,10 @@ internal fun ReaderTopBar(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (onFily != null) BarIconButton(EzIcons.Mic, "Ask Fily", onFily)
+        if (onFily != null) FilyButton {
+            onSettingsOpen(false)
+            onFily()
+        }
         ViewerSettings(actions, settingsOpen, onSettingsOpen)
     }
 }
@@ -60,10 +67,13 @@ internal fun ReaderTopBar(
 @Composable
 internal fun ViewerSettings(actions: List<ReaderAction>, open: Boolean, onOpen: (Boolean) -> Unit) {
     if (actions.isEmpty()) return
+    val filyOpen = LocalFilyOpen.current
+    BackHandler(enabled = open && !filyOpen) { onOpen(false) }
     Box {
         BarIconButton(EzIcons.Settings, "Viewer settings", { onOpen(!open) })
         DropdownMenu(
-            expanded = open,
+            expanded = open && !filyOpen,
+            properties = PopupProperties(focusable = false),
             onDismissRequest = { onOpen(false) },
             shape = MaterialTheme.shapes.large,
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,

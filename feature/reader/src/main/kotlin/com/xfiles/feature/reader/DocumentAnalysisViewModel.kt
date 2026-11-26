@@ -127,6 +127,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     fun dismissPrintError() = printController.dismiss()
 
     private var readerJob: Job? = null
+    private var pdfJumpId = android.os.SystemClock.elapsedRealtimeNanos()
     private var spreadJob: Job? = null
     private var summaryJob: Job? = null
     private var pdfPassword: String? = null
@@ -203,11 +204,26 @@ class DocumentAnalysisViewModel @Inject constructor(
         mutableState.value = null
     }
 
-    fun changePage(index: Int) {
+    fun changePage(index: Int) = selectPdfPage(index, explicit = true)
+
+    fun reportPdfPage(index: Int) = selectPdfPage(index, explicit = false)
+
+    private fun selectPdfPage(index: Int, explicit: Boolean) {
         val ready = state.value as? ReaderState.Ready ?: return
         val pdf = ready.preview as? FilePreview.Pdf ?: return
-        if (ready.turningPage || index !in 0 until pdf.pageCount || index == pdf.page) return
-        startReader(ready.copy(turningPage = true, pageError = false), onError = ready.copy(pageError = true)) {
+        if (index !in 0 until pdf.pageCount || (!explicit && ready.turningPage)) return
+        val selection = if (explicit) ready.copy(pdfJump = PdfPageJump(++pdfJumpId, index)) else ready
+        if (index == pdf.page) {
+            if (explicit) {
+                if (ready.turningPage) readerJob?.cancel()
+                mutableState.value = selection.copy(turningPage = false, pageError = false)
+            }
+            return
+        }
+        startReader(
+            selection.copy(turningPage = true, pageError = false),
+            onError = selection.copy(turningPage = false, pageError = true),
+        ) {
             val page = pdfPages.page(ready.file, index, pdfPassword)
             // The spread partner is read before the turn lands, so both pages appear together.
             val facing = if (ready.twoPage) pdfPartner(index, pdf.pageCount)?.let { pdfPages.page(ready.file, it, pdfPassword) } else null

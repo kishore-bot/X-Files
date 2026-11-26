@@ -170,6 +170,18 @@ ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh   # optional: FFmpeg aud
 ./gradlew :androidApp:assembleProdRelease                  # release build, R8-minified
 ```
 
+The reader depends on `dev.lazymatrix:lazymatrix:0.1.1`. Gradle finds the Maven
+publication at `../../CustomCompose/LazyMatrix/lazymatrix/build/maven` relative to
+Xfiles. Use `-PlazyMatrixLocalRepo=/path/to/lazymatrix/build/maven` for a different
+local checkout.
+
+Clean checkouts resolve the same version from GitHub Packages. Publish the AAR,
+POM, and Gradle module metadata to the private LazyMatrix Maven registry and give
+Xfiles Actions read access to the package. If the workflow token cannot access
+the private repository, set the `LAZYMATRIX_MAVEN_USER` repository variable and the
+`LAZYMATRIX_MAVEN_TOKEN` Actions secret for an account with package read access.
+Use `-PlazyMatrixMavenUrl=https://…` to use another hosted Maven repository.
+
 ### 🧪 Tests
 
 ```bash

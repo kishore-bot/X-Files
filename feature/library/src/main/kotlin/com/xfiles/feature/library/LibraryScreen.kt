@@ -102,6 +102,7 @@ import com.xfiles.design.FileTypeTile
 import com.xfiles.design.FilyMascot
 import com.xfiles.design.FilyMascotCallToAction
 import com.xfiles.design.GlassIconButton
+import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.LocalHapticsEnabled
 import com.xfiles.design.PrimaryActionButton
 import com.xfiles.design.floatingGlass
@@ -190,6 +191,14 @@ fun LibraryScreen(
     val window = LocalWindowInfo.current.containerDpSize
     val landscape = window.width >= 600.dp && window.width > window.height
     var toolsOpen by rememberSaveable { mutableStateOf(false) }
+    val filyOpen = LocalFilyOpen.current
+    LaunchedEffect(filyOpen) {
+        if (filyOpen) {
+            toolsOpen = false
+            confirmClear = false
+            removingFolder = null
+        }
+    }
     val navItems = remember(tab, toolsOpen) {
         listOf(
             EzNavItem("Library", EzIcons.Folder, tab == HomeTab.Library) { tab = HomeTab.Library },
@@ -198,7 +207,7 @@ fun LibraryScreen(
             EzNavItem("Tools", EzIcons.Apps, toolsOpen) { toolsOpen = true },
         )
     }
-    if (toolsOpen) {
+    if (toolsOpen && !filyOpen) {
         ToolsSheet(
             onSelect = {
                 toolsOpen = false
@@ -434,7 +443,7 @@ fun LibraryScreen(
         }
     }
 
-    if (confirmClear) {
+    if (confirmClear && !filyOpen) {
         EzDialog(
             onDismissRequest = { confirmClear = false },
             title = "Clear recent files?",
@@ -450,7 +459,7 @@ fun LibraryScreen(
         )
     }
     val folder = library.folders.firstOrNull { it.uri.toString() == removingFolder }
-    if (folder != null) {
+    if (folder != null && !filyOpen) {
         EzDialog(
             onDismissRequest = { removingFolder = null },
             title = "Remove ${folder.name}?",

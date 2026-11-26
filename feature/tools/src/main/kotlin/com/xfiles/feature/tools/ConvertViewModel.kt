@@ -30,6 +30,7 @@ import com.xfiles.scan.PageQuad
 import com.xfiles.documents.DocumentKind
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
@@ -38,7 +39,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -92,12 +94,13 @@ data class ConvertState(
     val previewPages: Int = 1,
     val preview: ImageBitmap? = null,
     val previewError: String? = null,
+    val textOutputOutdated: Boolean = false,
     /** Set by the home-screen widget: the screen opens the camera once, then clears it. */
     val openScanner: Boolean = false,
 )
 
 /** What the live preview draws. Any change to one of these redraws it, after a short pause. */
-private data class PreviewRequest(val tool: ConvertTool, val text: String, val style: TextPdfStyle, val page: Int)
+private data class PreviewRequest(val tool: ConvertTool, val text: String, val style: TextPdfStyle, val page: Int, val busy: Boolean)
 
 @HiltViewModel
 class ConvertViewModel @Inject constructor(
@@ -153,16 +156,21 @@ class ConvertViewModel @Inject constructor(
     private val mutableState = MutableStateFlow(ConvertState())
     val state = mutableState.asStateFlow()
     private var work: Job? = null
+    private val workGeneration = AtomicInteger()
     private val scans = File(application.cacheDir, "scans")
 
     init {
         // Typing, styling and paging all redraw the preview, but only after a pause, and an older draw is cancelled.
         viewModelScope.launch {
             mutableState
-                .map { PreviewRequest(it.tool, it.typedText, it.textStyle, it.previewPage) }
+                .map { it.previewRequest() }
                 .distinctUntilChanged()
-                .debounce(PREVIEW_DELAY_MS)
-                .collectLatest(::renderPreview)
+                .collectLatest { request ->
+                    if (!request.busy) {
+                        delay(PREVIEW_DELAY_MS)
+                        renderPreview(request)
+                    }
+                }
         }
     }
 
@@ -214,13 +222,38 @@ class ConvertViewModel @Inject constructor(
     }
 
     /** The text field's contents, as typed. */
-    fun setTypedText(text: String) = mutableState.update { if (it.typedText == text) it else it.copy(typedText = text) }
+    fun setTypedText(text: String) {
+        val current = state.value
+        if (current.typedText == text) return
+        updateTextInput(current.copy(typedText = text))
+    }
 
-    /** A new template, font, alignment or size. The finished PDF no longer matches it, so it goes. */
+    /** A new template, font, alignment or size invalidates any PDF made from the previous settings. */
     fun setTextStyle(style: TextPdfStyle) {
-        if (state.value.busy || state.value.textStyle == style) return
-        discardOutput()
-        mutableState.update { it.copy(textStyle = style, output = null, error = null) }
+        val current = state.value
+        if (current.busy || current.textStyle == style) return
+        updateTextInput(current.copy(textStyle = style))
+    }
+
+    private fun updateTextInput(updated: ConvertState) {
+        if (updated.busy) {
+            mutableState.update { it.copy(typedText = updated.typedText) }
+            return
+        }
+        val oldPdf = (updated.output as? ConvertOutput.Pdf)?.pdf?.file
+        val needsExport = updated.tool == ConvertTool.TextToPdf && oldPdf != null
+        mutableState.update {
+            it.copy(
+                typedText = updated.typedText,
+                textStyle = updated.textStyle,
+                output = if (needsExport) null else it.output,
+                textOutputOutdated = it.textOutputOutdated || needsExport,
+                error = null,
+                previewPage = 0,
+                previewError = null,
+            )
+        }
+        if (needsExport) viewModelScope.launch(Dispatchers.IO) { oldPdf?.delete() }
     }
 
     /** Moves the preview to [page], clamped to the pages the text makes. */
@@ -261,6 +294,8 @@ class ConvertViewModel @Inject constructor(
 
     /** Runs the selected tool. [target] is the folder picked for PDF to pictures, or the .zip for PDF to ZIP. */
     fun run(text: String = "", password: String? = null, target: Uri? = null) {
+        if (state.value.busy) return
+        if (state.value.tool == ConvertTool.TextToPdf) setTypedText(text)
         val current = state.value
         when (current.tool) {
             ConvertTool.PicturesToPdf, ConvertTool.ScanToPdf -> collect(
@@ -273,7 +308,17 @@ class ConvertViewModel @Inject constructor(
                 )
             }
             ConvertTool.TextToPdf -> launch("The text could not be laid out as a PDF.") {
-                setOutput(ConvertOutput.Pdf(conversions.textToPdf(text, current.textStyle), "Text.pdf"))
+                val generation = workGeneration.get()
+                val pdf = conversions.textToPdf(text, current.textStyle) { progress ->
+                    mutableState.update {
+                        if (it.busy && workGeneration.get() == generation) it.copy(progress = progress) else it
+                    }
+                }
+                if (state.value.typedText == text) {
+                    setOutput(ConvertOutput.Pdf(pdf, "Text.pdf"))
+                } else {
+                    viewModelScope.launch(Dispatchers.IO) { pdf.file.delete() }
+                }
             }
             ConvertTool.PictureToText -> launch("No text could be read from this picture.") {
                 val picture = current.pictures.firstOrNull() ?: return@launch
@@ -321,14 +366,21 @@ class ConvertViewModel @Inject constructor(
     }
 
     fun cancel() {
+        workGeneration.incrementAndGet()
         work?.cancel()
         mutableState.update { it.copy(busy = false, progress = null) }
     }
 
     fun close() {
         cancel()
-        discardOutput()
-        scans.listFiles()?.forEach(File::delete)
+        val current = state.value
+        if (current.tool == ConvertTool.TextToPdf) {
+            val temporary = (current.output as? ConvertOutput.Pdf)?.pdf?.file
+            if (temporary != null) viewModelScope.launch(Dispatchers.IO) { temporary.delete() }
+        } else {
+            discardOutput()
+            scans.listFiles()?.forEach(File::delete)
+        }
         mutableState.value = ConvertState()
     }
 
@@ -352,20 +404,22 @@ class ConvertViewModel @Inject constructor(
         )
     }
 
+    private fun ConvertState.previewRequest() = PreviewRequest(tool, typedText, textStyle, previewPage, busy)
+
     /** Draws the preview for [request] into state. Cancelled by [collectLatest] when a newer request arrives. */
     private suspend fun renderPreview(request: PreviewRequest) {
         if (request.tool != ConvertTool.TextToPdf || request.text.isBlank()) {
-            clearPreview(error = null)
+            clearPreview(request, error = null)
             return
         }
         if (request.text.length > MAX_PREVIEW_TEXT_CHARS) {
-            clearPreview(error = "This text is too long to preview. The PDF can still be made.")
+            clearPreview(request, error = "This text is too long to preview. The PDF can still be made.")
             return
         }
         try {
             val page = conversions.textPreview(request.text, request.style, request.page, PREVIEW_WIDTH_PX)
             mutableState.update { state ->
-                if (state.tool == request.tool && state.typedText == request.text && state.textStyle == request.style) {
+                if (state.previewRequest() == request) {
                     state.copy(
                         preview = page.bitmap.asImageBitmap(),
                         previewPage = page.pageIndex,
@@ -380,12 +434,12 @@ class ConvertViewModel @Inject constructor(
             throw cancelled
         } catch (error: Exception) {
             Log.w("XfilesConvert", "Text preview failed", error)
-            clearPreview(error = "The preview couldn't be drawn. The PDF can still be made.")
+            clearPreview(request, error = "The preview couldn't be drawn. The PDF can still be made.")
         }
     }
 
-    private fun clearPreview(error: String?) = mutableState.update {
-        it.copy(preview = null, previewPage = 0, previewPages = 1, previewError = error)
+    private fun clearPreview(request: PreviewRequest, error: String?) = mutableState.update {
+        if (it.previewRequest() == request) it.copy(preview = null, previewPage = 0, previewPages = 1, previewError = error) else it
     }
 
     /** Collects a [Conversion] flow into progress, then maps its single result to an output. */
@@ -403,6 +457,7 @@ class ConvertViewModel @Inject constructor(
 
     private fun launch(failure: String, block: suspend () -> Unit) {
         if (state.value.busy) return
+        val generation = workGeneration.incrementAndGet()
         work = viewModelScope.launch {
             mutableState.update { it.copy(busy = true, progress = null, error = null) }
             try {
@@ -419,7 +474,7 @@ class ConvertViewModel @Inject constructor(
                 Log.w("XfilesConvert", failure, error)
                 fail(failure)
             } finally {
-                mutableState.update { it.copy(busy = false, progress = null) }
+                if (workGeneration.get() == generation) mutableState.update { it.copy(busy = false, progress = null) }
             }
         }
     }
@@ -439,7 +494,7 @@ class ConvertViewModel @Inject constructor(
         return "$saved $pages drawn smaller than chosen, to fit this phone's memory limit."
     }
 
-    private fun setOutput(output: ConvertOutput) = mutableState.update { it.copy(output = output, error = null) }
+    private fun setOutput(output: ConvertOutput) = mutableState.update { it.copy(output = output, error = null, textOutputOutdated = false) }
 
     private fun fail(message: String) = mutableState.update { it.copy(error = message) }
 

@@ -149,7 +149,7 @@ fun GetFilyDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Get Fily") },
+        title = { Text("Set up Fily") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 FilyMascot(size = 120.dp)

@@ -45,7 +45,7 @@ import com.xfiles.design.raised
  * will be drawn, with paging when the text runs to more pages.
  */
 internal fun LazyListScope.textSections(state: ConvertState, viewModel: ConvertViewModel, text: TextFieldState) {
-    val locked = state.busy || state.output != null
+    val locked = state.busy
     val style = state.textStyle
     item("text") {
         OutlinedTextField(
@@ -116,6 +116,7 @@ internal fun LazyListScope.textSections(state: ConvertState, viewModel: ConvertV
     item("preview") {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Preview", style = MaterialTheme.typography.titleSmall, color = EzColors.Text)
+            if (state.textOutputOutdated) Text("Make a new PDF to apply your changes.", style = MaterialTheme.typography.bodySmall)
             TextPreviewCard(state, onPage = viewModel::showPreviewPage)
         }
     }

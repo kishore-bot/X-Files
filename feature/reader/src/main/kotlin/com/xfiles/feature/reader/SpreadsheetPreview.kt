@@ -4,24 +4,18 @@ import com.xfiles.design.rememberHaptics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
@@ -29,7 +23,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -43,6 +36,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,8 +46,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xfiles.design.EzColors
-import com.xfiles.design.EzIcons
-import com.xfiles.design.glassBar
 import com.xfiles.documents.structure.CellAlign
 import com.xfiles.documents.structure.CellLook
 import com.xfiles.documents.structure.ContentBlock
@@ -137,155 +130,13 @@ internal fun SpreadsheetPreview(
         }
         if (document.truncated) Text("Showing the rows within the preview limit.", color = pageSecondary(EzColors.TextSecondary))
         key(sheet) {
-            val supplied = SheetGrids.renderer
-            if (supplied != null) {
-                SuppliedSheetGrid(supplied, sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
-            } else {
-                SheetGrid(sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
-            }
-        }
-    }
-}
-
-/**
- * Two panes share one vertical scroll: a pinned left pane (row numbers plus frozen columns) and a
- * right pane scrolled horizontally. Frozen header rows sit above the body and scroll sideways with
- * the right pane, so headers and columns stay in step with the cells.
- */
-@Composable
-private fun ColumnScope.SheetGrid(
-    sheet: SheetPreview,
-    palette: Map<Int, CellLook>,
-    frozenRows: Int,
-    frozenColumns: Int,
-    cellEditor: CellEditor?,
-    onEdited: () -> Unit,
-) {
-    val columns = sheet.columnCount()
-    val progress = LocalViewerProgress.current
-    val field = "sheet:${sheet.title}"
-    var firstColumn by rememberSaveable { mutableIntStateOf(progress?.number("$field:column") ?: 0) }
-    SaveViewerProgress("$field:column") { firstColumn.coerceIn(0, (columns - frozenColumns - 1).coerceAtLeast(0)).toString() }
-    val scrollable = (columns - frozenColumns).coerceAtLeast(0)
-    val start = (frozenColumns + firstColumn.coerceIn(0, maxOf(scrollable - 1, 0)))
-    val end = (start + COLUMNS_PER_VIEW).coerceAtMost(columns)
-    val haptics = rememberHaptics()
-    val horizontal = androidx.compose.runtime.key(start) { rememberViewerScroll("$field:x:$start") }
-    val vertical = rememberViewerList("$field:rows", (sheet.rows.size - frozenRows).coerceAtLeast(0))
-    val leftWidth = (LABEL_WIDTH + CELL_WIDTH * frozenColumns).dp
-    val rightWidth = (CELL_WIDTH * (end - start).coerceAtLeast(0)).dp
-    val header = remember(sheet, frozenRows) { sheet.rows.take(frozenRows) }
-    val body = remember(sheet, frozenRows) { sheet.rows.drop(frozenRows) }
-    var editing by remember { mutableStateOf<EditTarget?>(null) }
-    // The assistant's scroll commands move the rows of this sheet while it is on screen.
-    val registerScroll = LocalViewerScroll.current
-    DisposableEffect(vertical, registerScroll) {
-        val unregister = registerScroll(LazyScroll(vertical))
-        onDispose { unregister() }
-    }
-
-    if (scrollable > COLUMNS_PER_VIEW) {
-        Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = { haptics.tick(); firstColumn = (firstColumn - COLUMNS_PER_VIEW).coerceAtLeast(0) }, enabled = start > frozenColumns) {
-                Icon(EzIcons.ChevronLeft, "Previous columns")
-            }
-            Text("${columnName(start)}–${columnName(end - 1)}")
-            IconButton(onClick = { haptics.tick(); firstColumn += COLUMNS_PER_VIEW }, enabled = end < columns) {
-                Icon(EzIcons.ChevronRight, "Next columns")
-            }
-        }
-    }
-
-    // Column letters, pinned to the top.
-    Row(Modifier.fillMaxWidth().background(pageVariant(MaterialTheme.colorScheme.surfaceVariant))) {
-        Row(Modifier.width(leftWidth)) {
-            GridLabel("", LABEL_WIDTH)
-            for (column in 0 until frozenColumns) GridLabel(columnName(column), CELL_WIDTH)
-        }
-        Box(Modifier.weight(1f).horizontalScroll(horizontal)) {
-            Row(Modifier.width(rightWidth)) {
-                for (column in start until end) GridLabel(columnName(column), CELL_WIDTH)
-            }
-        }
-    }
-    // Frozen header rows, pinned under the column letters.
-    if (header.isNotEmpty()) {
-        Row(Modifier.fillMaxWidth()) {
-            Column(Modifier.width(leftWidth)) {
-                header.forEachIndexed { index, row ->
-                    GridRow(index + 1, row, 0 until frozenColumns, showLabel = true, sheet, palette) { number, column, text ->
-                        editing = EditTarget(sheet.title, number, column, text)
-                    }
-                }
-            }
-            Box(Modifier.weight(1f).horizontalScroll(horizontal)) {
-                Column(Modifier.width(rightWidth)) {
-                    header.forEachIndexed { index, row ->
-                        GridRow(index + 1, row, start until end, showLabel = false, sheet, palette) { number, column, text ->
-                            editing = EditTarget(sheet.title, number, column, text)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // The scrolling body: both panes share the vertical state, so they move together.
-    Row(Modifier.weight(1f).fillMaxWidth()) {
-        LazyColumn(state = vertical, modifier = Modifier.width(leftWidth)) {
-            itemsIndexed(body, key = { index, _ -> frozenRows + index }) { index, row ->
-                GridRow(frozenRows + index + 1, row, 0 until frozenColumns, showLabel = true, sheet, palette) { number, column, text ->
-                    editing = EditTarget(sheet.title, number, column, text)
-                }
-            }
-        }
-        Box(Modifier.weight(1f).horizontalScroll(horizontal)) {
-            LazyColumn(state = vertical, modifier = Modifier.width(rightWidth)) {
-                itemsIndexed(body, key = { index, _ -> frozenRows + index }) { index, row ->
-                    GridRow(frozenRows + index + 1, row, start until end, showLabel = false, sheet, palette) { number, column, text ->
-                        editing = EditTarget(sheet.title, number, column, text)
-                    }
-                }
-            }
-        }
-    }
-
-    editing?.let { target ->
-        if (cellEditor == null) {
-            editing = null
-        } else {
-            CellEditDialog(target, cellEditor, onDismiss = { editing = null }, onSaved = { editing = null; onEdited() })
+            SuppliedSheetGrid(LazyMatrixSheetGrid, sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
         }
     }
 }
 
 /** A cell chosen for editing. [row] is the 1-based sheet row shown in the grid; the editor takes 0-based. */
 internal data class EditTarget(val sheet: String, val row: Int, val column: Int, val displayed: String)
-
-@Composable
-private fun GridRow(
-    fallback: Int,
-    row: ContentBlock.TableRow,
-    columns: IntRange,
-    showLabel: Boolean,
-    sheet: SheetPreview,
-    palette: Map<Int, CellLook>,
-    onOpen: (number: Int, column: Int, text: String) -> Unit,
-) {
-    val haptics = rememberHaptics()
-    // The height comes from the whole row, so the pinned and scrolling panes always line up.
-    val number = row.row ?: fallback
-    val wrap = row.styles.any { palette[it]?.wrap == true }
-    val height = if (wrap) 58 else 34
-    Row(Modifier.background(pageSurface(MaterialTheme.colorScheme.surface))) {
-        if (showLabel) GridLabel(number.toString(), LABEL_WIDTH, height)
-        for (column in columns) {
-            val text = row.cells.getOrNull(column).orEmpty()
-            val look = row.styles.getOrNull(column)?.let(palette::get)
-            val spans = sheet.runs[number to column].orEmpty()
-            SpreadsheetCell(text, look, spans, row.header, height, onClick = { haptics.tick(); onOpen(number, column, text) })
-        }
-    }
-}
 
 @Composable
 internal fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: () -> Unit, onSaved: () -> Unit) {
@@ -387,7 +238,10 @@ internal fun SpreadsheetCell(
     spans: List<TextSpan>,
     header: Boolean,
     height: Int,
-    onClick: () -> Unit,
+    selected: Boolean,
+    editable: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
     val align = when (look?.align) {
         CellAlign.Right -> TextAlign.End
@@ -408,10 +262,17 @@ internal fun SpreadsheetCell(
     }.takeIf { it.isNotEmpty() }?.let(TextDecoration::combine)
     val content = remember(value, spans) { richText(value, spans) }
     Box(
-        Modifier.width(CELL_WIDTH.dp).height(height.dp)
+        modifier.width(CELL_WIDTH.dp).height(height.dp)
             .background(fill)
-            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
-            .clickable(onClickLabel = "Edit cell", onClick = onClick)
+            .border(
+                if (selected) 2.dp else 0.5.dp,
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+            )
+            .then(
+                if (onClick == null) Modifier else Modifier
+                    .semantics { this.selected = selected }
+                    .clickable(onClickLabel = if (editable) "Edit cell" else "Select cell", onClick = onClick),
+            )
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Text(
@@ -429,7 +290,6 @@ internal fun SpreadsheetCell(
     }
 }
 
-private const val COLUMNS_PER_VIEW = 16
 internal const val LABEL_WIDTH = 48
 internal const val CELL_WIDTH = 128
 
@@ -437,8 +297,14 @@ internal data class SheetPreview(
     val title: String,
     val rows: List<ContentBlock.TableRow>,
     val runs: Map<Pair<Int, Int>, List<TextSpan>>,
+    val merges: List<ContentBlock.Merge>,
 ) {
-    fun columnCount(): Int = rows.maxOfOrNull { maxOf(it.cells.size, it.styles.size) }?.coerceAtLeast(1) ?: 1
+    val columns: Int = maxOf(
+        rows.maxOfOrNull { maxOf(it.cells.size, it.styles.size) } ?: 0,
+        (merges.maxOfOrNull { it.lastColumn.coerceIn(0, 16_383) } ?: 0) + 1,
+    )
+
+    fun columnCount(): Int = columns
 }
 
 private data class WorkbookPreview(val sheets: List<SheetPreview>, val palette: Map<Int, CellLook>)
@@ -447,11 +313,13 @@ private fun toWorkbook(blocks: List<ContentBlock>): WorkbookPreview {
     val palette = mutableMapOf<Int, CellLook>()
     val sheets = mutableListOf<SheetPreview>()
     val rows = mutableListOf<ContentBlock.TableRow>()
+    val merges = mutableListOf<ContentBlock.Merge>()
     val runs = mutableMapOf<Pair<Int, Int>, List<TextSpan>>()
     var title = ""
     fun finish() {
-        if (rows.isNotEmpty()) sheets.add(SheetPreview(title.ifBlank { "Sheet ${sheets.size + 1}" }, rows.toList(), runs.toMap()))
+        if (rows.isNotEmpty()) sheets.add(SheetPreview(title.ifBlank { "Sheet ${sheets.size + 1}" }, rows.toList(), runs.toMap(), merges.toList()))
         rows.clear()
+        merges.clear()
         runs.clear()
     }
     for (block in blocks) {
@@ -462,6 +330,7 @@ private fun toWorkbook(blocks: List<ContentBlock>): WorkbookPreview {
             }
             is ContentBlock.TableRow -> rows.add(block)
             is ContentBlock.CellStyle -> palette[block.index] = block.look
+            is ContentBlock.Merge -> merges.add(block)
             is ContentBlock.CellRuns -> runs[block.row to block.column] = block.spans
             else -> Unit
         }

@@ -39,6 +39,7 @@ import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfPageText
 import com.xfiles.design.EzIcons
+import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.PdfMarkup
@@ -62,6 +63,7 @@ fun ReaderScreen(
     onEdit: (String, String) -> Unit,
     onBack: () -> Unit,
     onPage: (Int) -> Unit,
+    onPdfPageSettled: (Int) -> Unit,
     onSummary: () -> Unit,
     onDismissSummary: () -> Unit,
     onPassword: (String) -> Unit,
@@ -134,6 +136,15 @@ fun ReaderScreen(
     val progress = remember(chromeVm, documentKey) { documentKey?.let { ViewerProgress(chromeVm.progress, it) } }
     LaunchedEffect(documentKey) { chromeVm.onEvent(ReaderUiEvent.DocumentChanged(documentKey)) }
     val onEvent: (ReaderUiEvent) -> Unit = chromeVm::onEvent
+    val filyOpen = LocalFilyOpen.current
+    LaunchedEffect(filyOpen) {
+        if (filyOpen) {
+            onEvent(ReaderUiEvent.SetActionsOpen(false))
+            onEvent(ReaderUiEvent.SetJump(false))
+            onEvent(ReaderUiEvent.SetPageStyleSheet(false))
+            if (ready?.summary != null) onDismissSummary()
+        }
+    }
 
     // Per-file settings fall back to the previous defaults for the file type.
     var pageStyle by rememberSaveable(documentKey) { mutableStateOf(PageStyle.entries.firstOrNull { it.name == progress?.read("style") } ?: readPageStyle(context, pageStyleKey(fileName))) }
@@ -168,7 +179,6 @@ fun ReaderScreen(
             if (markup.marks.isNotEmpty()) onEvent(ReaderUiEvent.SetConfirmDiscard(true)) else if (!onNestedBack()) onBack()
         }
     }
-    BackHandler(enabled = ui.actionsOpen) { onEvent(ReaderUiEvent.SetActionsOpen(false)) }
     BackHandler(enabled = markup.marks.isNotEmpty() || markup.saving, onBack = closeReader)
     BackHandler(enabled = ui.showGrid, onBack = { onEvent(ReaderUiEvent.SetGrid(false)) })
     // Picture-in-Picture shows only the picture: no bars, hints or panels, and no margins.
@@ -339,6 +349,7 @@ fun ReaderScreen(
                     onFily = onFily,
                     onPassword = onPassword,
                     onPage = onPage,
+                    onPdfPageSettled = onPdfPageSettled,
                     onPdfQuery = onPdfQuery,
                     onAddMarkup = onAddMarkup,
                     pdfThumbnail = pdfThumbnail,
@@ -355,21 +366,21 @@ fun ReaderScreen(
                 }
                 val pdf = ready?.preview as? FilePreview.Pdf
                 if (ready != null && pdf != null) {
-                    if (ready.turningPage) LinearProgressIndicator(Modifier.fillMaxWidth())
                     if (ready.pageError) Text("This page could not be opened.", color = MaterialTheme.colorScheme.error)
                     if (!ui.editingMarkup) PdfToolbar(
                         page = (ui.visiblePdfPage ?: pdf.page).coerceIn(0, (pdf.pageCount - 1).coerceAtLeast(0)),
                         pageCount = pdf.pageCount,
                         zoom = ui.pdfZoom,
                         grid = ui.showGrid,
-                        busy = ready.turningPage,
                         thumbnail = pdfThumbnail,
                         onPage = onPage,
                         onJump = { onEvent(ReaderUiEvent.SetJump(true)) },
+                        settingsOpen = ui.actionsOpen,
+                        onEngage = { onEvent(ReaderUiEvent.SetActionsOpen(false)) },
                         onZoom = { onEvent(ReaderUiEvent.SetPdfZoom(it)) },
                     )
-                    if (ui.showJump) {
-                        PdfJumpDialog(pdf.page, pdf.pageCount, onJump = onPage, onDismiss = { onEvent(ReaderUiEvent.SetJump(false)) })
+                    if (ui.showJump && !filyOpen) {
+                        PdfJumpDialog(ui.visiblePdfPage ?: pdf.page, pdf.pageCount, onJump = onPage, onDismiss = { onEvent(ReaderUiEvent.SetJump(false)) })
                     }
                 }
                 if (saveState.saving) {
@@ -383,7 +394,7 @@ fun ReaderScreen(
         }
     }
     val summaryState = ready?.summary
-    if (ready != null && summaryState != null) {
+    if (ready != null && summaryState != null && !filyOpen) {
         val inPdf = ready.preview is FilePreview.Pdf
         SummaryDialog(
             state = summaryState,
@@ -399,7 +410,7 @@ fun ReaderScreen(
             onDismiss = onDismissSummary,
         )
     }
-    if (ui.showPageStyle) {
+    if (ui.showPageStyle && !filyOpen) {
         PageStyleSheet(
             current = pageStyle,
             onPick = { style ->
@@ -410,7 +421,7 @@ fun ReaderScreen(
             onDismiss = { onEvent(ReaderUiEvent.SetPageStyleSheet(false)) },
         )
     }
-    if (ui.confirmDiscard) {
+    if (ui.confirmDiscard && !filyOpen) {
         AlertDialog(
             onDismissRequest = { onEvent(ReaderUiEvent.SetConfirmDiscard(false)) },
             title = { Text("Discard unsaved annotations?") },

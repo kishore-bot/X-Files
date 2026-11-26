@@ -17,6 +17,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzShapes
+import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.floatingGlass
 import com.xfiles.design.rememberHaptics
 
@@ -59,6 +61,8 @@ internal fun BookTopBar(
     onFily: (() -> Unit)? = null,
 ) {
     var settingsOpen by remember { mutableStateOf(false) }
+    val filyOpen = LocalFilyOpen.current
+    LaunchedEffect(filyOpen) { if (filyOpen) settingsOpen = false }
     ReaderTopBar(
         title = title,
         backEnabled = true,

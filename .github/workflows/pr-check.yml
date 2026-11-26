@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: pr-check-${{ github.event.pull_request.number || github.ref }}
@@ -63,6 +64,9 @@ jobs:
         run: cargo test --manifest-path engine/Cargo.toml --locked --workspace
 
       - name: Kotlin tests and app build
+        env:
+          LAZYMATRIX_MAVEN_USER: ${{ vars.LAZYMATRIX_MAVEN_USER || github.actor }}
+          LAZYMATRIX_MAVEN_TOKEN: ${{ secrets.LAZYMATRIX_MAVEN_TOKEN || github.token }}
         run: ./gradlew --no-configuration-cache :sharedLogic:testAndroidHostTest :androidApp:assembleDevDebug
 
       - name: Test reports on failure
