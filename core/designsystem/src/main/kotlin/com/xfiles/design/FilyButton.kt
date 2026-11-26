@@ -2,7 +2,7 @@ package com.xfiles.design
 
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconToggleButton
-import androidx.compose.material3.IconToggleButtonDefaults
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
@@ -16,7 +16,7 @@ fun FilyButton(onClick: () -> Unit) {
     IconToggleButton(
         checked = open,
         onCheckedChange = { onClick() },
-        colors = IconToggleButtonDefaults.iconToggleButtonColors(
+        colors = IconButtonDefaults.iconToggleButtonColors(
             checkedContainerColor = colors.primaryContainer,
             checkedContentColor = colors.onPrimaryContainer,
         ),

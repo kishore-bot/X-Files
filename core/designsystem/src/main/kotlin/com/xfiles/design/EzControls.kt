@@ -11,7 +11,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
-import androidx.compose.material3.IconToggleButtonDefaults
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -55,7 +55,7 @@ fun EzControlMenu(actions: List<EzControlAction>, open: Boolean, onOpen: (Boolea
         IconToggleButton(
             checked = open,
             onCheckedChange = onOpen,
-            colors = IconToggleButtonDefaults.iconToggleButtonColors(
+            colors = IconButtonDefaults.iconToggleButtonColors(
                 checkedContainerColor = colors.primaryContainer,
                 checkedContentColor = colors.onPrimaryContainer,
             ),
