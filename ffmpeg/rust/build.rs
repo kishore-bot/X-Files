@@ -19,6 +19,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
     println!("cargo:rerun-if-env-changed=ANDROID_NDK_HOME");
+    println!("cargo:rerun-if-env-changed=FFMPEG_ANDROID_API");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("android") {
         return;
     }
@@ -46,13 +47,22 @@ fn main() {
     }
 
     let target = env::var("TARGET").expect("cargo sets TARGET");
+    let api = env::var("FFMPEG_ANDROID_API").unwrap_or_else(|_| "30".to_owned());
     let prebuilt = ndk_prebuilt();
+    let sysroot = prebuilt.join("sysroot");
+    let sys_headers = sysroot.join("usr/include");
     let bindings = bindgen::Builder::default()
+        // Bindgen's detected host include paths can mix two Clang resource directories.
+        // Use the same resource and sysroot headers as the NDK compiler.
+        .detect_include_paths(false)
         .header_contents("wrapper.h", WRAPPER)
         .clang_args([
-            format!("--target={target}"),
-            format!("--sysroot={}", prebuilt.join("sysroot").display()),
+            format!("--target={target}{api}"),
+            format!("--sysroot={}", sysroot.display()),
+            "-nostdinc".to_owned(),
             format!("-isystem{}", clang_builtin_include(&prebuilt).display()),
+            format!("-isystem{}", sys_headers.join(&target).display()),
+            format!("-isystem{}", sys_headers.display()),
             format!("-I{}", ffmpeg.join("include").display()),
         ])
         .rust_edition(bindgen::RustEdition::Edition2024)

@@ -62,6 +62,7 @@ for (abi in abis) {
         workingDir(rustCrateDir)
         commandLine("cargo", "build", "--release", "--locked", "--lib", "--target", triple)
         environment("FFMPEG_DIR", ffmpegDir.path)
+        environment("FFMPEG_ANDROID_API", libs.versions.min.sdk.get())
         environment("ANDROID_NDK_HOME", ndkDir.path)
         environment("CARGO_TARGET_${triple.uppercase().replace('-', '_')}_LINKER", linker.path)
         doLast {
