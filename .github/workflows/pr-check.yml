@@ -79,3 +79,11 @@ jobs:
             **/build/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Upload Dev Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: xfiles-dev-debug
+          path: androidApp/build/outputs/apk/dev/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7

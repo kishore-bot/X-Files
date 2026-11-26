@@ -315,7 +315,7 @@ impl SearchIndex {
             let file = inner.next_file;
             fs::create_dir_all(self.dir.join(TEXTS))?;
             let mut snippet = fs::File::create(self.text_path(file))?;
-            snippet.write_all(stored)?;
+            snippet.write_all(stored.as_bytes())?;
             inner.pending_texts.push(file);
             inner.next_file += 1;
             file
