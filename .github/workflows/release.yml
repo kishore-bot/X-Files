@@ -33,6 +33,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check out pinned LazyMatrix Maven files
+        uses: actions/checkout@v7
+        with:
+          repository: kishore-bot/xfiles-maven
+          ref: 4a70cdb6f8ef71471856e9b9beec6ff6e6f5ca4d
+          path: .ci-maven
+          ssh-key: ${{ secrets.LAZYMATRIX_MAVEN_SSH_KEY }}
+          persist-credentials: false
+
       - name: Version from the tag
         id: version
         env:
@@ -92,8 +101,7 @@ jobs:
 
       - name: Build the release APK
         env:
-          LAZYMATRIX_MAVEN_USER: ${{ vars.LAZYMATRIX_MAVEN_USER || github.actor }}
-          LAZYMATRIX_MAVEN_TOKEN: ${{ secrets.LAZYMATRIX_MAVEN_TOKEN || github.token }}
+          ORG_GRADLE_PROJECT_lazyMatrixLocalRepo: ${{ github.workspace }}/.ci-maven
           XFILES_KEYSTORE_PASSWORD: ${{ secrets.XFILES_KEYSTORE_PASSWORD }}
           XFILES_KEY_ALIAS: ${{ secrets.XFILES_KEY_ALIAS }}
           XFILES_KEY_PASSWORD: ${{ secrets.XFILES_KEY_PASSWORD }}

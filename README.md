@@ -175,12 +175,13 @@ publication at `../../CustomCompose/LazyMatrix/lazymatrix/build/maven` relative 
 Xfiles. Use `-PlazyMatrixLocalRepo=/path/to/lazymatrix/build/maven` for a different
 local checkout.
 
-Clean checkouts resolve the same version from GitHub Packages. Publish the AAR,
-POM, and Gradle module metadata to the private LazyMatrix Maven registry and give
-Xfiles Actions read access to the package. If the workflow token cannot access
-the private repository, set the `LAZYMATRIX_MAVEN_USER` repository variable and the
-`LAZYMATRIX_MAVEN_TOKEN` Actions secret for an account with package read access.
-Use `-PlazyMatrixMavenUrl=https://…` to use another hosted Maven repository.
+GitHub Actions checks out the pinned AAR, POM, and Gradle module metadata from
+the private `kishore-bot/xfiles-maven` artifact repository. The
+`LAZYMATRIX_MAVEN_SSH_KEY` Actions secret is a read-only deploy key for that
+repository. GitHub withholds it from fork pull requests. To build outside that
+workflow, provide a local Maven path or set
+`-PlazyMatrixMavenUrl=https://…` and the `LAZYMATRIX_MAVEN_USER` and
+`LAZYMATRIX_MAVEN_TOKEN` environment variables for a hosted repository.
 
 ### 🧪 Tests
 
