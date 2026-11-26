@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.xfiles.feature.reader
 
 import android.content.ActivityNotFoundException
@@ -9,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
@@ -23,7 +26,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,6 +38,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.EzControlSheet
+import com.xfiles.design.LocalEzDarkTheme
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.design.rememberHaptics
 
@@ -127,17 +131,14 @@ internal fun SummaryDialog(
 @Composable
 internal fun PageStyleSheet(current: PageStyle, onPick: (PageStyle) -> Unit, onDismiss: () -> Unit) {
     val haptics = rememberHaptics()
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        scrimColor = Color.Black.copy(alpha = 0.22f),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    EzControlSheet(onDismiss) {
+        val darkApp = LocalEzDarkTheme.current
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Page style", style = MaterialTheme.typography.titleMedium)
-            Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PageStyle.entries.forEach { style ->
                     val selected = style == current
-                    val fixed = style.colors()
+                    val fixed = style.readerColors(darkApp)
                     val ring = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
                     Column(
                         modifier = Modifier.selectable(selected, role = Role.RadioButton) {
@@ -149,11 +150,11 @@ internal fun PageStyleSheet(current: PageStyle, onPick: (PageStyle) -> Unit, onD
                     ) {
                         Box(
                             Modifier.size(52.dp).clip(CircleShape)
-                                .background(fixed?.page ?: MaterialTheme.colorScheme.surfaceVariant)
+                                .background(fixed.page)
                                 .border(2.dp, ring, CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text("Aa", color = fixed?.text ?: MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+                            Text("Aa", color = fixed.text, style = MaterialTheme.typography.titleMedium)
                         }
                         Text(style.label, style = MaterialTheme.typography.labelMedium)
                     }

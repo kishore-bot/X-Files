@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -321,7 +320,8 @@ private fun PdfPageSlot(
                 contentScale = ContentScale.FillBounds,
                 colorFilter = colorFilter,
             )
-            val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+            val palette = LocalPageStyle.current.readerColors(darkApp = false)
+            val selectionColor = palette.selection.copy(alpha = 0.36f)
             Canvas(Modifier.fillMaxSize()) {
                 for (box in marks) {
                     if (box.right <= box.left || box.bottom <= box.top) continue
@@ -334,7 +334,7 @@ private fun PdfPageSlot(
                 for (box in highlights) {
                     if (box.right <= box.left || box.bottom <= box.top) continue
                     drawRect(
-                        Color(0xFFFFC928).copy(alpha = 0.42f),
+                        palette.currentMatch.copy(alpha = 0.52f),
                         topLeft = Offset(box.left * size.width, box.top * size.height),
                         size = Size((box.right - box.left) * size.width, (box.bottom - box.top) * size.height),
                     )
@@ -351,7 +351,7 @@ private fun PdfPageSlot(
                 selection = selection,
                 source = source,
                 transform = pageTransform,
-                color = MaterialTheme.colorScheme.primary,
+                color = palette.selection,
                 onClear = { selection.clear() },
             )
         }

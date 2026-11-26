@@ -1,15 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Starting theme: the system splash shows the animated mark until the first library listing is ready
-         (StartupGate), then MainActivity switches to Theme.Xfiles. -->
     <style name="Theme.Xfiles.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_animated</item>
-        <item name="windowSplashScreenAnimationDuration">1000</item>
-        <item name="windowSplashScreenIconBackgroundColor">@color/brand_icon_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_xfiles_mark</item>
         <item name="postSplashScreenTheme">@style/Theme.Xfiles</item>
+        <item name="android:statusBarColor">@color/splash_background</item>
+        <item name="android:navigationBarColor">@color/splash_background</item>
+        <item name="android:windowLightStatusBar">@bool/splash_light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/splash_light_system_bars</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
     <style name="Theme.Xfiles" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:statusBarColor">@color/splash_background</item>
+        <item name="android:navigationBarColor">@color/splash_background</item>
+        <item name="android:windowLightStatusBar">@bool/splash_light_system_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/splash_light_system_bars</item>
     </style>
 </resources>

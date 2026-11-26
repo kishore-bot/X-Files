@@ -21,9 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.zIndex
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.core.splashscreen.SplashScreenViewProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +63,7 @@ import com.xfiles.feature.assistant.speechLanguageLabel
 import com.xfiles.feature.editor.TextEditorScreen
 import com.xfiles.feature.editor.TextEditorViewModel
 import com.xfiles.feature.library.AboutScreen
+import com.xfiles.feature.library.SettingsScreen
 import com.xfiles.feature.library.LibraryScreen
 import com.xfiles.feature.library.LibraryViewModel
 import com.xfiles.feature.reader.DocumentAnalysisViewModel
@@ -105,7 +104,6 @@ class MainActivity : ComponentActivity() {
     private val pdfTools by viewModels<PdfToolsViewModel>()
     private val convert by viewModels<ConvertViewModel>()
     @Inject lateinit var tidy: TidyService
-    @Inject lateinit var librarySearch: com.xfiles.core.documents.LibrarySearchRepository
     @Inject lateinit var sharing: com.xfiles.core.documents.DocumentSharing
     @Inject lateinit var filySource: com.xfiles.android.appfunctions.FilyDocumentsSource
     private val pendingOpen = MutableStateFlow<Uri?>(null)
@@ -122,15 +120,20 @@ class MainActivity : ComponentActivity() {
     private val openPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { pendingOpen.value = it } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // System splash stays until the first library listing is ready and a minimum time has passed (StartupGate).
         val systemSplash = installSplashScreen()
         super.onCreate(savedInstanceState)
-        systemSplash.setKeepOnScreenCondition { StartupGate.keepSplash() }
-        // The branded intro plays on a cold start only; rotation and warm starts skip it.
-        val showIntro = savedInstanceState == null && StartupGate.claimIntro()
-        systemSplash.setOnExitAnimationListener { provider -> playSplashExit(provider, showIntro) }
+        systemSplash.setOnExitAnimationListener { splash ->
+            if (savedInstanceState != null || !android.animation.ValueAnimator.areAnimatorsEnabled()) {
+                splash.remove()
+            } else {
+                // The system mark stays in place over the first app frame during this brief handoff.
+                splash.view.animate().alpha(0f).setDuration(120L).withEndAction(splash::remove).start()
+            }
+        }
         enableEdgeToEdge()
         if (savedInstanceState == null) captureOpenRequest(intent)
+        val initialDocument = if (savedInstanceState == null) pendingOpen.value.also { pendingOpen.value = null } else null
+        initialDocument?.let { analysis.open(it) }
         setContent {
             val theme by appearance.theme.collectAsStateWithLifecycle()
             val haptics by appearance.haptics.collectAsStateWithLifecycle()
@@ -139,14 +142,8 @@ class MainActivity : ComponentActivity() {
                 ThemePreference.Dark -> true
                 ThemePreference.Light -> false
             }
-            SideEffect {
-                WindowCompat.getInsetsController(window, window.decorView).apply {
-                    isAppearanceLightStatusBars = !darkTheme
-                    isAppearanceLightNavigationBars = !darkTheme
-                }
-            }
-            var introVisible by rememberSaveable { mutableStateOf(showIntro) }
-            val stack = rememberNavBackStack(Route.Library)
+            val initialRoutes = if (initialDocument == null) arrayOf(Route.Library) else arrayOf(Route.Library, Route.Reader)
+            val stack = rememberNavBackStack(*initialRoutes)
             val navigator = remember(stack) { AppNavigator(stack, analysis, editor) }
             val draft by editor.state.collectAsStateWithLifecycle()
             val reader by analysis.state.collectAsStateWithLifecycle()
@@ -196,7 +193,7 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(LocalHapticsEnabled provides haptics, LocalReducedMotion provides reducedMotion, LocalMediaPip provides mediaPip, LocalFilyOpen provides showFily) {
                 EzTheme(darkTheme = darkTheme) {
-                    // The window behind the Compose tree follows the (animated) palette, so bars and gaps never flash.
+                    // The window behind the Compose tree follows the active palette, including any app theme override.
                     val windowColor = LocalEzPalette.current.background.toArgb()
                     SideEffect { window.setBackgroundDrawable(ColorDrawable(windowColor)) }
                     sharedLink?.takeUnless { showFily }?.let { link ->
@@ -206,23 +203,28 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { sharedLink = null },
                         )
                     }
-                    val onLibrary = navigator.top in setOf(Route.Library, Route.About, Route.Tools, Route.Tidy, Route.CompressZip, Route.ExtractArchive)
+                    val onLibrary = navigator.top in setOf(Route.Library, Route.Settings, Route.About, Route.Tools, Route.Tidy, Route.CompressZip, Route.ExtractArchive)
                     val background = if (onLibrary) Modifier.libraryBackground() else Modifier.readerBackground()
                     val inPip by mediaPip.isInPictureInPicture.collectAsStateWithLifecycle()
                     // Picture-in-Picture: a plain black edge-to-edge window, no glass or inset padding.
                     // The media player draws edge to edge on black and keeps its controls inside the safe area itself.
                     val readerState by analysis.state.collectAsStateWithLifecycle()
                     val mediaOnTop = navigator.top == Route.Reader && (readerState as? ReaderState.Ready)?.preview is FilePreview.Media
+                    SideEffect {
+                        WindowCompat.getInsetsController(window, window.decorView).apply {
+                            isAppearanceLightStatusBars = !darkTheme && !mediaOnTop && !inPip
+                            isAppearanceLightNavigationBars = !darkTheme && !mediaOnTop && !inPip
+                        }
+                    }
                     val chrome = if (inPip || mediaOnTop) Modifier.background(Color.Black) else Modifier.then(background).glassScreen().safeDrawingPadding()
                     // Vote for the display's top refresh rate while Xfiles is on screen (120/144 Hz panels).
                     Box(Modifier.fillMaxSize().preferredFrameRate(FrameRateCategory.High).then(chrome)) {
-                        if (introVisible) SplashIntro(Modifier.zIndex(1f)) { introVisible = false }
                         NavDisplay(
                             backStack = stack,
                             onBack = navigator::back,
                             entryProvider = entryProvider {
                                 entry<Route.Library> {
-                                    LibraryRoute(navigator, onFily = { showFily = !showFily }, onListedFiles = { displayedFiles = it; StartupGate.markDataReady() })
+                                    LibraryRoute(navigator, onFily = { showFily = !showFily }, onListedFiles = { displayedFiles = it })
                                 }
                                 entry<Route.Reader> { ReaderRoute(navigator, onFily = { showFily = !showFily }) }
                                 entry<Route.Editor> { draft?.let { TextEditorScreen(it, editor) } }
@@ -242,21 +244,23 @@ class MainActivity : ComponentActivity() {
                                         onOpen = { navigator.openDocument(Uri.parse(it.uri)) },
                                     )
                                 }
-                                entry<Route.About> {
-                                    AboutScreen(
+                                entry<Route.About> { AboutScreen(onBack = navigator::back) }
+                                entry<Route.Settings> {
+                                    SettingsScreen(
                                         onBack = navigator::back,
+                                        onAbout = { navigator.show(Route.About) },
                                         theme = theme,
                                         haptics = haptics,
                                         onTheme = appearance::setTheme,
                                         onHaptics = appearance::setHaptics,
                                         cloudCrash = cloudCrash,
                                         fily = rememberFilyAbout(),
-                                        onClearSearchIndex = { librarySearch.clear() },
+                                        onClearSearchIndex = library::clearSearchFromSettings,
                                     )
                                 }
                             },
                         )
-                        if (showFily && !inPip && !introVisible) FilyOverlay(navigator, { displayedFiles }, onDismiss = { showFily = false })
+                        if (showFily && !inPip) FilyOverlay(navigator, { displayedFiles }, onDismiss = { showFily = false })
                         if (!inPip && !showFily) CrashReportPrompt(crashReports)
                         // The screen name only (never a file name), for the crash report.
                         SideEffect(navigator.top) { CrashBreadcrumbs.screen = (navigator.top as? Route)?.toString() }
@@ -264,31 +268,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    /**
-     * The system splash's exit: on a cold start the mark scales up and fades while the Compose intro reveals the name
-     * and tagline beneath it; a tap skips the rest. Warm starts and rotation remove the splash at once.
-     */
-    private fun playSplashExit(provider: SplashScreenViewProvider, cold: Boolean) {
-        if (!cold) {
-            provider.remove()
-            return
-        }
-        val view = provider.view
-        val length = StartupGate.beginExit().toLong()
-        view.setOnClickListener {
-            view.animate().cancel()
-            provider.remove()
-            StartupGate.skipIntro()
-        }
-        view.animate()
-            .alpha(0f)
-            .scaleX(1.25f)
-            .scaleY(1.25f)
-            .setDuration(length)
-            .withEndAction { provider.remove() }
-            .start()
     }
 
     @Composable
@@ -352,7 +331,7 @@ class MainActivity : ComponentActivity() {
                 folderPicker.launch(it)
             },
             onRefresh = library::refresh,
-            onAbout = { navigator.show(Route.About) },
+            onSettings = { navigator.show(Route.Settings) },
             onTools = { tool ->
                 fun convertTool(target: ConvertTool) {
                     convert.select(target)

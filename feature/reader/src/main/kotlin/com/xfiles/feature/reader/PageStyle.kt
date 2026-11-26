@@ -1,24 +1,18 @@
 package com.xfiles.feature.reader
 
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
-import com.xfiles.design.glassCard
-import com.xfiles.design.glassPanel
 
 /**
- * The page style of one file, chosen per file type and used by every viewer. [Original] keeps the author's
- * colours on a white page; [Standard] follows the app's light or dark theme; [Dark] and [Sepia] are fixed
+ * The page style of one file, chosen per file type and used by every viewer. [Original] uses white paper with the author's
+ * formatting; [Standard] follows the app's light or dark theme; [Dark] and [Sepia] are fixed
  * pages whose text always contrasts with them, whatever the app theme.
  */
 enum class PageStyle(val label: String) {
@@ -26,14 +20,6 @@ enum class PageStyle(val label: String) {
     Standard("Standard"),
     Dark("Dark"),
     Sepia("Sepia");
-
-    /** Page and text colours for the viewers that draw their own page, or null for [Standard] (the app's colours). */
-    fun colors(): PageColors? = when (this) {
-        Standard -> null
-        Original -> PageColors(page = Color.White, text = Color(0xFF161616), secondary = Color(0xFF5A5A5A), syntaxDark = false)
-        Dark -> PageColors(page = Color(0xFF121214), text = Color(0xFFE4E2DE), secondary = Color(0xFF9B9A96), syntaxDark = true)
-        Sepia -> PageColors(page = Color(0xFFF4ECD8), text = Color(0xFF3B2F22), secondary = Color(0xFF7A6A55), syntaxDark = false)
-    }
 
     /** The filter for rendered pages (PDF): dark inverts with the hues kept, sepia tones the paper. Null otherwise. */
     fun pageFilter(): ColorFilter? = when (this) {
@@ -84,47 +70,13 @@ enum class PageStyle(val label: String) {
     }
 }
 
-/** Colours of a page that a viewer draws itself. */
-@Immutable
-data class PageColors(
-    val page: Color,
-    val text: Color,
-    val secondary: Color,
-    /** Whether syntax colours should use the dark-page set. */
-    val syntaxDark: Boolean,
-)
-
 /** The page style of the document on screen; provided by the reader body. */
 val LocalPageStyle = compositionLocalOf { PageStyle.Standard }
 
-/** The viewer's page surface: the page colour for a fixed style, else [default] (the app's surface). */
 @Composable
-internal fun pageSurface(default: Color): Color = LocalPageStyle.current.colors()?.page ?: default
+internal fun Modifier.pageCard(): Modifier =
+    clip(RoundedCornerShape(12.dp)).background(LocalReaderColors.current.header)
 
-/** A cell or header band: a faint tint of the page's text colour, else [default]. */
 @Composable
-internal fun pageVariant(default: Color): Color =
-    LocalPageStyle.current.colors()?.let { it.secondary.copy(alpha = 0.14f) } ?: default
-
-/** Secondary text on the page, else [default]. */
-@Composable
-internal fun pageSecondary(default: Color): Color = LocalPageStyle.current.colors()?.secondary ?: default
-
-/** Primary text on the page, else [default]. */
-@Composable
-internal fun pageText(default: Color): Color = LocalPageStyle.current.colors()?.text ?: default
-
-/** A card on the page: the app's glass for [PageStyle.Standard], a faint tint for the fixed pages. */
-@Composable
-internal fun Modifier.pageCard(): Modifier {
-    val colors = LocalPageStyle.current.colors() ?: return this.glassCard()
-    return this.clip(RoundedCornerShape(12.dp)).background(colors.secondary.copy(alpha = 0.10f))
-}
-
-/** The page itself, filling its parent: glass for [PageStyle.Standard], the page colour for the fixed styles. */
-@Composable
-internal fun Modifier.pagePanel(corner: androidx.compose.ui.unit.Dp = 16.dp): Modifier {
-    val colors = LocalPageStyle.current.colors()
-    val shape = RoundedCornerShape(corner)
-    return if (colors == null) this.glassPanel(shape, elevation = 3.dp) else this.clip(shape).background(colors.page)
-}
+internal fun Modifier.pagePanel(corner: androidx.compose.ui.unit.Dp = 16.dp): Modifier =
+    clip(RoundedCornerShape(corner)).background(LocalReaderColors.current.page)

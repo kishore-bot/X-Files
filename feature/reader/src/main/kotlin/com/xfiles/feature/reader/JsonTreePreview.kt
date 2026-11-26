@@ -13,11 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,8 +35,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.xfiles.design.EzColors
-import com.xfiles.design.glassPanel
 import com.xfiles.design.rememberHaptics
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -118,11 +114,15 @@ internal fun JsonTreePreview(root: JsonElement, raw: String) {
 
 @Composable
 private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String) -> Unit) {
+    val palette = LocalReaderColors.current
+    val keyInk = remember(palette) { readableInk(KEY, palette.page) }
+    val stringInk = remember(palette) { readableInk(STRING, palette.page) }
+    val literalInk = remember(palette) { readableInk(LITERAL, palette.page) }
     val rows = remember(root, expanded) { jsonRows(root, expanded).take(MAX_ROWS).toList() }
     val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp)
     val jsonList = rememberViewerList("json-tree", rows.size)
     RegisterViewerScroll(jsonList) { LazyScroll(jsonList) }
-    Box(Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)) {
+    Box(Modifier.fillMaxSize().pagePanel()) {
         LazyColumn(Modifier.fillMaxSize(), state = jsonList, contentPadding = PaddingValues(12.dp)) {
             items(rows, key = { it.path }) { row ->
                 val container = row.value is JsonObject || row.value is JsonArray
@@ -130,12 +130,12 @@ private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String
                     buildAnnotatedString {
                         append("  ".repeat(row.depth))
                         if (container) append(if (row.path in expanded) "▾ " else "▸ ") else append("  ")
-                        row.key?.let { withStyle(SpanStyle(color = KEY)) { append(it) }; append(": ") }
+                        row.key?.let { withStyle(SpanStyle(color = keyInk)) { append(it) }; append(": ") }
                         when (val value = row.value) {
-                            is JsonObject -> withStyle(SpanStyle(color = EzColors.TextSecondary)) { append("{ ${value.size} ${if (value.size == 1) "key" else "keys"} }") }
-                            is JsonArray -> withStyle(SpanStyle(color = EzColors.TextSecondary)) { append("[ ${value.size} ${if (value.size == 1) "item" else "items"} ]") }
-                            JsonNull -> withStyle(SpanStyle(color = LITERAL)) { append("null") }
-                            is JsonPrimitive -> withStyle(SpanStyle(color = if (value.isString) STRING else LITERAL)) {
+                            is JsonObject -> withStyle(SpanStyle(color = palette.secondary)) { append("{ ${value.size} ${if (value.size == 1) "key" else "keys"} }") }
+                            is JsonArray -> withStyle(SpanStyle(color = palette.secondary)) { append("[ ${value.size} ${if (value.size == 1) "item" else "items"} ]") }
+                            JsonNull -> withStyle(SpanStyle(color = literalInk)) { append("null") }
+                            is JsonPrimitive -> withStyle(SpanStyle(color = if (value.isString) stringInk else literalInk)) {
                                 append(if (value.isString) "\"${value.content}\"" else value.content)
                             }
                         }
@@ -144,7 +144,7 @@ private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String
                         .then(if (container) Modifier.clickable(role = Role.Button) { onToggle(row.path) } else Modifier)
                         .padding(vertical = 2.dp),
                     style = mono,
-                    color = EzColors.Text,
+                    color = palette.text,
                 )
             }
             if (rows.size == MAX_ROWS) item { Text("Showing the first $MAX_ROWS rows. Collapse parts to see others.", Modifier.padding(top = 8.dp)) }
@@ -161,13 +161,13 @@ private fun JsonText(text: String, view: JsonView) {
     RegisterViewerScroll(vertical) { ColumnScroll(vertical) }
     Box(
         Modifier.fillMaxSize()
-            .glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
+            .pagePanel()
             .verticalScroll(vertical)
             .horizontalScroll(horizontal)
             .padding(12.dp),
     ) {
         SelectionContainer {
-            Text(text, style = mono, color = MaterialTheme.colorScheme.onSurface, softWrap = false)
+            Text(text, style = mono, color = LocalReaderColors.current.text, softWrap = false)
         }
     }
 }

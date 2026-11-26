@@ -78,6 +78,7 @@ class LibraryViewModel @Inject constructor(
     private var indexJob: Job? = null
     private var indexingSnapshot: FolderLibrary? = null
     private var clearIndexJob: Job? = null
+    private var refreshBeforeQuery = false
 
     private val query = MutableStateFlow("")
     private val mutableCategory = MutableStateFlow(LibraryCategory.entries.firstOrNull { it.name == progress.read("library", "category") } ?: LibraryCategory.All)
@@ -176,6 +177,7 @@ class LibraryViewModel @Inject constructor(
         stopSearch()
         val snapshot = library.value
         if (!searchEnabled.value || query.length < 2) return
+        if (refreshBeforeQuery && !snapshot.scanning) refreshSearchIndex(snapshot)
         queryJob = viewModelScope.launch {
             delay(240)
             try {
@@ -198,6 +200,15 @@ class LibraryViewModel @Inject constructor(
         mutableContentSearch.value = LibraryContentSearch()
     }
 
+    suspend fun clearSearchFromSettings() {
+        clearIndexJob?.join()
+        val active = indexJob
+        active?.cancel()
+        active?.join()
+        search.clear()
+        refreshBeforeQuery = true
+    }
+
     private suspend fun clearSearchIndex() {
         try {
             search.clear()
@@ -214,6 +225,7 @@ class LibraryViewModel @Inject constructor(
         if (!searchEnabled.value || (indexJob?.isActive == true && indexingSnapshot == snapshot)) return
         indexJob?.cancel()
         indexingSnapshot = snapshot
+        refreshBeforeQuery = false
         indexJob = viewModelScope.launch {
             clearIndexJob?.join()
             try {

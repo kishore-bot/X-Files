@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
@@ -37,6 +38,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
 import com.xfiles.core.documents.PdfMatchBox
 import com.xfiles.documents.PdfBox
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 /** Past this zoom the picture's visible tiles are decoded at full resolution (only when [regions] is given). */
@@ -104,6 +106,8 @@ internal fun ReaderImage(
     val haptics = LocalHapticFeedback.current
     val selection = remember(bitmap, text?.page) { PdfTextSelection(haptics) }
     val currentText by rememberUpdatedState(text)
+    val reportZoom by rememberUpdatedState(onZoomChanged)
+    val swipePage by rememberUpdatedState(onSwipePage)
     val scope = rememberCoroutineScope()
     val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
     val handleColor = MaterialTheme.colorScheme.primary
@@ -120,15 +124,18 @@ internal fun ReaderImage(
     )
 
     fun clamp(pan: Offset, scale: Float): Offset {
+        if (!pan.isSpecified) return Offset.Zero
         val horizontal = ((width * renderScale * scale - viewport.width) / 2).coerceAtLeast(0f)
         val vertical = ((height * renderScale * scale - viewport.height) / 2).coerceAtLeast(0f)
-        return Offset(pan.x.coerceIn(-horizontal, horizontal), pan.y.coerceIn(-vertical, vertical))
+        val x = if (pan.x.isFinite()) pan.x.coerceIn(-horizontal, horizontal) else 0f
+        val y = if (pan.y.isFinite()) pan.y.coerceIn(-vertical, vertical) else 0f
+        return Offset(x, y)
     }
 
     androidx.compose.runtime.LaunchedEffect(viewport, rotation) {
         if (viewport != IntSize.Zero) {
             offset = clamp(offset, zoom)
-            onZoomChanged(zoom > 1.001f)
+            reportZoom(zoom > 1.001f)
         }
     }
     Box(
@@ -141,31 +148,45 @@ internal fun ReaderImage(
                     var swipeX = 0f
                     var swipeY = 0f
                     var swiped = false
+                    var usedMultipleFingers = false
+                    var panning = false
+                    var pendingPan = Offset.Zero
                     do {
                         val event = awaitPointerEvent()
                         val pressed = event.changes.count { it.pressed }
+                        usedMultipleFingers = usedMultipleFingers || pressed > 1
                         // A text selection owns the drag: the page holds still while a word or a handle is moved.
                         if (selection.dragging) continue
+                        // An up event has no continuing pointers, so its centroid is unspecified.
+                        // Leave down/up events and stationary taps to the tap recognizer.
+                        if (event.changes.none { it.previousPressed && it.pressed }) continue
                         val zoomChange = event.calculateZoom()
-                        val pan = event.calculatePan()
-                        val pinching = pressed > 1 && zoomChange != 1f
-                        if (pinching || zoom > 1.001f || pressed > 1) {
+                        var pan = event.calculatePan()
+                        if (pan == Offset.Zero && zoomChange == 1f) continue
+                        if (pressed > 1 || zoom > 1.001f) {
+                            if (pressed == 1 && !panning && !usedMultipleFingers) {
+                                pendingPan += pan
+                                if (pendingPan.getDistance() <= viewConfiguration.touchSlop) continue
+                                pan = pendingPan
+                            }
+                            val centroid = event.calculateCentroid(useCurrent = false)
+                            if (!centroid.isSpecified || !centroid.x.isFinite() || !centroid.y.isFinite() || !zoomChange.isFinite()) continue
+                            panning = true
                             val previous = zoom
                             val updated = (previous * zoomChange).coerceIn(1f, 5f)
-                            val centroid = event.calculateCentroid(useCurrent = true)
                             val center = Offset(viewport.width / 2f, viewport.height / 2f)
                             val focus = centroid - center
                             val nextOffset = focus + (offset - focus) * (updated / previous) + pan
                             zoom = updated
-                            onZoomChanged(updated > 1.001f)
                             offset = clamp(nextOffset, updated)
+                            if ((previous > 1.001f) != (updated > 1.001f)) reportZoom(updated > 1.001f)
                             event.changes.forEach { it.consume() }
-                        } else if (pressed == 1 && !swiped) {
+                        } else if (pressed == 1 && !swiped && !usedMultipleFingers) {
                             swipeX += pan.x
                             swipeY += pan.y
-                            if (kotlin.math.abs(swipeY) > SWIPE_PAGE_PX && kotlin.math.abs(swipeY) > kotlin.math.abs(swipeX) * 1.5f) {
+                            if (abs(swipeY) > SWIPE_PAGE_PX && abs(swipeY) > abs(swipeX) * 1.5f) {
                                 swiped = true
-                                onSwipePage(if (swipeY < 0f) 1 else -1)
+                                swipePage(if (swipeY < 0f) 1 else -1)
                                 event.changes.forEach { it.consume() }
                             }
                         }
@@ -175,11 +196,13 @@ internal fun ReaderImage(
             .pointerInput(bitmap, rotation, viewport) {
                 detectTapGestures(
                     onTap = { if (selection.range.value != null) selection.clear() },
-                    onDoubleTap = {
-                        zoom = if (zoom == 1f) 2.5f else 1f
-                        onZoomChanged(zoom > 1.001f)
+                    onDoubleTap = { tap ->
+                        val zoomIn = zoom <= 1.001f
                         val center = Offset(viewport.width / 2f, viewport.height / 2f)
-                        offset = clamp((center - it) * (zoom - 1f), zoom)
+                        val nextZoom = if (zoomIn) 2.5f else 1f
+                        offset = if (zoomIn) clamp((center - tap) * (nextZoom - 1f), nextZoom) else Offset.Zero
+                        zoom = nextZoom
+                        reportZoom(zoomIn)
                     },
                 )
             }

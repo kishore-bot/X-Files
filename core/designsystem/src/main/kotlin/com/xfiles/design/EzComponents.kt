@@ -91,7 +91,7 @@ fun BarIconButton(
     val haptics = rememberHaptics()
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(48.dp)
             .pressScale(interaction, 0.85f)
             .clip(CircleShape)
             .clickable(interaction, indication = null, enabled = enabled, role = Role.Button) {

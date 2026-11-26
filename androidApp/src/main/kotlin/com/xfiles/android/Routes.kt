@@ -13,6 +13,7 @@ sealed interface Route : NavKey {
     @Serializable data object Reader : Route
     @Serializable data object Editor : Route
     @Serializable data object Tools : Route
+    @Serializable data object Settings : Route
     @Serializable data object About : Route
     @Serializable data object Tidy : Route
     @Serializable data object CompressZip : Route

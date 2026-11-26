@@ -70,12 +70,12 @@ internal fun documentItems(blocks: List<ContentBlock>): List<DocumentItem> {
 internal fun DocumentTable(rows: List<ContentBlock.TableRow>, progressField: String? = null) {
     val columns = remember(rows) { rows.maxOf { maxOf(it.cells.size, 1) } }
     val widths = remember(rows) { columnWidths(rows, columns) }
-    val line = MaterialTheme.colorScheme.outlineVariant
+    val palette = LocalReaderColors.current
     val shape = RoundedCornerShape(10.dp)
     val totalWidth = remember(widths) { widths.fold(0.dp) { total, width -> total + width } }
     BoxWithConstraints(
         Modifier.fillMaxWidth().clip(shape)
-            .background(pageSurface(MaterialTheme.colorScheme.surface)).border(1.dp, line, shape),
+            .background(palette.page).border(1.dp, palette.grid, shape),
     ) {
         if (totalWidth > maxWidth && progressField != null) {
             WideDocumentTable(rows, widths, progressField)
@@ -97,14 +97,13 @@ internal fun DocumentTable(rows: List<ContentBlock.TableRow>, progressField: Str
 private fun WideDocumentTable(rows: List<ContentBlock.TableRow>, widths: List<Dp>, progressField: String) {
     val density = LocalDensity.current
     val style = MaterialTheme.typography.bodyMedium
-    val dark = themeIsDark()
     val textMeasurer = rememberTextMeasurer(cacheSize = 0)
-    val rowHeights = remember(rows, widths, density, style, dark, textMeasurer) {
+    val rowHeights = remember(rows, widths, density, style, textMeasurer) {
         with(density) {
             rows.map { row ->
                 val rowStyle = style.copy(fontWeight = if (row.header) FontWeight.Bold else FontWeight.Normal)
                 val height = widths.indices.maxOf { column ->
-                    val text = richText(row.cells.getOrNull(column).orEmpty(), row.cellSpans.getOrNull(column).orEmpty(), dark)
+                    val text = richText(row.cells.getOrNull(column).orEmpty(), row.cellSpans.getOrNull(column).orEmpty())
                     textMeasurer.measure(
                         text, style = rowStyle,
                         constraints = Constraints(maxWidth = (widths[column] - 20.dp).roundToPx().coerceAtLeast(1)),
@@ -167,13 +166,13 @@ private data class DocumentTableBand(val rows: IntRange, val height: Int)
 
 @Composable
 private fun DocumentTableCell(row: ContentBlock.TableRow, column: Int, modifier: Modifier) {
-    val dark = themeIsDark()
+    val palette = LocalReaderColors.current
+    val background = if (row.header) palette.header else palette.page
     val cell = row.cells.getOrNull(column).orEmpty()
     val spans = row.cellSpans.getOrNull(column).orEmpty()
-    val styled = remember(cell, spans, dark) { richText(cell, spans, dark) }
+    val styled = remember(cell, spans, palette, background) { richText(cell, spans, palette = palette, background = background) }
     Box(
-        modifier.border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
-            .then(if (row.header) Modifier.background(pageVariant(MaterialTheme.colorScheme.surfaceVariant)) else Modifier)
+        modifier.background(background).border(0.5.dp, palette.grid)
             .padding(horizontal = 10.dp, vertical = 7.dp),
     ) {
         Text(

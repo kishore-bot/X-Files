@@ -1,4 +1,6 @@
-﻿package com.xfiles.feature.reader
+﻿@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
+package com.xfiles.feature.reader
 
 import com.xfiles.design.rememberHaptics
 import androidx.compose.foundation.background
@@ -7,7 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,7 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontStyle
@@ -45,7 +47,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.xfiles.design.EzColors
 import com.xfiles.documents.structure.CellAlign
 import com.xfiles.documents.structure.CellLook
 import com.xfiles.documents.structure.ContentBlock
@@ -92,6 +93,7 @@ internal fun SpreadsheetPreview(
     cellEditor: CellEditor? = null,
     onEdited: () -> Unit = {},
 ) {
+    val palette = LocalReaderColors.current
     val workbook = remember(document.blocks) { toWorkbook(document.blocks) }
     val progress = LocalViewerProgress.current
     var selected by rememberSaveable { mutableIntStateOf(progress?.number("sheet") ?: 0) }
@@ -124,11 +126,11 @@ internal fun SpreadsheetPreview(
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = freezeRow, onClick = { haptics.toggle(!freezeRow); freezeRow = !freezeRow }, label = { Text("Freeze first row") })
             FilterChip(selected = freezeColumn, onClick = { haptics.toggle(!freezeColumn); freezeColumn = !freezeColumn }, label = { Text("Freeze first column") })
         }
-        if (document.truncated) Text("Showing the rows within the preview limit.", color = pageSecondary(EzColors.TextSecondary))
+        if (document.truncated) Text("Showing the rows within the preview limit.", color = palette.secondary)
         key(sheet) {
             SuppliedSheetGrid(LazyMatrixSheetGrid, sheet, workbook.palette, frozenRows, frozenColumns, cellEditor, onEdited)
         }
@@ -206,7 +208,7 @@ internal fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: (
                             enabled = !busy,
                         )
                         FilterChip(selected = asNumber, onClick = { asNumber = !asNumber }, label = { Text("Number") }, enabled = !busy)
-                        Text("Saves a new copy. The original file is not changed.", color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall)
+                        Text("Saves a new copy. The original file is not changed.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -221,13 +223,14 @@ internal fun CellEditDialog(target: EditTarget, editor: CellEditor, onDismiss: (
 
 @Composable
 internal fun GridLabel(label: String, width: Int, height: Int = 34) {
+    val palette = LocalReaderColors.current
     Box(
         Modifier.width(width.dp).height(height.dp)
-            .background(pageVariant(MaterialTheme.colorScheme.surfaceVariant))
-            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+            .background(palette.header)
+            .border(0.5.dp, palette.grid),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = pageSecondary(EzColors.TextSecondary), style = MaterialTheme.typography.labelMedium)
+        Text(label, color = palette.secondary, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -240,6 +243,7 @@ internal fun SpreadsheetCell(
     height: Int,
     selected: Boolean,
     editable: Boolean,
+    width: Int = CELL_WIDTH,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
 ) {
@@ -249,24 +253,22 @@ internal fun SpreadsheetCell(
         CellAlign.Left -> TextAlign.Start
         else -> if (value.toDoubleOrNull() != null) TextAlign.End else TextAlign.Start
     }
-    val fill = look?.fill?.let(::Color)
-        ?: if (header) pageVariant(MaterialTheme.colorScheme.surfaceVariant) else Color.Transparent
-    val foreground = look?.color?.let(::Color) ?: if (look?.fill != null) {
-        if (fill.luminance() > 0.38f) Color.Black else Color.White
-    } else {
-        pageText(EzColors.Text)
-    }
+    val palette = LocalReaderColors.current
+    val base = if (header) palette.header else palette.page
+    val fill = look?.fill?.let { Color(it).compositeOver(base) } ?: base
+    val foreground = readableInk(look?.color?.let(::Color) ?: palette.text, fill)
+    val outline = if (selected) readableInk(palette.selection, fill, minimum = 3f) else palette.grid
     val underline = buildList {
         if (look?.underline == true) add(TextDecoration.Underline)
         if (look?.strikethrough == true) add(TextDecoration.LineThrough)
     }.takeIf { it.isNotEmpty() }?.let(TextDecoration::combine)
-    val content = remember(value, spans) { richText(value, spans) }
+    val content = remember(value, spans, palette, fill) { richText(value, spans, palette = palette, background = fill) }
     Box(
-        modifier.width(CELL_WIDTH.dp).height(height.dp)
+        modifier.width(width.dp).height(height.dp)
             .background(fill)
             .border(
                 if (selected) 2.dp else 0.5.dp,
-                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                outline,
             )
             .then(
                 if (onClick == null) Modifier else Modifier

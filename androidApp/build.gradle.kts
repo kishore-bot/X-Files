@@ -151,7 +151,7 @@ dependencies {
     implementation(libs.hilt.viewmodel.compose)
     implementation(platform(libs.compose.bom))
     implementation(libs.activity.compose)
-    // System splash (Android 12+ native, compat below) with the animated mark in ic_splash_animated.xml.
+    // Use the same static brand mark for the platform and compat splash.
     implementation(libs.core.splashscreen)
     implementation(libs.navigation3.runtime)
     implementation(libs.navigation3.ui)

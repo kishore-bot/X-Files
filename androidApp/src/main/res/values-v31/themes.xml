@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- The system splash now comes from Theme.Xfiles.Starting (values/themes.xml) via core-splashscreen. -->
-    <style name="Theme.Xfiles" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/splash_background</item>
-    </style>
-</resources>

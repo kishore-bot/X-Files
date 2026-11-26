@@ -1,16 +1,16 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.EzControlSheet
 import com.xfiles.design.EzColors
 import kotlin.math.roundToInt
 
@@ -37,13 +38,9 @@ internal fun MediaPlaybackSheet(
     val haptics = rememberMediaHaptics()
     var volume by remember { mutableFloatStateOf(device.volume()) }
     var brightness by remember { mutableFloatStateOf(device.brightness()) }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
-    ) {
+    EzControlSheet(onDismiss) {
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp).padding(bottom = 16.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("Playback settings", style = MaterialTheme.typography.titleLarge)

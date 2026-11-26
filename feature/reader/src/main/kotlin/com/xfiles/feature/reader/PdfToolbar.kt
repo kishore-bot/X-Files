@@ -1,15 +1,19 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,7 +28,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -35,9 +38,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.EzControlSheet
 import com.xfiles.design.EzIcons
 import com.xfiles.design.LocalFilyOpen
-import com.xfiles.design.glassBar
+import com.xfiles.design.EzControlBar
 import com.xfiles.design.rememberHaptics
 
 /**
@@ -65,45 +69,44 @@ internal fun PdfToolbar(
     LaunchedEffect(filyOpen, settingsOpen) {
         if (filyOpen || settingsOpen) showPages = false
     }
-    Column(
-        modifier.fillMaxWidth().glassBar().padding(horizontal = 4.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(0.dp, Alignment.CenterHorizontally),
-        ) {
-            IconButton(onClick = { haptics.tick(); previous?.let(onPage) }, enabled = previous != null) {
-                Icon(EzIcons.ChevronLeft, "Previous page")
+    EzControlBar(modifier) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { haptics.tick(); previous?.let(onPage) }, enabled = previous != null) {
+                    Icon(EzIcons.ChevronLeft, "Previous page")
+                }
+                Row(
+                    Modifier
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClickLabel = "Go to page") {
+                            haptics.tick()
+                            onEngage()
+                            onJump()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("${page + 1} / $pageCount", style = MaterialTheme.typography.labelLarge)
+                    Icon(EzIcons.DropDown, null)
+                }
+                IconButton(onClick = { haptics.tick(); next?.let(onPage) }, enabled = next != null) {
+                    Icon(EzIcons.ChevronRight, "Next page")
+                }
             }
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(onClickLabel = "Go to page") {
-                        haptics.tick()
-                        onEngage()
-                        onJump()
-                    }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("${page + 1} / $pageCount", style = MaterialTheme.typography.labelLarge)
-                Icon(EzIcons.DropDown, "Go to page")
-            }
-            IconButton(onClick = { haptics.tick(); next?.let(onPage) }, enabled = next != null) {
-                Icon(EzIcons.ChevronRight, "Next page")
-            }
-            IconButton(
-                onClick = { haptics.tick(); onZoom(zoom - PDF_ZOOM_STEP) },
-                enabled = !grid && zoom > PDF_MIN_ZOOM,
-            ) { Icon(EzIcons.Minus, "Zoom out") }
-            Text("$zoom%", style = MaterialTheme.typography.labelLarge)
-            IconButton(
-                onClick = { haptics.tick(); onZoom(zoom + PDF_ZOOM_STEP) },
-                enabled = !grid && zoom < PDF_MAX_ZOOM,
-            ) { Icon(EzIcons.Plus, "Zoom in") }
-            if (pageCount > 1 && !grid) {
-                IconButton(onClick = { onEngage(); showPages = true }) { Icon(EzIcons.ListLines, "Page thumbnails") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = { haptics.tick(); onZoom(zoom - PDF_ZOOM_STEP) },
+                    enabled = !grid && zoom > PDF_MIN_ZOOM,
+                ) { Icon(EzIcons.Minus, "Zoom out") }
+                Text("$zoom%", style = MaterialTheme.typography.labelLarge)
+                IconButton(
+                    onClick = { haptics.tick(); onZoom(zoom + PDF_ZOOM_STEP) },
+                    enabled = !grid && zoom < PDF_MAX_ZOOM,
+                ) { Icon(EzIcons.Plus, "Zoom in") }
+                if (pageCount > 1 && !grid) {
+                    IconButton(onClick = { onEngage(); showPages = true }) { Icon(EzIcons.ListLines, "Page thumbnails") }
+                }
             }
         }
     }
@@ -125,12 +128,8 @@ private fun PdfPageSheet(
     onPage: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    androidx.compose.material3.ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    EzControlSheet(onDismiss) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text("Pages", style = MaterialTheme.typography.titleMedium)
             PdfPageSlider(page, pageCount, enabled, onPage)
             PdfThumbnailStrip(pageCount, page, thumbnail, enabled, onPage)

@@ -106,10 +106,10 @@ import com.xfiles.documents.library.libraryCategories
 
 internal enum class HomeTab { Library, Recent, Bookmarks }
 
-/** Menu, the app's name, Fily's mic and About (when there is one). */
+/** Menu, the app's name, Fily and Settings (when there is one). */
 @Composable
 internal fun Header(
-    onAbout: (() -> Unit)?,
+    onSettings: (() -> Unit)?,
     onVoice: (() -> Unit)?,
     compact: Boolean,
 ) {
@@ -127,7 +127,7 @@ internal fun Header(
             modifier = Modifier.weight(1f).semantics { heading() },
         )
         if (onVoice != null) FilyButton(onVoice)
-        if (onAbout != null) GlassIconButton(EzIcons.Info, "About Xfiles", onAbout)
+        if (onSettings != null) GlassIconButton(EzIcons.Settings, "Settings", onSettings)
     }
 }
 

@@ -1,8 +1,5 @@
 package com.xfiles.design
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
@@ -15,11 +12,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -136,9 +131,6 @@ val DarkPalette = EzPalette(
 )
 
 val LocalEzPalette = staticCompositionLocalOf { LightPalette }
-
-/** How long a light/dark switch takes to cross-fade. */
-const val THEME_FADE_MS = 350
 
 /**
  * Design tokens of the Xfiles design system (Material 3 Expressive + glass).
@@ -365,63 +357,14 @@ private fun EzPalette.colorScheme(): ColorScheme {
     )
 }
 
-/** Every colour of [a] blended towards [b] by [f] (0 = [a], 1 = [b]); both palettes share their layout. */
-internal fun lerpPalette(a: EzPalette, b: EzPalette, f: Float): EzPalette {
-    fun c(x: Color, y: Color) = lerp(x, y, f)
-    fun cs(x: List<Color>, y: List<Color>) = List(x.size) { i -> lerp(x[i], y[i], f) }
-    fun fl(x: Float, y: Float) = x + (y - x) * f
-    return EzPalette(
-        dark = f >= 0.5f,
-        background = c(a.background, b.background),
-        backgroundSecondary = c(a.backgroundSecondary, b.backgroundSecondary),
-        text = c(a.text, b.text),
-        textSecondary = c(a.textSecondary, b.textSecondary),
-        accent = c(a.accent, b.accent),
-        glassTop = c(a.glassTop, b.glassTop),
-        glassBottom = c(a.glassBottom, b.glassBottom),
-        glassAlphaMin = fl(a.glassAlphaMin, b.glassAlphaMin),
-        glassAlphaMax = fl(a.glassAlphaMax, b.glassAlphaMax),
-        glassEdgeTop = c(a.glassEdgeTop, b.glassEdgeTop),
-        glassEdgeBottom = c(a.glassEdgeBottom, b.glassEdgeBottom),
-        glassGlow = c(a.glassGlow, b.glassGlow),
-        glassShadow = c(a.glassShadow, b.glassShadow),
-        dialogSurface = c(a.dialogSurface, b.dialogSurface),
-        sheetSurface = c(a.sheetSurface, b.sheetSurface),
-        hairline = c(a.hairline, b.hairline),
-        selected = c(a.selected, b.selected),
-        fieldOutline = c(a.fieldOutline, b.fieldOutline),
-        pageOutline = c(a.pageOutline, b.pageOutline),
-        sliderTrack = c(a.sliderTrack, b.sliderTrack),
-        waveBase = cs(a.waveBase, b.waveBase),
-        waveGlowTop = c(a.waveGlowTop, b.waveGlowTop),
-        waveGlowBottom = c(a.waveGlowBottom, b.waveGlowBottom),
-        ribbonTop = cs(a.ribbonTop, b.ribbonTop),
-        ribbonBottom = cs(a.ribbonBottom, b.ribbonBottom),
-        readerBase = cs(a.readerBase, b.readerBase),
-        readerGlow = c(a.readerGlow, b.readerGlow),
-    )
-}
+/** The effective app theme, including an explicit override of the system theme. */
+val LocalEzDarkTheme = staticCompositionLocalOf { false }
 
-/**
- * [darkTheme] picks the palette; the Android app follows the system setting. A change cross-fades the colours
- * over [THEME_FADE_MS] in Compose, so the switch needs no activity recreation and no restart.
- */
+/** Switch related foreground and surface colors together without recreating the activity. */
 @Composable
 fun EzTheme(darkTheme: Boolean = false, content: @Composable () -> Unit) {
-    val target = if (darkTheme) 1f else 0f
-    val progress by animateFloatAsState(
-        targetValue = target,
-        animationSpec = tween(THEME_FADE_MS, easing = FastOutSlowInEasing),
-        label = "themeFade",
-    )
-    val palette = remember(progress) {
-        when (progress) {
-            0f -> LightPalette
-            1f -> DarkPalette
-            else -> lerpPalette(LightPalette, DarkPalette, progress)
-        }
-    }
-    CompositionLocalProvider(LocalEzPalette provides palette) {
+    val palette = if (darkTheme) DarkPalette else LightPalette
+    CompositionLocalProvider(LocalEzPalette provides palette, LocalEzDarkTheme provides darkTheme) {
         MaterialTheme(
             colorScheme = remember(palette) { palette.colorScheme() },
             // Text fields and menus take extraSmall; dialogs and sheets extraLarge.

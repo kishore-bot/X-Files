@@ -53,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -155,7 +156,7 @@ fun LibraryScreen(
     onRemoveFolder: (Uri) -> Unit,
     onReconnectFolder: (Uri) -> Unit = {},
     onRefresh: () -> Unit,
-    onAbout: () -> Unit,
+    onSettings: () -> Unit,
     onTools: (LibraryTool) -> Unit,
     onFily: () -> Unit,
     onListedFiles: (List<FileEntry>) -> Unit,
@@ -189,7 +190,7 @@ fun LibraryScreen(
     }
     DisposableEffect(Unit) { onDispose(onStopSearch) }
     val window = LocalWindowInfo.current.containerDpSize
-    val landscape = window.width >= 600.dp && window.width > window.height
+    val landscape = window.width >= 480.dp && window.width > window.height
     var toolsOpen by rememberSaveable { mutableStateOf(false) }
     val filyOpen = LocalFilyOpen.current
     LaunchedEffect(filyOpen) {
@@ -257,7 +258,10 @@ fun LibraryScreen(
     }
     val noFolders = library.folders.isEmpty()
     // The list scrolls under the floating button and the tab bar, and clears them at the end.
-    val bottomClearance = if (landscape) 24.dp else PortraitClearance
+    var chromeHeight by remember { mutableStateOf(0) }
+    val bottomClearance = if (landscape) 24.dp else with(LocalDensity.current) {
+        if (chromeHeight > 0) chromeHeight.toDp() + 12.dp else PortraitClearance
+    }
     val startClearance = if (landscape) 112.dp else 0.dp
     val showsAssistant = tab == HomeTab.Library && (query.isNotEmpty() || !noFolders)
 
@@ -293,7 +297,7 @@ fun LibraryScreen(
             } else {
                 item(key = "header", contentType = "header") {
                     Header(
-                        onAbout = onAbout.takeUnless { landscape },
+                        onSettings = onSettings.takeUnless { landscape },
                         onVoice = onFily,
                         compact = landscape,
                     )
@@ -321,7 +325,7 @@ fun LibraryScreen(
                         onReconnect = onReconnectFolder,
                     )
                 }
-                if (noFolders) item(key = "no-folders", contentType = "card") {
+                if (noFolders && !library.scanning) item(key = "no-folders", contentType = "card") {
                     NoFoldersCard(onAddFolder, RowGutter)
                 }
             }
@@ -369,6 +373,11 @@ fun LibraryScreen(
                             onLongPress = { longPress(bookmark.file) },
                         )
                     }
+                }
+            } else if (tab == HomeTab.Library && matching.isEmpty() && library.scanning) {
+                item("loading") {
+                    SearchNote("Checking linked folders…")
+                    LinearProgressIndicator(RowGutter.fillMaxWidth(), color = EzColors.Primary)
                 }
             } else if (matching.isEmpty()) {
                 item("empty") {
@@ -427,11 +436,12 @@ fun LibraryScreen(
             }
         }
         if (landscape) {
-            LandscapeLibraryRail(navItems, onOpen, onAbout, Modifier.align(Alignment.CenterStart))
+            LandscapeLibraryRail(navItems, onOpen, onSettings, Modifier.align(Alignment.CenterStart))
         } else {
             Column(
                 Modifier
                     .align(Alignment.BottomCenter)
+                    .onSizeChanged { chromeHeight = it.height }
                     .navigationBarsPadding()
                     .padding(start = EzSpacing.Gutter, end = EzSpacing.Gutter, bottom = 10.dp),
                 horizontalAlignment = Alignment.End,

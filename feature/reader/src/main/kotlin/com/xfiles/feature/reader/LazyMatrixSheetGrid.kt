@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,7 +36,7 @@ import kotlin.math.roundToLong
 internal object LazyMatrixSheetGrid : SheetGridRenderer {
     @Composable
     override fun Grid(spec: SheetGridSpec, modifier: Modifier) {
-        BoxWithConstraints(modifier) {
+        BoxWithConstraints(modifier.background(LocalReaderColors.current.page)) {
             val leftLimit = (maxWidth - 48.dp).coerceAtLeast(spec.labelWidth)
             val topLimit = (maxHeight - 48.dp).coerceAtLeast(spec.labelHeight)
             var left = spec.labelWidth

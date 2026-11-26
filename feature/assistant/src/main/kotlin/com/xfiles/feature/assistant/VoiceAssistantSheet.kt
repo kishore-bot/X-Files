@@ -230,7 +230,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
         }
         Surface(shape = MaterialTheme.shapes.extraLarge, color = colors.surfaceContainerHigh, contentColor = colors.onSurface) {
             Column(
-                Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(20.dp),
+                Modifier.fillMaxWidth().heightIn(max = 480.dp).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -247,75 +247,80 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                     Box(Modifier.size(8.dp).background(dot, CircleShape))
                     Text(status, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
-                if (settingsOpen) {
-                    FilySettings(
-                        enabled = enabled,
-                        contents = contents,
-                        languages = languages,
-                        pickedLanguage = pickedLanguage,
-                        onEnabled = {
-                            if (!it) {
-                                recognizer.cancel()
-                                speaker.stop()
-                                session.clear()
-                            }
-                            viewModel.setEnabled(it)
-                        },
-                        onContents = {
-                            if (!it) {
-                                session.clear()
-                                speaker.stop()
-                            }
-                            viewModel.setContentAccess(it)
-                        },
-                        onLanguage = { tag ->
-                            viewModel.selectSpeechLanguage(tag)
-                            if (languages.downloadable.any { it.tag == tag }) {
-                                settingsOpen = false
-                                downloadPack(tag)
-                            }
-                        },
-                    )
-                } else {
-                    if (question.isNotBlank()) {
-                        Text(question, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
-                    }
-                    if (answer.isNotBlank()) {
-                        Text(
-                            answer,
-                            color = if (ui.error != null && !ui.working) MaterialTheme.colorScheme.error else colors.onSurface,
-                            style = MaterialTheme.typography.titleMedium.copy(lineHeight = 24.sp),
+                Column(
+                    Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (settingsOpen) {
+                        FilySettings(
+                            enabled = enabled,
+                            contents = contents,
+                            languages = languages,
+                            pickedLanguage = pickedLanguage,
+                            onEnabled = {
+                                if (!it) {
+                                    recognizer.cancel()
+                                    speaker.stop()
+                                    session.clear()
+                                }
+                                viewModel.setEnabled(it)
+                            },
+                            onContents = {
+                                if (!it) {
+                                    session.clear()
+                                    speaker.stop()
+                                }
+                                viewModel.setContentAccess(it)
+                            },
+                            onLanguage = { tag ->
+                                viewModel.selectSpeechLanguage(tag)
+                                if (languages.downloadable.any { it.tag == tag }) {
+                                    settingsOpen = false
+                                    downloadPack(tag)
+                                }
+                            },
                         )
-                    }
-                    val downloading = pack as? SpeechPack.Downloading
-                    when {
-                        downloading != null -> {
-                            val percent = downloading.percent
-                            if (percent == null) LinearProgressIndicator(Modifier.fillMaxWidth())
-                            else LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        if (question.isNotBlank()) {
+                            Text(question, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
                         }
-                        !enabled -> EzTextButton("Open Fily settings", { settingsOpen = true })
-                        permissionPending -> Unit
-                        !hasMic -> EzTextButton("Allow microphone", {
-                            micDenied = false
-                            startMic()
-                        })
-                        pack == SpeechPack.Failed -> EzTextButton("Try again", { downloadPack() })
-                        needsLanguage -> EzTextButton("Download speech pack", { downloadPack() })
-                        engineMissing -> EzTextButton("Get Google speech", recognizer::getSpeechEngine)
+                        if (answer.isNotBlank()) {
+                            Text(
+                                answer,
+                                color = if (ui.error != null && !ui.working) MaterialTheme.colorScheme.error else colors.onSurface,
+                                style = MaterialTheme.typography.titleMedium.copy(lineHeight = 24.sp),
+                            )
+                        }
+                        val downloading = pack as? SpeechPack.Downloading
+                        when {
+                            downloading != null -> {
+                                val percent = downloading.percent
+                                if (percent == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                                else LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
+                            }
+                            !enabled -> EzTextButton("Open Fily settings", { settingsOpen = true })
+                            permissionPending -> Unit
+                            !hasMic -> EzTextButton("Allow microphone", {
+                                micDenied = false
+                                startMic()
+                            })
+                            pack == SpeechPack.Failed -> EzTextButton("Try again", { downloadPack() })
+                            needsLanguage -> EzTextButton("Download speech pack", { downloadPack() })
+                            engineMissing -> EzTextButton("Get Google speech", recognizer::getSpeechEngine)
+                        }
                     }
-                }
-                if (enabled && hasMic && !settingsOpen) {
-                    val action = when {
-                        speaking == TtsState.Speaking || replyPending -> "Interrupt"
-                        ui.working -> "Processing"
-                        recognition == SpeechState.Listening -> "Pause listening"
-                        else -> "Start listening"
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        FilyMascot(state = mascotState, size = 56.dp)
-                        if (!ui.working && !packBusy && !needsLanguage && !engineMissing) {
-                            EzTextButton(action, ::tapRobot)
+                    if (enabled && hasMic && !settingsOpen) {
+                        val action = when {
+                            speaking == TtsState.Speaking || replyPending -> "Interrupt"
+                            ui.working -> "Processing"
+                            recognition == SpeechState.Listening -> "Pause listening"
+                            else -> "Start listening"
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FilyMascot(state = mascotState, size = 56.dp)
+                            if (!ui.working && !packBusy && !needsLanguage && !engineMissing) {
+                                EzTextButton(action, ::tapRobot)
+                            }
                         }
                     }
                 }

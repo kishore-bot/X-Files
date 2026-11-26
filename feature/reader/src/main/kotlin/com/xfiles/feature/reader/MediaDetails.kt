@@ -12,13 +12,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
+import com.xfiles.design.EzControlSheet
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.design.EzColors
 import java.text.DateFormat
@@ -42,11 +42,7 @@ internal fun MediaDetailsSheet(file: FileEntry, player: Player, onDismiss: () ->
         if (size.width > 0 && size.height > 0) add("Resolution" to "${size.width} × ${size.height}")
         codecsOf(player).takeIf { it.isNotEmpty() }?.let { add("Codecs" to it.joinToString(", ")) }
     }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
-    ) {
+    EzControlSheet(onDismiss) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

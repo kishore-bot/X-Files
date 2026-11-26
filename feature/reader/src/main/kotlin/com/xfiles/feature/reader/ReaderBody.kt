@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
@@ -17,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.LocalEzDarkTheme
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfPageText
@@ -65,6 +67,7 @@ internal fun ReaderBody(
 ) {
     val ready = state as? ReaderState.Ready
     val gridPdf = ready?.preview as? FilePreview.Pdf
+    val colors = pageStyle.readerColors(LocalEzDarkTheme.current)
     Box(modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
         if (ui.showGrid && gridPdf != null) {
             PdfPageGrid(
@@ -89,8 +92,9 @@ internal fun ReaderBody(
             // A gallery keeps one key across page turns, so the pager is not recreated when the file changes.
             is ReaderState.Ready -> CompositionLocalProvider(
                 LocalPageStyle provides pageStyle,
-                // Fixed page styles set the text colour, so default text contrasts with the page they sit on.
-                LocalContentColor provides (pageStyle.colors()?.text ?: LocalContentColor.current),
+                LocalReaderColors provides colors,
+                LocalTextSelectionColors provides colors.selectionColors(),
+                LocalContentColor provides colors.text,
             ) {
                 key(paged?.id ?: state.file.uri) {
                     ReaderPreview(

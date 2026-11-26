@@ -41,7 +41,7 @@ import com.xfiles.design.pressScale
 internal fun LandscapeLibraryRail(
     items: List<EzNavItem>,
     onOpen: () -> Unit,
-    onAbout: () -> Unit,
+    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
@@ -79,7 +79,7 @@ internal fun LandscapeLibraryRail(
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 GlassIconButton(EzIcons.Folder, "Open file", onOpen, tint = EzColors.Primary)
-                GlassIconButton(EzIcons.Info, "About Xfiles", onAbout, tint = EzColors.Primary)
+                GlassIconButton(EzIcons.Settings, "Settings", onSettings, tint = EzColors.Primary)
             }
         }
     }

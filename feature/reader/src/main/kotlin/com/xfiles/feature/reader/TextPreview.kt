@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -26,16 +25,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.dp
 import com.xfiles.core.documents.FilePreview
-import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
-import com.xfiles.design.glassPanel
 
 @Composable
 internal fun TextPreview(
@@ -44,7 +39,7 @@ internal fun TextPreview(
     onSearchClose: () -> Unit,
 ) {
     val content = preview.content
-    val palette = LocalPageStyle.current.colors()
+    val palette = LocalReaderColors.current
     val scale = LocalTextScale.current
     val bodyStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = MaterialTheme.typography.bodyLarge.fontSize * scale)
     val sections = remember(content) { textSections(content) }
@@ -89,19 +84,12 @@ internal fun TextPreview(
                 IconButton(onClick = onSearchClose) { Icon(EzIcons.Close, "Close search") }
             }
         }
-        val pageModifier = if (palette == null) {
-            Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
-        } else {
-            Modifier.fillMaxSize().background(palette.page, RoundedCornerShape(16.dp))
-        }
-        Box(pageModifier) {
+        Box(Modifier.weight(1f).fillMaxWidth().pagePanel()) {
             LazyColumn(state = list, contentPadding = PaddingValues(16.dp)) {
-                if (preview.truncated) item { Text("Showing the beginning of this file.", Modifier.padding(bottom = 12.dp), color = palette?.secondary ?: Color.Unspecified) }
-                if (sections.isEmpty()) item { Text("This file has no readable text.", color = palette?.secondary ?: Color.Unspecified) }
+                if (preview.truncated) item { Text("Showing the beginning of this file.", Modifier.padding(bottom = 12.dp), color = palette.secondary) }
+                if (sections.isEmpty()) item { Text("This file has no readable text.", color = palette.secondary) }
                 itemsIndexed(sections, key = { _, section -> section.first }) { _, section ->
-                    val selectedColor = EzColors.Selected
-                    val otherColor = selectedColor.copy(alpha = 0.5f)
-                    val styled = remember(content, section, matches, selected, selectedColor, otherColor) {
+                    val styled = remember(content, section, matches, selected, palette) {
                         buildAnnotatedString {
                             append(content.substring(section.first, section.last + 1))
                             val start = matches.binarySearch { it.last.compareTo(section.first) }
@@ -111,12 +99,19 @@ internal fun TextPreview(
                                 if (match.first > section.last) break
                                 val from = maxOf(section.first, match.first) - section.first
                                 val to = minOf(section.last, match.last) - section.first + 1
-                                addStyle(SpanStyle(background = if (match == selected) selectedColor else otherColor), from, to)
+                                val active = match == selected
+                                addStyle(
+                                    SpanStyle(
+                                        background = if (active) palette.currentMatch else palette.match,
+                                        color = if (active || !palette.dark) palette.matchText else palette.text,
+                                    ),
+                                    from, to,
+                                )
                             }
                         }
                     }
                     SelectionContainer {
-                        Text(styled, style = bodyStyle, color = palette?.text ?: Color.Unspecified)
+                        Text(styled, style = bodyStyle, color = palette.text)
                     }
                 }
             }

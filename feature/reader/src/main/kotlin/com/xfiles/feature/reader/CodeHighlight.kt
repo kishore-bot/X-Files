@@ -71,6 +71,15 @@ private val IntelliJLight = CodeTheme(
     operator = SpanStyle(color = Color(0xFF1E1E1E)),
 )
 
+private fun CodeTheme.onPage(page: Color): CodeTheme {
+    fun SpanStyle.ink() = if (color == Color.Unspecified) this else copy(color = readableInk(color, page))
+    return CodeTheme(
+        keyword.ink(), string.ink(), comment.ink(), number.ink(), annotation.ink(), typeName.ink(),
+        functionCall.ink(), tag.ink(), attribute.ink(), heading.ink(), link.ink(), code.ink(),
+        emphasis.ink(), strong.ink(), marker.ink(), quote.ink(), operator.ink(),
+    )
+}
+
 /** Longer text stays plain: colouring is per block, and a huge block would stall the frame. */
 private const val MAX_HIGHLIGHT_CHARS = 200_000
 
@@ -79,10 +88,11 @@ private const val MAX_HIGHLIGHT_CHARS = 200_000
  * text. Each block is coloured on its own, so a comment or code fence that
  * starts in an earlier block isn't known here.
  */
-internal fun highlightCode(language: String?, text: String, dark: Boolean = true): AnnotatedString? {
+internal fun highlightCode(language: String?, text: String, dark: Boolean = true, background: Color? = null): AnnotatedString? {
     val lang = language?.lowercase() ?: return null
     if (text.length > MAX_HIGHLIGHT_CHARS) return null
-    val theme = if (dark) Darcula else IntelliJLight
+    val base = if (dark) Darcula else IntelliJLight
+    val theme = background?.let(base::onPage) ?: base
     return when (lang) {
         "markdown", "md" -> highlightMarkdown(text, theme)
         "html", "xml", "svg", "xsd", "plist", "vue", "svelte" -> highlightMarkup(text, theme)

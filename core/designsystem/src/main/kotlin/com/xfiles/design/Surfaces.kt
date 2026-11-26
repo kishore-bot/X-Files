@@ -53,12 +53,12 @@ fun Modifier.glass(shape: Shape, strength: Float = 0.45f): Modifier {
 
 /** The glass of every top and bottom bar, with a soft shadow, so they all read as one family. */
 @Composable
-fun Modifier.glassBar(shape: Shape = EzShapes.Bar): Modifier {
+fun Modifier.glassBar(shape: Shape = EzShapes.Bar, strength: Float = 0.45f): Modifier {
     val palette = LocalEzPalette.current
     return this.then(
-        remember(palette, shape) {
+        remember(palette, shape, strength) {
             Modifier.chromeShadow(shape, palette.glassShadow, 3.dp)
-                .then(glassLayers(palette, shape, 0.45f))
+                .then(glassLayers(palette, shape, strength))
         },
     )
 }

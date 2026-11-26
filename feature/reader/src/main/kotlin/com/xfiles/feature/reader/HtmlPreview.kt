@@ -33,7 +33,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.xfiles.design.glassPanel
 import com.xfiles.design.rememberHaptics
 import com.xfiles.feature.reader.domain.HtmlLinkAction
 import com.xfiles.feature.reader.domain.classifyHtmlLink
@@ -54,18 +53,18 @@ internal fun HtmlPreview(
     val context = LocalContext.current
     val haptics = rememberHaptics()
     val style = LocalPageStyle.current
-    // Original keeps the page's own CSS on white and injects nothing; Standard keeps the glass; Dark and Sepia
-    // add their page colours and a stylesheet.
-    val original = style == PageStyle.Original
-    val palette = if (style == PageStyle.Standard || original) null else style.colors()
+    // Web documents retain authored styling in Original and Standard. Fixed reading styles tint the page.
+    val palette = LocalReaderColors.current.takeIf { style == PageStyle.Dark || style == PageStyle.Sepia }
     // The page keeps an about:blank base, so relative hrefs reach the link handler as written.
     val pageUrl = "about:blank"
     var pendingLink by rememberSaveable(html) { mutableStateOf<String?>(null) }
     val siblingHandler by rememberUpdatedState(onOpenSibling)
     val progress = LocalViewerProgress.current
     var readingOffset by remember(progress) { mutableIntStateOf(progress?.number("html-y")?.coerceAtLeast(0) ?: 0) }
+    var readingX by remember(progress) { mutableIntStateOf(progress?.number("html-x")?.coerceAtLeast(0) ?: 0) }
     var restoring by remember { mutableStateOf(true) }
     var restoreGeneration by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    SaveViewerProgress("html-x") { readingX.toString().takeUnless { restoring } }
     SaveViewerProgress("html-y") { readingOffset.toString().takeUnless { restoring } }
     // The assistant pages this web view through the handle while it is on screen.
     val webHandle = remember { WebViewHandle() }
@@ -74,11 +73,8 @@ internal fun HtmlPreview(
         val unregister = registerScroll(WebViewScroll(webHandle))
         onDispose { unregister() }
     }
-    val page = when {
-        original -> Modifier.fillMaxSize().background(Color.White, RoundedCornerShape(16.dp))
-        palette == null -> Modifier.fillMaxSize().glassPanel(RoundedCornerShape(16.dp), elevation = 3.dp)
-        else -> Modifier.fillMaxSize().background(palette.page, RoundedCornerShape(16.dp))
-    }
+    val background = palette?.page ?: Color.White
+    val page = Modifier.fillMaxSize().background(background, RoundedCornerShape(16.dp))
     // The reading colours go in as a stylesheet ahead of the page; the page itself is unchanged.
     val pageHtml = if (palette == null) html else readingHtml(html, palette)
     Box(page.clip(RoundedCornerShape(16.dp))) {
@@ -100,8 +96,11 @@ internal fun HtmlPreview(
                         loadWithOverviewMode = true
                         useWideViewPort = true
                     }
-                    setOnScrollChangeListener { _, _, y, _, _ ->
-                        if (!restoring) readingOffset = y
+                    setOnScrollChangeListener { _, x, y, _, _ ->
+                        if (!restoring) {
+                            readingX = x
+                            readingOffset = y
+                        }
                     }
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String?) {
@@ -109,7 +108,8 @@ internal fun HtmlPreview(
                             view.postVisualStateCallback(generation, object : WebView.VisualStateCallback() {
                                 override fun onComplete(requestId: Long) {
                                     if (requestId == restoreGeneration) {
-                                        view.scrollTo(0, readingOffset)
+                                        view.scrollTo(readingX, readingOffset)
+                                        readingX = view.scrollX
                                         readingOffset = view.scrollY
                                         restoring = false
                                     }
@@ -141,6 +141,7 @@ internal fun HtmlPreview(
                 }
             },
             update = { view ->
+                view.setBackgroundColor(background.toArgb())
                 if (view.tag != pageHtml.hashCode()) {
                     view.tag = pageHtml.hashCode()
                     restoring = true
@@ -184,15 +185,16 @@ private fun openExternalLink(context: Context, link: String): Boolean = try {
  * Backgrounds and text colours are forced with !important so the page's own colours yield; links keep the
  * palette's secondary tone. The page's markup and scripts (none run) are untouched.
  */
-internal fun readingHtml(html: String, palette: PageColors): String {
+internal fun readingHtml(html: String, palette: ReaderColors): String {
     val page = palette.page.hex()
     val text = palette.text.hex()
-    val muted = palette.secondary.hex()
+    val link = palette.link.hex()
+    val grid = palette.grid.hex()
     val css = "<style>html,body{background:$page !important;color:$text !important}" +
         "body *{color:inherit}" +
-        "a{color:$muted !important}" +
+        "a{color:$link !important}" +
         "table,th,td,pre,code,blockquote{background:transparent !important}" +
-        "th,td,pre,blockquote{border-color:$muted !important}</style>"
+        "th,td,pre,blockquote{border-color:$grid !important}</style>"
     val head = Regex("<head[^>]*>", RegexOption.IGNORE_CASE).find(html)
     return if (head != null) html.replaceRange(head.range, head.value + css) else css + html
 }

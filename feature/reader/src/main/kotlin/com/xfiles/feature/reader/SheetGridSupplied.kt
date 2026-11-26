@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.structure.CellLook
 import com.xfiles.documents.structure.ContentBlock
@@ -53,43 +54,47 @@ internal fun ColumnScope.SuppliedSheetGrid(
         val unregister = if (current != null) registerScroll(SheetGridViewerScroll(current)) else ({})
         onDispose { unregister() }
     }
-    val heights = remember(sheet, palette) {
+    val density = LocalDensity.current
+    val fontScale = density.fontScale.coerceIn(1f, 2.5f)
+    val rowHeight = (ROW_HEIGHT * fontScale).roundToInt()
+    val labelWidth = (LABEL_WIDTH * fontScale).roundToInt()
+    val columnWidth = (CELL_WIDTH * fontScale.coerceAtMost(1.65f)).roundToInt()
+    val heights = remember(sheet, palette, fontScale) {
         buildMap {
             sheet.rows.forEachIndexed { index, row ->
-                val height = sheetRowHeight(row, palette)
-                if (height != ROW_HEIGHT) put(index, height.dp)
+                val height = (sheetRowHeight(row, palette) * fontScale).roundToInt()
+                if (height != rowHeight) put(index, height.dp)
             }
         }
     }
-    val density = LocalDensity.current
     val mergeIndex = remember(sheet) { SheetMergeIndex(sheet) }
     val rowOffsets = remember(sheet, heights, density) {
         if (sheet.merges.isEmpty()) IntArray(0) else with(density) {
             IntArray(sheet.rows.size + 1).also { offsets ->
                 for (index in sheet.rows.indices) {
-                    offsets[index + 1] = offsets[index] + (heights[index] ?: ROW_HEIGHT.dp).roundToPx()
+                    offsets[index + 1] = offsets[index] + (heights[index] ?: rowHeight.dp).roundToPx()
                 }
             }
         }
     }
-    val columnPixels = with(density) { CELL_WIDTH.dp.roundToPx() }
-    val spec = remember(sheet, palette, frozenRows, frozenColumns, heights, mergeIndex, rowOffsets, columnPixels, cellEditor) {
+    val columnPixels = with(density) { columnWidth.dp.roundToPx() }
+    val spec = remember(sheet, palette, frozenRows, frozenColumns, heights, mergeIndex, rowOffsets, columnPixels, fontScale, cellEditor) {
         SheetGridSpec(
             progressField = "sheet:${sheet.title}",
             rowCount = sheet.rows.size,
             columnCount = sheet.columnCount(),
             frozenRows = frozenRows,
             frozenColumns = frozenColumns,
-            columnWidth = CELL_WIDTH.dp,
-            rowHeight = ROW_HEIGHT.dp,
+            columnWidth = columnWidth.dp,
+            rowHeight = rowHeight.dp,
             rowHeights = heights,
-            labelWidth = LABEL_WIDTH.dp,
-            labelHeight = ROW_HEIGHT.dp,
-            corner = { GridLabel("", LABEL_WIDTH) },
-            columnLabel = { column -> GridLabel(columnName(column), CELL_WIDTH) },
+            labelWidth = labelWidth.dp,
+            labelHeight = rowHeight.dp,
+            corner = { GridLabel("", labelWidth, rowHeight) },
+            columnLabel = { column -> GridLabel(columnName(column), columnWidth, rowHeight) },
             rowLabel = { index ->
                 val row = sheet.rows[index]
-                GridLabel((row.row ?: index + 1).toString(), LABEL_WIDTH, sheetRowHeight(row, palette))
+                GridLabel((row.row ?: index + 1).toString(), labelWidth, (heights[index] ?: rowHeight.dp).value.toInt())
             },
             cell = { index, column ->
                 val merge = mergeIndex[index, column]
@@ -109,12 +114,12 @@ internal fun ColumnScope.SuppliedSheetGrid(
                 }
                 if (merge == null) {
                     SpreadsheetCell(
-                        text, look, spans, row.header, sheetRowHeight(row, palette),
-                        selected = isSelected, editable = cellEditor != null, onClick = activate,
+                        text, look, spans, row.header, (heights[anchorRow] ?: rowHeight.dp).value.toInt(),
+                        selected = isSelected, editable = cellEditor != null, width = columnWidth, onClick = activate,
                     )
                 } else {
                     Box(
-                        Modifier.width(CELL_WIDTH.dp).height(heights[index] ?: ROW_HEIGHT.dp).clipToBounds()
+                        Modifier.width(columnWidth.dp).height(heights[index] ?: rowHeight.dp).clipToBounds()
                             .semantics(mergeDescendants = true) { this.selected = isSelected }
                             .clickable(
                                 onClickLabel = if (cellEditor != null) "Edit merged cell" else "Select merged cell",
@@ -123,8 +128,8 @@ internal fun ColumnScope.SuppliedSheetGrid(
                         propagateMinConstraints = true,
                     ) {
                         SpreadsheetCell(
-                            text, look, spans, row.header, sheetRowHeight(row, palette),
-                            selected = isSelected, editable = cellEditor != null,
+                            text, look, spans, row.header, (heights[anchorRow] ?: rowHeight.dp).value.toInt(),
+                            selected = isSelected, editable = cellEditor != null, width = columnWidth,
                             // Each slot draws the part of the merged cell inside its viewport, including across frozen panes.
                             modifier = Modifier.mergeFragment(
                                 width = (merge.lastColumn - anchorColumn + 1) * columnPixels,

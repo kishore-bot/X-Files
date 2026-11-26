@@ -1,11 +1,10 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.xfiles.feature.editor
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,7 +43,8 @@ import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.HapticOnChange
-import com.xfiles.design.glassBar
+import com.xfiles.design.EzControlBar
+import com.xfiles.design.EzOptionMenu
 import com.xfiles.design.glassCard
 import com.xfiles.design.rememberHaptics
 
@@ -73,7 +73,7 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
     HapticOnChange(state.saved) { if (it) confirm() }
     HapticOnChange(state.error) { if (it != null) reject() }
     Column(Modifier.fillMaxSize().imePadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth().glassBar(), verticalAlignment = Alignment.CenterVertically) {
+        EzControlBar {
             IconButton(onClick = back, enabled = !state.saving) { Icon(EzIcons.Back, "Close editor") }
             Text(
                 state.name,
@@ -82,14 +82,16 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium,
             )
-            IconButton(onClick = viewModel::undo, enabled = viewModel.text.undoState.canUndo && !state.saving) { Icon(EzIcons.Undo, "Undo") }
-            IconButton(onClick = viewModel::redo, enabled = viewModel.text.undoState.canRedo && !state.saving) { Icon(EzIcons.Redo, "Redo") }
-            IconButton(onClick = { finding = !finding }) { Icon(EzIcons.Search, if (finding) "Close find and replace" else "Find and replace") }
             Button(
                 onClick = { save.launch(viewModel.suggestFileName()) },
                 enabled = !state.saving,
                 modifier = Modifier.padding(end = 8.dp),
             ) { Text("Save copy") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = viewModel::undo, enabled = viewModel.text.undoState.canUndo && !state.saving) { Icon(EzIcons.Undo, "Undo") }
+            IconButton(onClick = viewModel::redo, enabled = viewModel.text.undoState.canRedo && !state.saving) { Icon(EzIcons.Redo, "Redo") }
+            IconButton(onClick = { finding = !finding }) { Icon(EzIcons.Search, if (finding) "Close find and replace" else "Find and replace") }
         }
         if (finding) {
             Column(Modifier.fillMaxWidth().glassCard().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -110,27 +112,27 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
                 status?.let { Text(it, color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall) }
             }
         }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Encoding", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
-            TextEncoding.entries.forEach { option ->
-                FilterChip(
-                    selected = state.encoding == option,
-                    onClick = { haptics.segment(); viewModel.chooseEncoding(option) },
-                    label = { Text(option.label) },
-                    enabled = !state.saving && state.blocked == null,
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Encoding", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
+                EzOptionMenu(
+                    options = if (state.saving || state.blocked != null) emptyList() else TextEncoding.entries,
+                    selected = state.encoding,
+                    optionLabel = { it.label },
+                    onSelect = viewModel::chooseEncoding,
+                    placeholder = "Encoding",
                 )
             }
-            Text("Line ending", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
-            LineEnding.entries.forEach { option ->
-                FilterChip(
-                    selected = state.lineEnding == option,
-                    onClick = { haptics.segment(); viewModel.chooseLineEnding(option) },
-                    label = { Text(option.label) },
-                    enabled = !state.saving && state.blocked == null,
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Line ending", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
+                EzOptionMenu(
+                    options = if (state.saving || state.blocked != null) emptyList() else LineEnding.entries,
+                    selected = state.lineEnding,
+                    optionLabel = { it.label },
+                    onSelect = viewModel::chooseLineEnding,
+                    placeholder = "Line ending",
                 )
             }
         }

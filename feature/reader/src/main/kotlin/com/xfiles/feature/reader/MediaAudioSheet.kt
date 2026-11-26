@@ -3,17 +3,16 @@ package com.xfiles.feature.reader
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.EzControlSheet
 import com.xfiles.design.EzColors
 import com.xfiles.feature.reader.domain.MediaAudioTrack
 
@@ -28,13 +27,9 @@ internal fun MediaAudioSheet(
     onChoose: (MediaAudioTrack) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f),
-    ) {
+    EzControlSheet(onDismiss) {
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 16.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text("Audio language", style = MaterialTheme.typography.titleLarge)
@@ -47,7 +42,7 @@ internal fun MediaAudioSheet(
                     color = EzColors.TextSecondary,
                 )
             }
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column {
                 tracks.take(64).forEach { track ->
                     MediaChoiceRow(
                         title = track.title,
