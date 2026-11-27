@@ -88,12 +88,12 @@ def make(split, variants):
 
 
 def main():
-    source = ROOT / "FEATURES.md"
+    source = ROOT.parent / "README.md"
     text = source.read_text(encoding="utf-8")
     section = text.split("## Supported files",1)[1].split("\n## ",1)[0]
     formats = []
     for line in section.splitlines():
-        if line.startswith("| ") and not line.startswith("| Format"):
+        if line.startswith("| ") and not line.startswith(("| Format", "| ---")):
             cells = line.split("|")
             if len(cells)>4:
                 formats.append({"name": cells[1].strip(), "extensions": re.findall(r"`(\.[^`]+)`", cells[2])})

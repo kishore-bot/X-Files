@@ -114,14 +114,6 @@ def main():
                 lines.append(f"| {item['suite']} / {Path(item['model']).name} | {item['examples']} | {item['contract_valid']} | {item['tool_exact_matches']}/{item['tool_examples']} | {item['exact_matches']} |")
             lines += ['',final['note'],'','Inspect raw failures before choosing a default model. Prior exports remain intact.']
             (output/'RUN_REPORT.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
-            note=(f"\n\n## Automated five-hour Fily completion: {datetime.now(timezone.utc).isoformat()}\n\n"
-                  f"- Goal: owner-authorized five-hour local GPU training on expanded app/edge curriculum; no app source edits.\n"
-                  f"- Result: {training['steps']} optimizer steps, {training['elapsed_seconds']:.1f} elapsed seconds; selected {selected} by fixed validation loss.\n"
-                  f"- Outputs: {args.output}/completed.json and RUN_REPORT.md; {export_relative} contains merged/quantized models, calibration, evaluations and isolated benchmarks.\n"
-                  f"- Commands: training/run_five_hour.py; train_long.py; export_quantized.py; calibrate_quantization.py; evaluate_gguf.py; bench_quantized.py, exact arguments in worker logs.\n"
-                  f"- Scope: local synthetic model work only; no tool actions executed, app/device/voice acceptance or production guarantee.\n"
-                  f"- Next: review the raw evaluation failures and benchmark/quantization tradeoffs before integrating or promoting a model.\n")
-            with (ROOT.parent/'NOTES.md').open('a',encoding='utf-8') as notes:notes.write(note)
             print(json.dumps({'status':'completed','report':str(output/'completed.json')}),flush=True)
         except BaseException as exc:
             write(pipeline,{**state,'status':'failed','error':type(exc).__name__+': '+str(exc),'traceback':traceback.format_exc(),

@@ -4,7 +4,7 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Thanks for reporting. For security problems, use the Security tab instead (see SECURITY.md).
+      value: Thanks for reporting. Use [private reporting](https://github.com/kishore-bot/X-Files#reporting-a-vulnerability) for security problems.
   - type: textarea
     id: what
     attributes:

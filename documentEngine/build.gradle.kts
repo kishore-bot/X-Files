@@ -36,7 +36,7 @@ cargo {
     // Fily on the Adreno GPU through llama.cpp's OpenCL backend: -Pfily.opencl=true. Off by default because a
     // static OpenCL build links libdocument_ffi.so to libOpenCL.so, and Pixels and emulators don't expose it to
     // apps, so the whole engine would fail to load. Shipping it needs ggml's dynamically loaded backend
-    // (GGML_BACKEND_DL) and OpenCL headers plus the ICD loader in the NDK sysroot (see docs/PLAN.md, Fily).
+    // (GGML_BACKEND_DL) and OpenCL headers plus the ICD loader in the NDK sysroot (see AI.md).
     if (providers.gradleProperty("fily.opencl").orNull == "true") features.add("fily-opencl")
 }
 

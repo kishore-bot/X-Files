@@ -5,7 +5,7 @@
 //! session, pull bounded batches, cancel, close. Exported types mirror
 //! `document-core` so the core crate stays free of FFI concerns. Panics inside
 //! an exported call are caught by UniFFI and surface in Kotlin as
-//! `InternalException`; see docs/architecture/ffi-contract.md.
+//! `InternalException`. The root README describes native bridge ownership.
 
 use std::fs::File;
 use std::sync::{Arc, Mutex};

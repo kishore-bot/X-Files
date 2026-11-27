@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Xcode supplies the destination, deployment target, and requested architectures.
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-command -v cargo >/dev/null || { echo "error: Install rustup and the Rust targets listed in iosApp/README.md." >&2; exit 1; }
+command -v cargo >/dev/null || { echo "error: Install rustup and the Rust targets listed in the root README.md under Build from source." >&2; exit 1; }
 
 engine="$(cd "$SRCROOT/../engine" && pwd)"
 derived="${DERIVED_FILE_DIR:?Xcode derived-files directory is required}"

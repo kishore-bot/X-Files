@@ -1,261 +1,180 @@
 <div align="center">
 
-<img src="docs/assets/xfiles-logo.svg" alt="Xfiles logo: Fily above a glass document with a crimson X" width="160" />
+<img src="docs/assets/xfiles-logo.svg" alt="Xfiles logo" width="144" />
 
 # Xfiles
 
-### ✨ Premium feel. Faster app. ✨
+An offline-first file library, reader, editor, and media player for Android, iPhone, and iPad.
 
-**Every file, beautifully handled, all on your phone.**
-On Android, read PDFs, Office documents, EPUBs, media and archives, and use **Fily**, the on-device assistant. The [iPhone and iPad app](#ios) includes offline readers, document tools, content search, and Fily. See the [archive and subtitle design](docs/ARCHIVE_AND_SUBTITLE_DESIGN.md) for format support, implementation boundaries, and release checks.
-
-<p>
-  <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.09"><img alt="Release: 1.0.0-beta.09" src="https://img.shields.io/badge/release-1.0.0--beta.09-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
-  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-6366F1?style=for-the-badge" /></a>
-  <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
-</p>
-<p>
-  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" />
-  <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" />
-  <img alt="Rust" src="https://img.shields.io/badge/Rust-engine-B7410E?style=flat-square&logo=rust&logoColor=white" />
-  <img alt="llama.cpp" src="https://img.shields.io/badge/llama.cpp-on--device%20AI-38BDF8?style=flat-square" />
-  <img alt="Offline first" src="https://img.shields.io/badge/offline-first-10B981?style=flat-square" />
-  <img alt="Privacy" src="https://img.shields.io/badge/your%20files-never%20leave%20the%20phone-F472B6?style=flat-square" />
-</p>
-
-[⬇️ Download](#get-it) · [🌟 Android features](#features) · [iPhone & iPad](#ios) · [🤖 Fily](#fily) · [🏗️ Architecture](#architecture) · [🛠️ Build](#build) · [🤝 Contribute](#contributing)
+[Download](#get-it) · [Features](#features) · [iPhone and iPad](#ios) · [Fily and AI](AI.md) · [Architecture](#architecture) · [Build](#build)
 
 </div>
 
----
+## Get it
 
-## 💎 Highlights
+Android 11 and later. The signed APK supports `arm64-v8a` and `x86_64`. The current source version is set in [gradle.properties](gradle.properties).
 
-| ⚡ **Fast** | 🔒 **Private** | 🎨 **Premium** | 🤖 **Smart** |
-|:---:|:---:|:---:|:---:|
-| A native Rust engine parses, searches and edits | Offline-first: documents never leave the device | Glass UI, motion and haptics, Material 3 | Fily answers and acts, fully on-device |
+[Download beta.09](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.09/Xfiles-1.0.0-beta.09.apk) · [SHA-256 checksum](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.09/Xfiles-1.0.0-beta.09.apk.sha256) · [All Android releases](https://github.com/kishore-bot/X-Files/releases)
 
----
+<a id="features"></a>
 
-<a name="get-it"></a>
+## Android features
 
-## ⬇️ Get it
+- **Library.** Open or share files into Xfiles, or link folders through Android's storage picker. Filter by file type, bookmark files, share a selection, and search filenames or indexed text. PDF search results can open at the matching page. Recent files use frequency and recency. The Images tab restores and marks the last viewed image, and video history shows playback progress.
+- **Readers.** Reopen supported files at the saved page, offset, sheet, slide, or timestamp. Media reopens paused. Top-bar controls reflect the active format. Reading appearance, text size, and other options depend on the viewer. Xfiles includes a launcher widget and file shortcuts.
+- **PDF.** Use continuous, single-page, two-page, or thumbnail views. Zoomed pages can render higher-detail content. Native text search and selection depend on Android PDF API availability. Bundled Latin-script OCR covers supported scans and older devices with approximate highlights. Add pen, highlight, note or drawn signature annotations when the file can be edited. Signature details describe the PDF's declared signature. Cryptographic trust verification is outside this feature.
+- **Books and Office.** EPUB supports paged and continuous reading, chapter progress, themes, footnotes, and a notebook for bookmarks, highlights, and notes. Workbook viewing includes frozen rows and columns. Supported edits create a separate file. Layout fidelity, cached formulas, slide animations, and embedded media depend on the file and renderer. Office macros and EPUB scripts are disabled.
+- **Images and video.** Browse a folder gallery and use tiled image zoom for supported files. The video player offers PiP, speed and track controls, pinch zoom, side double-tap seeking, center double-tap play/pause, and seek previews on horizontal drags. External SRT and WebVTT timing can shift earlier or later per video.
+- **Tools.** Merge, split, reorder, rotate, compress, watermark and protect PDFs. Convert images or text to PDF or export PDF pages, text, or ZIP. Scan with corner adjustment, filters and optional OCR. Tidy groups exact duplicates and similar content for review. Archive tools create and extract ZIP, TAR, TAR.GZ, and 7z. Password-protected ZIP creation uses WinZip-compatible AES-256 and leaves entry names visible.
 
-**Xfiles 1.0.0-beta.09** is available as a signed Android APK.
+## Supported files
 
-- [Download the APK](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.09/Xfiles-1.0.0-beta.09.apk)
-- [SHA-256 checksum](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.09/Xfiles-1.0.0-beta.09.apk.sha256)
-- [Release notes](https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.09) · [All releases](https://github.com/kishore-bot/X-Files/releases)
+Common extensions are listed here. Device decoders, document protection, and format variants affect what each viewer can open. The training domain builder reads the first two columns.
 
-> 🧪 Xfiles is in **beta** (`1.0.0-beta.xx`). Releases are built, tested and signed automatically by GitHub Actions.
+| Format | Extensions | Reader notes |
+| --- | --- | --- |
+| PDF | `.pdf` | Protected file opening and native text features depend on Android APIs. |
+| Word | `.docx` `.docm` `.dotx` `.dotm` `.doc` | Page or reading layout for supported documents. |
+| Excel | `.xlsx` `.xlsm` `.xltx` `.xltm` `.xls` | Stored values and formatting. XLSX supports Save As edits. |
+| PowerPoint | `.pptx` `.pptm` `.ppsx` `.ppsm` `.potx` `.potm` `.ppt` | Slides, notes and supported links and media. |
+| OpenDocument | `.odt` `.ods` `.odp` | Text documents, sheets and presentations. |
+| EPUB | `.epub` | Reflowable and fixed-layout books. DRM-protected books are unsupported. |
+| Markdown | `.md` `.markdown` `.mdown` `.mkd` `.mdx` | Preview and numbered source. |
+| HTML and SVG | `.html` `.htm` `.svg` | Local preview with restricted document content. |
+| CSV / TSV | `.csv` `.tsv` `.tab` | Grid and source views. |
+| JSON | `.json` `.geojson` `.jsonc` `.webmanifest` | Structured preview and source. |
+| Code and config | `.kt` `.java` `.rs` `.py` `.js` `.ts` `.swift` `.go` `.c` `.cpp` `.sql` `.sh` `.xml` `.yaml` `.yml` `.toml` `.ini` `.css` `.diff` `.patch` `.jsonl` | Bounded syntax highlighting and plain-text editing. |
+| Plain text | `.txt` `.log` | UTF-8 and UTF-16 with a byte-order mark. |
+| Images | `.jpg` `.jpeg` `.png` `.webp` `.gif` `.bmp` `.heic` `.heif` `.avif` | Supported formats vary by Android version. |
+| Audio and video | `.mp4` `.m4v` `.mov` `.3gp` `.webm` `.mkv` `.mp3` `.m4a` `.aac` `.wav` `.ogg` `.opus` `.flac` `.amr` `.mid` | Container detection and track decoding are separate. |
+| ZIP | `.zip` | Standard ZIP and supported ZipCrypto or AES-encrypted entries. |
+| TAR and 7z | `.tar` `.tar.gz` `.tgz` `.7z` | Extraction limits apply. New 7z files use non-solid LZMA2. |
 
----
+<a id="ios"></a>
 
-<a name="features"></a>
+## iPhone and iPad
 
-## 🌟 Android features
+The native SwiftUI app targets iOS and iPadOS 17 or later. Import files from Files or open them in Xfiles to keep an owned local copy. The library provides search, bookmarks, recents, document tools, scanning, and duplicate detection. Readers include PDFKit, paged and continuous EPUB, structured Office and spreadsheet views, local media, image preview and archives. Quick Look covers eligible additional formats. Edited or extracted files can publish as separate copies.
 
-### 📖 Reading
+AVKit handles native playback. Choose **Use compatibility playback** for a supported local container or audio track that AVKit cannot handle. MPVKit provides compatibility playback and its own seek, language, and subtitle controls. Apple Foundation Models and voice capabilities have separate OS, device, and permission requirements. See the [AI guide](AI.md) for fallback behavior.
 
-| | Format | Highlights |
-|---|---|---|
-| 📕 | **PDF** | Continuous scrolling, thumbnails, zoom, single, two-up and grid views; find; annotations (pen, highlight, notes, signatures); text selection, also on scans through OCR; **declared digital signature details** |
-| 📘 | **Word · Excel · PowerPoint** | DOCX, XLSX and PPTX (plus ODF and legacy DOC/XLS/PPT); tables as one grid; find & replace; cell editing with frozen panes; slides with **links, audio and video**; presenter |
-| 📗 | **EPUB** | **Paged or scroll** reading; contents and notebook; highlights and notes; footnotes; working links; themes (White, Sepia, Green, Dark, Black), fonts and justified text |
-| 📝 | **Text · Code · JSON · HTML · SVG** | Syntax highlighting with expand/collapse all; JSON tree and pretty print; working web links; SVG preview and source; text size |
-| 🖼️ | **Pictures** | Swipeable folder gallery, sharp tiled zoom, animated images, EXIF |
-| 🎬 | **Video · Audio** | Picture-in-picture; gestures; speed control; audio-track switching; subtitles (SRT, VTT, ASS) with styling; AC3, DTS and TrueHD through FFmpeg |
-| 🗜️ | **ZIP** | Browse, extract, compress, and open ZipCrypto or AES-encrypted entries |
+The iOS implementation is available in source. Distribution, signing, and physical-device acceptance are separate release checks.
 
-🎨 **Page style** shows any document in **Original**, **Standard**, **Dark** or **Sepia**.
+<a id="fily"></a>
 
-💡 **At a glance** summarises any file and makes its dates, amounts, phone numbers and links tappable.
+## Fily
 
-### 🧰 Tools
+Fily searches authorized files, answers with source excerpts, and controls supported readers. Android uses a downloadable on-device model. iOS can use Apple Foundation Models when available. The [AI guide](AI.md) covers local retrieval, permissions, training, evaluation, and the desktop MCP server.
 
-- 📄 **PDF:** merge, split, reorder, rotate, compress, watermark, sign, and password protect or unlock (AES-256).
-- 🔁 **Convert:** pictures ⇄ PDF, PDF → text, PDF → ZIP, and text → PDF with templates.
-- 📷 **Scanner:** corner adjustment, filters, and searchable (OCR) PDFs.
-- 🗜️ **Zip tools:** compress to ZIP and extract, with progress.
-- 🧹 **Tidy up:** finds duplicate and unneeded files.
+## Architecture
 
-Every tool follows the same visual flow: **Pick → Adjust → Save**, with live previews.
-
-### 📚 Library
-
-- Recent files ranked by **frecency**, plus bookmarks, 12 type filters and typo-tolerant search with full-text search inside documents.
-- Multi-select, a home-screen widget, app shortcuts, **Open with** / **Share to** for 40+ types, and **Save to Downloads** for files opened from other apps.
-
----
-
-<a name="ios"></a>
-
-## Xfiles for iPhone and iPad
-
-The SwiftUI app targets **iOS and iPadOS 17 or later** and uses Swift 6 language mode. It is available as source in this repository, with compilation and device validation pending.
-
-- Import files from Files and keep local copies for offline access.
-- Search filenames and document contents. Open PDF hits at the cited page.
-- Read PDFs, paged EPUBs with a notebook, Office documents, spreadsheets, and slides. Browse ZIPs, preview images, and use AVKit or the FFmpeg-backed compatibility player for local media.
-- Create edited copies, convert text or images to PDF, scan with on-device OCR, and find exact duplicates.
-- Ask Fily about local files, open its sources, or control the current reader. Generated answers use Apple Foundation Models where available.
-
-The [iOS architecture and delivery plan](docs/IOS_ARCHITECTURE.md) covers resume state, the shared Rust engine, platform limits, and device validation.
-
----
-
-<a name="fily"></a>
-
-## 🤖 Fily: the on-device assistant
-
-<img align="right" src="docs/assets/xfiles-logo.svg" width="96" alt="" />
-
-Fily is a voice assistant running a **350M-parameter model locally** through llama.cpp. It answers questions about your files, with page citations, and uses local tools to open documents, prepare PDF workflows for review, move between pages and spreadsheet tabs, and inspect storage. It speaks its answers back on-device. Voice input requires an on-device recognizer on Android 12 or later. Spoken replies require an installed offline TTS voice.
-
-| 🧠 Technique | 🎯 Why | ⚙️ How |
-|---|---|---|
-| **Offline hybrid RAG** | Document wording can differ from a question | Rust combines BM25 and compact English business-concept vectors with reciprocal rank fusion. Queries containing digits use BM25 to preserve exact terms. Passages are de-duplicated with MMR and carry PDF page labels. |
-| **Live app state** | Reader position and action results can change between tool calls | Android supplies the active screen, PDF page or spreadsheet tab and cell, selected file aliases, available reader operations, and the last reported tool outcome. Direct PDF save questions use the current tool screen's save state. |
-| **KV-cache reuse** | Re-reading the long system prompt costs seconds | The context stays alive, and only the new suffix is decoded |
-| **GPU crash guard** | Some GPU drivers crash while loading models | A persisted state machine falls back to the CPU |
-| **Quick commands** | Instant screen control, no model round-trip | "Scroll down the page" or "next slide" act at once |
-| **Prompt contract test** | A retrained model must see the prompt it was trained on | The app's prompt is tested against training fixtures |
-
-The beta.05 Linux runner compared retrieval modes on five labelled queries against the same five-page fixture.
-
-| Retrieval | Correct first page | Mean time per query |
-|---|---:|---:|
-| BM25 | 2/5 | 1.5 µs |
-| Concept vectors | 4/5 | 3.4 µs |
-| Hybrid | 5/5 | 3.7 µs |
-
-The shared index was estimated at 2,546 bytes. These figures cover passage retrieval on that fixture. Phone latency and generated citation accuracy require separate measurement. [Beta.05 build and test results](https://github.com/kishore-bot/X-Files/actions/runs/45913509970)
-
-The model downloads once on request from the `models-v1` release. Beta.05 uses the existing 350M weights. [Training and export pipeline](training/README.md)
-
-<details>
-<summary>🔌 <b>MCP server: the engine as AI tools</b></summary>
-
-[`engine/crates/xfiles-mcp`](engine/crates/xfiles-mcp) is a **Model Context Protocol** server, built on the official Rust SDK `rmcp`. It gives desktop AI clients such as Claude Desktop and Claude Code the same document engine the app uses, with 13 tools for reading, PDF, Office find & replace and ZIP. Access is sandboxed to the `--root` directories you pass, inputs are never modified, outputs are written atomically, and there's no network access.
-
-```bash
-cargo build --release --manifest-path engine/Cargo.toml -p xfiles-mcp
-claude mcp add xfiles -- /path/to/xfiles-mcp --root ~/Documents
-```
-</details>
-
----
-
-<a name="architecture"></a>
-
-## 🏗️ Architecture
+### High-level design
 
 ```mermaid
-flowchart TD
-    A["📱 androidApp<br/>Hilt · navigation · splash · widget"]:::app
-    F["🧩 feature/*<br/>library · reader · tools · editor · assistant · tidy<br/><i>MVVM · UiState / UiEvent · use cases</i>"]:::feature
-    D["🎨 core/designsystem<br/>glass UI · motion · haptics"]:::core
-    C["📂 core/documents<br/>repositories · PDF render · archives"]:::core
-    S["🧠 sharedLogic (KMP)<br/>Fily · search · models · settings"]:::shared
-    E["🔗 documentEngine<br/>UniFFI bindings"]:::bridge
-    R["🦀 Rust engine<br/>parsers · PDF tools · BM25 search · llama.cpp"]:::rust
-    A --> F --> D
-    F --> C --> E
-    F --> S
-    S --> E --> R
-    classDef app fill:#E11D48,color:#fff,stroke:#BE123C
-    classDef feature fill:#7F52FF,color:#fff,stroke:#5B3BD1
-    classDef core fill:#0EA5E9,color:#fff,stroke:#0369A1
-    classDef shared fill:#10B981,color:#fff,stroke:#047857
-    classDef bridge fill:#F59E0B,color:#fff,stroke:#B45309
-    classDef rust fill:#B7410E,color:#fff,stroke:#7C2D12
+flowchart LR
+    Android["Android · Compose, Hilt, Navigation 3"] --> Feature["Feature ViewModels and use cases"]
+    Feature --> Kotlin["Kotlin rules and Android repositories"]
+    Kotlin --> UniFFI["Kotlin / UniFFI bridge"]
+    iOS["iOS · SwiftUI"] --> Swift["Swift models and document store actor"]
+    Swift --> C["Swift / C bridge"]
+    UniFFI --> Rust["Rust document engine"]
+    C --> Rust
+    Desktop["Desktop MCP over stdio"] --> Rust
+    Feature --> AndroidPlatform["SAF, PdfRenderer, Media3, CameraX and ML Kit"]
+    Swift --> ApplePlatform["PDFKit, AVKit, Quick Look and VisionKit"]
 ```
 
-**Stack:**
-- **Kotlin 2.4**, Compose BOM 2026.11 with Material 3, Hilt, Coroutines/Flow, Navigation 3, Media3, CameraX, ML Kit and WorkManager.
-- **Rust** with UniFFI, llama.cpp and FFmpeg 7.1.
-- **AGP 9.5** with R8 full mode and baseline profiles.
+| Area | Source |
+| --- | --- |
+| Android app shell, navigation, launch and integrations | [androidApp](androidApp) |
+| Android feature UI and workflows | [feature](feature) |
+| Reusable UI, accessibility, motion, and haptics | [core/designsystem](core/designsystem) |
+| Android storage, rendering, staging, and publishing | [core/documents](core/documents) |
+| Kotlin Multiplatform rules and Android native adapter | [sharedLogic](sharedLogic), [documentEngine](documentEngine) |
+| iOS shell, readers, and adapters | [iosApp/Xfiles](iosApp/Xfiles) |
+| Rust parsers, search, editing, archives, and FFI | [engine/crates](engine/crates) |
+| Android software audio fallback | [ffmpeg](ffmpeg), [build script](scripts/build-ffmpeg.sh) |
 
----
+### Low-level design
 
-## 🔒 Privacy
+| Boundary | Ownership |
+| --- | --- |
+| Android UI | Compose renders immutable state from feature ViewModels. Use cases handle reusable workflows. Reader controllers scope PDF rendering, scroll state and asynchronous results to the open document. LazyMatrix owns the sheet grid viewport and frozen panes. |
+| iOS UI and storage | SwiftUI and main-actor models drive the UI. The document store actor holds security-scoped access for imports and publishes a local copy and metadata. Readers persist a PDF page, text offset, structured location or playback timestamp. EPUB can store an offset within the block for repagination. |
+| Native bridge | OxiKT generates Kotlin bindings for the UniFFI library. Xcode builds the Rust static library and Swift sends bounded JSON requests through a C interface. Keep generated types, descriptor ownership, cancellation and native allocation release inside the adapters. |
+| Search and storage | Android traverses user-linked SAF folders and reconciles permissions and missing sources. iOS indexes owned files. Rust uses a local BM25 posting index and returns snippets and page references where available. |
+| Exports and archives | Stage transforms privately and publish completed outputs through the platform repository. Archive extraction uses relative paths and rejects unsafe destinations. Supported extraction is bounded to 512 MiB per file, 2 GiB selected and 20,000 entries. ZIP64/split ZIP and passworded 7z are current limits. |
+| Player | Android uses MediaCodec by default, with FFmpeg audio fallback where packaged. Eligible audio failures can retry with FFmpeg preferred. Signaled HDR uses a SurfaceView. Android audio boost, SDR adjustment and USB mixer preferences depend on the route and playback mode. iOS uses AVKit and MPVKit. |
+| Audio, color and subtitles | HDR signaling and advertised display modes are diagnostic. The device, stream and route determine the result. Source losslessness and output quality are separate. Android reports compatible USB mixer preference or spatial availability when available, and iOS reports session route and sample rate. External subtitle overlays use Rust-parsed cues and the player clock. Embedded-track timing stays with the player. |
 
-- 📴 **Offline-first:** documents, file names and Fily conversations never leave the phone.
-- 🌐 **Internet is used only for:**
-  - the one-time Fily model download, when you ask for it;
-  - crash reports you send or opt in to sending automatically;
-  - feedback you choose to send. Reporting uses [Cloud Firestore](firebase/README.md) in configured Android builds.
-- 🗑️ **No backups:** uninstalling removes all app data.
+## Privacy and reporting
 
----
+Reading, indexing, document conversion, and Fily inference run locally. Android access comes from files and folders you choose. iOS imports private copies. Sharing and printing open system flows for you to complete. Android can use a network connection for an explicitly requested model download and for reporting when configured.
 
-<a name="build"></a>
+Firebase-enabled Android builds send suggestions and crash reports directly to Cloud Firestore. **Feedback** writes to `feedback` when you tap Send. **Crash reports** write to `crash_reports` when sent from the preview or on the next launch after a crash if automatic reporting is enabled. Automatic reporting starts off. Reports include technical metadata and stack frames. Exception messages are omitted. The local recorder covers uncaught Java and Kotlin exceptions. Failed crash submissions remain available for retry. Feedback can queue through Firestore.
 
-## 🛠️ Build from source
+Maintainers register `com.xfiles` in Firebase, enable Firestore, and place the ignored `google-services.json` in `androidApp/` for local production builds. The `xfiles.firebaseCrashReports` Gradle property controls the integration. CI uses `XFILES_GOOGLE_SERVICES_JSON_BASE64`. Dev or unconfigured builds have no Firestore sender. Deploy the [checked-in rules](firebase/firestore.rules) with the Firebase CLI from `firebase/`.
 
-### iPhone and iPad
+```sh
+firebase deploy --project <project-id> --only firestore:rules
+```
 
-Install the Rust iOS targets, then open `iosApp/Xfiles.xcodeproj` on macOS and select the shared **Xfiles** scheme. The project builds the Rust engine for the selected iOS destination. [Xcode and Rust setup](iosApp/README.md)
+The rules validate creates and deny client reads, updates and deletes. Inspect submissions in the Firebase console. App Check, quotas and retention are deployment responsibilities.
+
+<a id="build"></a>
+
+## Build from source
 
 ### Android
 
-**Requirements:** Linux or WSL, JDK 17, Android SDK (compile SDK 37), NDK `29.0.14206865`, Rust (see `rust-toolchain.toml`) and CMake.
+Use Linux or WSL, JDK 17, Android SDK 37, the configured NDK and CMake, and the pinned Rust toolchain. See the [version catalog](gradle/libs.versions.toml), [Rust toolchain](rust-toolchain.toml) and [release workflow](.github/workflows/release.yml) for exact pins.
 
-```bash
-ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh   # enables FFmpeg audio fallback (LGPL)
-./gradlew :androidApp:assembleDevDebug                     # dev build (com.xfiles.dev)
-./gradlew :androidApp:assembleProdRelease                  # release build, R8-minified
+```sh
+ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh
+./gradlew :androidApp:assembleDevDebug
+./gradlew :androidApp:assembleProdRelease
 ```
 
-The reader depends on `dev.lazymatrix:lazymatrix:0.1.2`. Gradle finds the Maven
-publication at `../../CustomCompose/LazyMatrix/lazymatrix/build/maven` relative to
-Xfiles. Use `-PlazyMatrixLocalRepo=/path/to/lazymatrix/build/maven` for a different
-local checkout. The `xfiles-maven-0.1.2` branch in LazyMatrix packages upstream
-commit `03e9731` at this version. Its Maven publication includes the
-`arm64-v8a` and `x86_64` native libraries.
+The spreadsheet reader uses `dev.lazymatrix:lazymatrix:0.1.2`. Provide the Maven publication at `../../CustomCompose/LazyMatrix/lazymatrix/build/maven` relative to Xfiles, or set `-PlazyMatrixLocalRepo=/path/to/lazymatrix/build/maven`. For hosted Maven, use `-PlazyMatrixMavenUrl` and the `LAZYMATRIX_MAVEN_USER` and `LAZYMATRIX_MAVEN_TOKEN` environment variables. GitHub Actions obtains the pinned AAR, POM, and module metadata from the private artifact repository with the read-only `LAZYMATRIX_MAVEN_SSH_KEY`.
 
-GitHub Actions checks out the pinned AAR, POM, and Gradle module metadata from
-the private `kishore-bot/xfiles-maven` artifact repository. The
-`LAZYMATRIX_MAVEN_SSH_KEY` Actions secret is a read-only deploy key for that
-repository. Fork pull requests run the Rust engine checks. Trusted pull requests
-also run Kotlin host tests and build the Android app. GitHub checks that the
-Dev Debug and signed release APKs include FFmpeg audio fallback for both
-`arm64-v8a` and `x86_64`. To build outside GitHub
-Actions, provide a local Maven path or set
-`-PlazyMatrixMavenUrl=https://…` and the `LAZYMATRIX_MAVEN_USER` and
-`LAZYMATRIX_MAVEN_TOKEN` environment variables for a hosted repository.
+### iOS
 
-### 🧪 Tests
+Use macOS and Xcode with Swift 6 and an iOS 26 or newer SDK for Foundation Models. Install the destinations you use. Add `x86_64-apple-ios` for Intel simulators.
 
-```bash
-./gradlew :sharedLogic:testAndroidHostTest                # Kotlin domain tests
-cargo test --manifest-path engine/Cargo.toml --workspace  # Rust engine and MCP server
+```sh
+rustup target add --toolchain 1.100.0 aarch64-apple-ios aarch64-apple-ios-sim
+open iosApp/Xfiles.xcodeproj
 ```
 
-### 🚀 Releasing
+Select the shared **Xfiles** scheme. The build compiles the Rust engine for the selected destination and resolves the pinned MPVKit package. Set the team and bundle identifier under **Signing & Capabilities** for a physical device.
 
-1. Bump `xfiles.version` in `gradle.properties` (for example `1.0.0-beta.03`) and commit.
-2. Push the matching tag: `git tag v1.0.0-beta.03 && git push origin v1.0.0-beta.03`.
+### Checks and release
 
-GitHub Actions then builds, tests, signs and publishes the APK.
+```sh
+./gradlew :sharedLogic:testAndroidHostTest
+cargo test --manifest-path engine/Cargo.toml --workspace
+```
 
----
+When preparing an Android release, bump `xfiles.version` and push a matching `v<version>` tag or dispatch the release workflow with the version. The workflow uses `XFILES_KEYSTORE_BASE64`, `XFILES_KEYSTORE_PASSWORD`, `XFILES_KEY_ALIAS` and `XFILES_KEY_PASSWORD` to sign and publish. CI checks the FFmpeg libraries and alignment for both ABIs in the Dev Debug and signed APKs. The workflow files describe the CI variants and trusted artifact access. [PR check](.github/workflows/pr-check.yml) · [CodeQL](.github/workflows/codeql.yml) · [Release](.github/workflows/release.yml)
 
-<a name="contributing"></a>
+## Performance and acceptance
 
-## 🤝 Contributing
+- Keep provider reads and native work off the UI thread. Scope concurrent work and caches to the owning operation or document revision. Bound decoder work, intermediate buffers, native bitmap memory, and background queues. Publish only current results and release handles when the owning job exits.
+- Use [Baseline Profiles](baselineprofile) and device traces for cold and warm startup, PDF first render and scroll, folder scans, query latency during indexing, frozen sheet scrolling, and video seek-to-frame. Measure p95 latency, frame timing and peak memory on identical files and devices. Measure I/O, queue delay and native work before changing storage or concurrency.
+- Validate archives with both apps and desktop tools, including Unicode names, wrong passwords, cancellation, path safety, and low storage. Verify subtitle timing after seek, pause, speed and track changes on Media3, AVKit and MPVKit.
+- For media, cover Snapdragon, Dimensity, Exynos, Tensor, entry-level Android hardware, and the x86_64 emulator. Include older and newer iPhones and an M-series iPad. Check every language track in a multilingual fixture, HDR and SDR displays, wired and wireless routes, spatial availability and USB DAC transitions. A rate or mixer match in the UI is capability evidence. End-to-end bit-perfect output requires measurement.
+- Include light and dark themes, landscape, small screens, large fonts, TalkBack, VoiceOver, and reduced motion in UI acceptance. Check PDF controls during a fling, resume after restart, cancellation of an export, and deletion or revocation of a linked folder.
 
-Contributions are welcome! 💜 Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first. It covers:
-- **architecture:** MVVM with unidirectional data flow, use cases, and the Rust engine;
-- **performance rules;**
-- **the current stack.**
+## Contributing
 
-Please follow the [code of conduct](CODE_OF_CONDUCT.md), and report security issues privately as described in [SECURITY.md](SECURITY.md).
+Keep pull requests focused. Follow each feature's existing state and use-case boundaries, keep heavy work off the UI thread, and use the shared theme and motion components. Include changed-logic tests, screenshots for UI changes, and measurements for performance-sensitive changes. Use the PR template and keep keys, service configuration and model weights out of Git.
 
----
+Xfiles follows the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). Treat contributors respectfully and report conduct concerns privately to a maintainer through GitHub. Maintainers handle reports confidentially and may moderate contributions or restrict participation.
 
-## 📜 Licence
+## Reporting a vulnerability
 
-Xfiles is licensed under the **[Apache License 2.0](LICENSE)**. See [NOTICE](NOTICE) for third-party components:
-- **FFmpeg** is used under the LGPL 2.1+, as separate replaceable shared libraries.
-- **The Fily model** is downloaded separately and governed by its base model's licence.
+Use GitHub's **Report a vulnerability** action on the repository Security tab, or contact a maintainer privately through GitHub if the action is unavailable. Include the version or commit, reproduction details, a safe fixture if available, and the likely impact. Use private reporting for crafted-file vulnerabilities, unauthorized file access, or Fily confirmation bypasses. Xfiles aims to acknowledge reports within seven days. The latest release and `dev-deploy` receive fixes.
+
+## License
+
+Xfiles uses the [Apache License 2.0](LICENSE). Contributions are licensed under the same terms. The [NOTICE](NOTICE) describes third-party components, including FFmpeg under LGPL 2.1+. Downloadable model weights are subject to their own license terms.

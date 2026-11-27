@@ -75,7 +75,7 @@ private.settings.gradle.kts
 private.app.gradle.kts
 
 # Fily training: scripts, catalog and docs are tracked; the venv, generated data,
-# checkpoints, exported models and tool binaries are not (rebuild them; see training/README.md).
+# checkpoints, exported models and tool binaries are not (see AI.md for rebuilding).
 /training/.venv/
 /training/__pycache__/
 /training/cache/

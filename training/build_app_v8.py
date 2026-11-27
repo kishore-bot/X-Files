@@ -1,6 +1,6 @@
 """App-faithful curriculum (app v8): what the phone app actually sends and returns, on the v5 contract.
 
-Targets the failures seen on the phone (docs/fily-training-needs.md, areas A, E, F, G, H):
+Targets the failures seen on the phone:
   A  never invent IDs: a named file is searched first; IDs come only from tool results or APP_STATE
   E  answers grounded in excerpts, with [page N] citations, and "it doesn't say" when it doesn't
   F  speech-recognition slips and fillers in requests
