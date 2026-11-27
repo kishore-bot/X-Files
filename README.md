@@ -10,7 +10,7 @@
 PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that lives on your device.
 
 <p>
-  <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.05"><img alt="Release: 1.0.0-beta.05" src="https://img.shields.io/badge/release-1.0.0--beta.05-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
+  <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.06"><img alt="Release: 1.0.0-beta.06" src="https://img.shields.io/badge/release-1.0.0--beta.06-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-6366F1?style=for-the-badge" /></a>
   <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
 </p>
@@ -41,11 +41,11 @@ PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that
 
 ## ⬇️ Get it
 
-**Xfiles 1.0.0-beta.05** is available as a signed Android APK.
+**Xfiles 1.0.0-beta.06** is available as a signed Android APK.
 
-- [Download the APK](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.05/Xfiles-1.0.0-beta.05.apk)
-- [SHA-256 checksum](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.05/Xfiles-1.0.0-beta.05.apk.sha256)
-- [Release notes](https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.05) · [All releases](https://github.com/kishore-bot/X-Files/releases)
+- [Download the APK](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.06/Xfiles-1.0.0-beta.06.apk)
+- [SHA-256 checksum](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.06/Xfiles-1.0.0-beta.06.apk.sha256)
+- [Release notes](https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.06) · [All releases](https://github.com/kishore-bot/X-Files/releases)
 
 > 🧪 Xfiles is in **beta** (`1.0.0-beta.xx`). Releases are built, tested and signed automatically by GitHub Actions.
 
@@ -59,7 +59,7 @@ PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that
 
 | | Format | Highlights |
 |---|---|---|
-| 📕 | **PDF** | Continuous scrolling, thumbnails, zoom, single, two-up and grid views; find; annotations (pen, highlight, notes, signatures); text selection, also on scans through OCR; **digital signature details** |
+| 📕 | **PDF** | Continuous scrolling, thumbnails, zoom, single, two-up and grid views; find; annotations (pen, highlight, notes, signatures); text selection, also on scans through OCR; **declared digital signature details** |
 | 📘 | **Word · Excel · PowerPoint** | DOCX, XLSX and PPTX (plus ODF and legacy DOC/XLS/PPT); tables as one grid; find & replace; cell editing with frozen panes; slides with **links, audio and video**; presenter |
 | 📗 | **EPUB** | **Paged or scroll** reading; contents and notebook; highlights and notes; footnotes; working links; themes (White, Sepia, Green, Dark, Black), fonts and justified text |
 | 📝 | **Text · Code · JSON · HTML · SVG** | Syntax highlighting with expand/collapse all; JSON tree and pretty print; working web links; SVG preview and source; text size |
@@ -193,8 +193,9 @@ local checkout.
 GitHub Actions checks out the pinned AAR, POM, and Gradle module metadata from
 the private `kishore-bot/xfiles-maven` artifact repository. The
 `LAZYMATRIX_MAVEN_SSH_KEY` Actions secret is a read-only deploy key for that
-repository. GitHub withholds it from fork pull requests. To build outside that
-workflow, provide a local Maven path or set
+repository. Fork pull requests run the Rust engine checks. Trusted pull requests
+also run Kotlin host tests and build the Android app. To build outside GitHub
+Actions, provide a local Maven path or set
 `-PlazyMatrixMavenUrl=https://…` and the `LAZYMATRIX_MAVEN_USER` and
 `LAZYMATRIX_MAVEN_TOKEN` environment variables for a hosted repository.
 
