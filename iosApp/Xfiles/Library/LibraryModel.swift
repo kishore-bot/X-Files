@@ -41,6 +41,12 @@ final class LibraryModel {
         return imported
     }
 
+    func importOutput(_ url: URL) async throws -> UUID {
+        let record = try await store.importFile(url)
+        update(record)
+        return record.id
+    }
+
     func open(_ id: UUID) async throws -> ReaderFile {
         let file = try await store.open(id)
         update(file.record)

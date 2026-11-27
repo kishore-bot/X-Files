@@ -7,7 +7,7 @@
 ### ✨ Premium feel. Faster app. ✨
 
 **Every file, beautifully handled, all on your phone.**
-On Android, read PDFs, Office documents, EPUBs, media and archives, and use **Fily**, the on-device assistant. The [iPhone and iPad app](#ios) offers an offline library and native file preview.
+On Android, read PDFs, Office documents, EPUBs, media and archives, and use **Fily**, the on-device assistant. The [iPhone and iPad app](#ios) includes offline readers, document tools, content search, and Fily.
 
 <p>
   <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.09"><img alt="Release: 1.0.0-beta.09" src="https://img.shields.io/badge/release-1.0.0--beta.09-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
@@ -95,11 +95,12 @@ Every tool follows the same visual flow: **Pick → Adjust → Save**, with live
 The SwiftUI app targets **iOS and iPadOS 17 or later** and uses Swift 6 language mode. It is available as source in this repository, with compilation and device validation pending.
 
 - Import files from Files and keep local copies for offline access.
-- Search by filename, filter by file type, bookmark documents, reopen recent files, and share local copies.
-- Read PDFs and selectable text, play media supported by iOS, and preview images and other supported formats with Quick Look.
-- Resume the last PDF page, text scroll position, or playback timestamp. Choose system, light, or dark appearance.
+- Search filenames and document contents. Open PDF hits at the cited page.
+- Read PDFs, EPUB, Office documents, spreadsheets, and slides. Browse ZIPs, preview images, and play media supported by iOS.
+- Create edited copies, convert text or images to PDF, scan with on-device OCR, and find exact duplicates.
+- Ask Fily about local files and open its sources. Generated answers use Apple Foundation Models where available.
 
-The [iOS architecture and delivery plan](docs/IOS_ARCHITECTURE.md) covers the local store, reader lifecycle, validation steps, and future Rust search, custom Office and EPUB readers, and offline Fily.
+The [iOS architecture and delivery plan](docs/IOS_ARCHITECTURE.md) covers resume state, the shared Rust engine, platform limits, and device validation.
 
 ---
 
@@ -194,7 +195,7 @@ flowchart TD
 
 ### iPhone and iPad
 
-On macOS, open `iosApp/Xfiles.xcodeproj` in Xcode and select the shared **Xfiles** scheme. Choose an iOS 17 or newer simulator. Running on a physical device requires a development team and a bundle identifier available to that team. [iOS setup](iosApp/README.md)
+Install the Rust iOS targets, then open `iosApp/Xfiles.xcodeproj` on macOS and select the shared **Xfiles** scheme. The project builds the Rust engine for the selected iOS destination. [Xcode and Rust setup](iosApp/README.md)
 
 ### Android
 

@@ -5,13 +5,18 @@ struct LibraryScreen: View {
     let model: LibraryModel
     @Binding var appearance: Appearance
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var route: [UUID] = []
+    @State private var route: [ReadDestination] = []
     @State private var section: SectionFilter = .library
     @State private var kind: DocumentKind?
     @State private var query = ""
     @State private var importing = false
-    @State private var settingsOpen = false
+    @State private var panel: Panel?
     @State private var deleteCandidate: DocumentRecord?
+
+    private enum Panel: String, Identifiable {
+        case settings, contents, tools, fily, scanner, duplicates
+        var id: Self { self }
+    }
 
     private enum SectionFilter: String, CaseIterable {
         case library = "Library", recent = "Recent", bookmarks = "Bookmarks"
@@ -20,7 +25,7 @@ struct LibraryScreen: View {
     private var results: [DocumentRecord] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let matching = model.documents.filter { record in
-            (kind == nil || kind == record.kind) &&
+            (kind == nil || kind == record.viewerKind) &&
             (search.isEmpty || record.name.localizedStandardContains(search)) &&
             (section != .recent || record.openedAt != nil) &&
             (section != .bookmarks || record.bookmarked)
@@ -62,7 +67,14 @@ struct LibraryScreen: View {
                     }
                     Button { importing = true } label: { Label("Import files", systemImage: "plus") }
                         .disabled(model.importCount > 0)
-                    Button { settingsOpen = true } label: { Label("Settings", systemImage: "gearshape") }
+                    Menu {
+                        Button("Search contents", systemImage: "magnifyingglass") { panel = .contents }
+                        Button("Document tools", systemImage: "wrench.and.screwdriver") { panel = .tools }
+                        Button("Scan document", systemImage: "doc.viewfinder") { panel = .scanner }
+                        Button("Find duplicates", systemImage: "doc.on.doc") { panel = .duplicates }
+                        Button("Ask Fily", systemImage: "sparkles") { panel = .fily }
+                        Button("Settings", systemImage: "gearshape") { panel = .settings }
+                    } label: { Label("More actions", systemImage: "ellipsis.circle") }
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -73,10 +85,19 @@ struct LibraryScreen: View {
                         .background(.regularMaterial)
                 }
             }
-            .navigationDestination(for: UUID.self) { id in
-                ReaderScreen(id: id, library: model)
+            .navigationDestination(for: ReadDestination.self) { destination in
+                ReaderScreen(id: destination.id, library: model, startPage: destination.page)
             }
-            .sheet(isPresented: $settingsOpen) { SettingsScreen(appearance: $appearance) }
+            .sheet(item: $panel) { selected in
+                switch selected {
+                case .settings: SettingsScreen(appearance: $appearance)
+                case .contents: ContentSearch(library: model) { route.append($0) }
+                case .tools: DocumentTools(library: model, initial: nil) { route.append($0) }
+                case .scanner: DocumentScanner(library: model) { route.append($0) }
+                case .duplicates: DuplicateFiles(library: model)
+                case .fily: FilyScreen(library: model, selected: nil, openFile: { route.append($0) }, goToPage: nil)
+                }
+            }
             .task { await model.reload() }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data], allowsMultipleSelection: true) { result in
                 switch result {
@@ -108,7 +129,7 @@ struct LibraryScreen: View {
     private var fileList: some View {
         let visible = results
         return List(visible) { record in
-            NavigationLink(value: record.id) {
+            NavigationLink(value: ReadDestination(id: record.id)) {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(record.name).font(.body.weight(.medium)).lineLimit(2)
@@ -116,7 +137,7 @@ struct LibraryScreen: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } icon: {
-                    Image(systemName: record.kind.symbol).foregroundStyle(.tint)
+                    Image(systemName: record.viewerKind.symbol).foregroundStyle(.tint)
                 }
                 .overlay(alignment: .trailing) {
                     if record.bookmarked {
@@ -175,7 +196,7 @@ struct LibraryScreen: View {
     private func receive(_ urls: [URL]) {
         Task {
             let ids = await model.importFiles(urls)
-            if urls.count == 1, let id = ids.first { route.append(id) }
+            if urls.count == 1, let id = ids.first { route.append(ReadDestination(id: id)) }
         }
     }
 }

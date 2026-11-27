@@ -25,9 +25,17 @@
                 <string>public.text</string>
                 <string>public.image</string>
                 <string>public.audiovisual-content</string>
+                <string>org.idpf.epub-container</string>
+                <string>public.zip-archive</string>
+                <string>org.openxmlformats.wordprocessingml.document</string>
+                <string>org.openxmlformats.spreadsheetml.sheet</string>
+                <string>org.openxmlformats.presentationml.presentation</string>
             </array>
         </dict>
     </array>
+    <key>NSCameraUsageDescription</key><string>Use the camera to scan documents into Xfiles.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Use the microphone to dictate a question to Fily.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Convert your speech to text on this device for Fily.</string>
     <key>UILaunchScreen</key><dict/>
     <key>UIApplicationSceneManifest</key>
     <dict><key>UIApplicationSupportsMultipleScenes</key><true/></dict>

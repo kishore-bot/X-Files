@@ -2,61 +2,63 @@
 
 ## High-level design
 
-Build a native SwiftUI app with one iOS target, a Swift 6 language mode, and an iOS/iPadOS 17 deployment target. The 2026 Apple guidance informs the architecture. Stable system APIs keep the first version installable on older devices. The app runs offline after import and uses system viewers where they fit. Android keeps its existing Gradle targets.
+Xfiles for iOS uses SwiftUI and Swift 6 language mode with an iOS and iPadOS 17 deployment target. Platform UI, playback, camera, speech, and AI are hosted by the iOS target. Structured parsing and the document operations already available in Rust are shared with Android. The app keeps its own imported copies and works offline after import.
 
 ```mermaid
 flowchart LR
-    Files["Files picker or Open in Xfiles"] --> Library["SwiftUI Library"]
-    Library --> Model["Observation library model"]
-    Model --> Store["Local document store actor"]
-    Store --> Disk["App sandbox: documents, metadata and progress"]
-    Library --> Reader["Reader route"]
-    Reader --> PDF["PDFKit"]
-    Reader --> Media["AVKit"]
-    Reader --> Text["UIKit text view"]
-    Reader --> QuickLook["Quick Look"]
-    Reader --> Store
+    Files["Files picker or Open in Xfiles"] --> Library["SwiftUI library and navigation"]
+    Library --> Store["Local document store actor"]
+    Store --> Disk["App sandbox: files, metadata, resume state"]
+    Library --> Reader["Native and structured readers"]
+    Library --> Search["Content search and Fily"]
+    Library --> Tools["Editors, scanner and conversions"]
+    Reader --> Apple["PDFKit, AVKit and Quick Look"]
+    Reader --> Bridge["Bounded Swift/Rust requests"]
+    Search --> Bridge
+    Tools --> Bridge
+    Tools --> Vision["Vision OCR and VisionKit"]
+    Bridge --> Engine["Rust parsers, index, passages and document tools"]
+    Search --> Model["Apple on-device Foundation Models"]
+    Search --> Speech["On-device speech recognition"]
 ```
-
-The first delivery covers import, library organization, search by filename, system previews, sharing, and reopen position. iOS and Android use independent libraries on their respective devices. Existing Rust parsers and BM25 search are candidates for reuse through UniFFI. The shared Kotlin module currently has no Apple target, and the Android Compose grids are Android UI.
 
 ## Low-level design
 
 | Boundary | Ownership and behavior |
 | --- | --- |
-| App | The SwiftUI scene owns navigation. The library model is isolated to the main actor and shared by app windows. The appearance preference uses AppStorage. |
-| Import | File importer accepts regular files. Hold security-scoped access while a coordinated copy reads the provider file. Publish a UUID directory only after its staged copy and metadata exist. Original URLs and permission tokens are transient. |
-| Store | An actor serializes filesystem access. Each document directory stores its original file name under `payload` and a versioned JSON record. Metadata updates use atomic replacement. Missing payloads disappear from the index. Imports and deletes leave recoverable staging directories if interrupted. |
-| Library | Filter the local records by file kind, bookmark status, and last-opened date. Filename searches operate on metadata. Last-opened and bookmark changes go through the same store. |
-| Reader | The stored kind selects PDFKit, AVKit, a selectable text surface, or Quick Look. The reader shares the owned file through the system share sheet. Unsupported formats surface an error or a Quick Look fallback. |
-| Position | PDF stores a zero-based page, text stores its vertical offset, and AVKit stores seconds. Keep the latest in memory, checkpoint changes, and flush on leaving the reader or backgrounding. Reopen media paused and clamp the seek to its duration. Images and other system previews are tracked in Recents. |
-| Accessibility | Use system navigation, searchable lists, scalable reader text, and native controls. Custom Library animations observe Reduce Motion. |
+| Library | SwiftUI owns navigation and presentation. The main-actor library model publishes file metadata, bookmarks, recents, and import state. The store actor holds security-scoped access during coordinated imports and atomically publishes the owned copy and metadata. |
+| Bridge | Xcode builds the existing `document-ffi` static library for the active destination. Swift uses a C header to send JSON requests to an iOS-only Rust adapter. Each request runs off the main actor, owns a cancellation job, and releases Rust allocations at the boundary. The Android UniFFI API remains available. |
+| Readers | PDFKit, AVKit, and a UIKit text surface handle the native reader paths. The Rust adapter sends a bounded structured preview for Office, EPUB, spreadsheets, and slides. EPUB uses chapter starts, inline styles, links, and footnotes. Sheets can freeze the first row and column. Slides use the engine’s shape geometry and embedded resources. Quick Look handles formats outside these reader paths when supported. |
+| Position | Persist PDF page, text offset, playback timestamp, or structured section and block. Save while reading and flush on departure or backgrounding. Resume media paused. |
+| Search | The store gives the Rust index only owned library files. Rust serializes index writes, removes stale entries on search, and returns snippets with the PDF page whenever available. Filename search remains available independently. |
+| Fily | Library retrieval uses the local index. Open-document questions may also use the Rust hybrid passage cache. Answers use the local Foundation Models provider when iOS 26+ and the device make it available. Sources and deterministic find/open/page commands work independently. The model receives excerpts and has no file-action tool authority. Dictation requires the on-device speech route and user permission. |
+| Editing and tools | Text and document edits generate separate files in temporary storage. Rust handles PDF rewrites, markup, watermarking and drawn signatures, Office replacement, XLSX cell editing, PPTX ordering, and ZIP extraction. Platform tools handle scan capture, OCR, text/images to PDF, ZIP creation, and duplicate detection. Successful outputs are published to the library under new IDs. |
+| Accessibility | Use native controls, support VoiceOver and system gestures, and respect Reduce Motion for library transitions. Platform features expose unavailable states. |
 
 ## Implementation and validation plan
 
-| Step | Completion |
+| Step | Status |
 | --- | --- |
-| 1. Research Apple’s 2026 Swift and iOS guidance and inspect Android/Rust boundaries | Done. Sources and integration decisions are recorded here. |
-| 2. Add the standalone SwiftUI app and Xcode scheme | Implemented under `iosApp`. Apple SDK verification pending. |
-| 3. Implement file import, durable storage, filters, bookmarks, recents, and share | Implemented. Verify on-device provider permissions, empty or deleted entries, large imports, and an interrupted import. |
-| 4. Wire PDF, text, image/Quick Look, and video/audio previews with resume | Implemented. Verify relaunch position, locked PDFs, unsupported media, and format behavior on device. |
-| 5. Add appearance controls and native accessibility behavior | Implemented. Verify light and dark appearance, VoiceOver, Dynamic Type, Reduce Motion, and iPad resizing. |
-| 6. Build, sign, and validate the delivery | Pending macOS, Xcode, and explicit build/test authorization. Use the shared Xfiles scheme. Provisioning and distribution are separate from building for the simulator. |
+| App structure and library | Implemented in source. Validate import from Files providers, large files, app restart, and two iPad windows. |
+| Rust bridge and document readers | Implemented in source. Verify linking on device and simulator, EPUB chapters and footnotes, pinned panes, slideshow links, password handling, and media resources. |
+| Full-text search and offline Fily | Implemented in source. Check PDF citation jumps, concurrent searches, stale entries, model availability, and offline dictation. |
+| Editing and conversion | Implemented in source. Check that inputs stay byte-for-byte unchanged, verify generated PDFs and ZIPs, and validate scanner OCR on an iPhone or iPad. |
+| Xcode build, signing and device approval | Pending macOS, Xcode, and explicit build or test authorization. The shared Xfiles scheme is configured for this step. |
 
-### Android parity after the first delivery
+### Current platform limits
 
-1. Package the existing `document-ffi` Rust static library for device and simulator and generate Swift UniFFI bindings. Validate the Swift boundary against existing parser fixtures before routing Office, EPUB, spreadsheets, and archives to custom viewers. Keep the native previews as the baseline.
-2. Expose the Rust document-search API to Swift for passage retrieval and citations. Keep filename search available during indexing. Revisit store indexing based on measured library size.
-3. Add an offline Fily provider after defining iOS action capabilities. Evaluate on-device model availability and keep reader commands local even when the model is unavailable.
-4. Add Android-specific feature equivalents only after recording the iOS route and OS capabilities for playback, HDR, spatial audio, annotations, and document editing.
+- Office previews are Xfiles renderings of the parsed content. Pixel-level fidelity, spreadsheet formula recalculation, and desktop Office editing are outside the current reader.
+- EPUB uses scrolling chapter views and saved block positions. Android's paged layout, reading annotations, and notebook are separate feature work.
+- AVKit plays iOS-supported codecs and offers tracks that the asset exposes. Android's FFmpeg/Media3 decoder fallback and the advanced player enhancements have no iOS counterpart in this delivery.
+- Archive browsing and extraction cover ZIP. The archive reader imports requested entries individually. Duplicate detection compares exact content.
+- Content search is based on text that the engine can extract. Password-protected files are not indexed, and scanned documents need an OCR text layer to participate.
+- The iOS Fily provider is Apple's on-device model. The Android GGUF backend and the full Android action set are separate. Availability of the model, dictation, and voices depends on the device and configuration.
 
 ### Primary references
 
 - [Apple WWDC26 iOS guide](https://developer.apple.com/wwdc26/guides/ios)
-- [What’s new in Swift](https://developer.apple.com/videos/play/wwdc2026/262/)
-- [What’s new in SwiftUI](https://developer.apple.com/videos/play/wwdc2026/269/)
 - [SwiftUI Observation](https://developer.apple.com/documentation/swiftui/migrating-from-the-observable-object-protocol-to-the-observable-macro)
-- [SwiftUI file importer](https://developer.apple.com/documentation/swiftui/view/fileimporter(ispresented:allowedcontenttypes:allowsmultipleselection:oncompletion:))
-- [PDFKit](https://developer.apple.com/documentation/pdfkit)
-- [AVKit](https://developer.apple.com/documentation/avkit)
-- [Quick Look](https://developer.apple.com/documentation/quicklook)
+- [PDFKit](https://developer.apple.com/documentation/pdfkit) · [AVKit](https://developer.apple.com/documentation/avkit) · [Quick Look](https://developer.apple.com/documentation/quicklook)
+- [VisionKit document scanner](https://developer.apple.com/documentation/visionkit/vndocumentcameraviewcontroller)
+- [Foundation Models](https://developer.apple.com/documentation/foundationmodels/systemlanguagemodel)
+- [On-device speech recognition](https://developer.apple.com/documentation/speech/sfspeechrecognitionrequest/requiresondevicerecognition)

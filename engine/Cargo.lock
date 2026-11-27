@@ -394,6 +394,7 @@ dependencies = [
  "document-tidy",
  "fily-inference",
  "libc",
+ "serde_json",
  "uniffi",
  "zeroize",
 ]

@@ -1,3 +1,4 @@
+import AVFoundation
 import AVKit
 import SwiftUI
 
@@ -9,16 +10,27 @@ struct MediaReader: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
     @State private var problem: String?
+    @State private var optionsOpen = false
+    @State private var audioTracks: AVMediaSelectionGroup?
+    @State private var subtitles: AVMediaSelectionGroup?
 
     var body: some View {
         Group {
             if let problem {
                 ContentUnavailableView("Media unavailable", systemImage: "play.slash", description: Text(problem))
             } else if let player {
-                VideoPlayer(player: player)
-                    .background(.black)
+                VStack(spacing: 0) {
+                    VideoPlayer(player: player).background(.black)
+                    Button("Playback options", systemImage: "slider.horizontal.3") { optionsOpen = true }
+                        .padding(10)
+                }
             } else {
                 ProgressView("Preparing media")
+            }
+        }
+        .sheet(isPresented: $optionsOpen) {
+            if let player {
+                MediaOptions(player: player, audio: audioTracks, subtitles: subtitles)
             }
         }
         .task(id: url) {
@@ -43,6 +55,8 @@ struct MediaReader: View {
                 }
                 try Task.checkCancellation()
                 player = active
+                audioTracks = try? await asset.loadMediaSelectionGroup(for: .audible)
+                subtitles = try? await asset.loadMediaSelectionGroup(for: .legible)
                 while !Task.isCancelled {
                     if let error = active.currentItem?.error {
                         problem = error.localizedDescription
@@ -74,6 +88,70 @@ struct MediaReader: View {
         if player.currentItem?.status == .readyToPlay {
             record(player)
             onCheckpoint()
+        }
+    }
+}
+
+
+private struct MediaOptions: View {
+    let player: AVPlayer
+    let audio: AVMediaSelectionGroup?
+    let subtitles: AVMediaSelectionGroup?
+    @Environment(\.dismiss) private var dismiss
+    @State private var rate: Float = 1
+    @State private var audioIndex: Int?
+    @State private var subtitleIndex: Int?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Speed", selection: $rate) {
+                    ForEach([0.5, 0.75, 1, 1.25, 1.5, 2] as [Float], id: \.self) { rate in
+                        Text("\(rate.formatted())×").tag(rate)
+                    }
+                }
+                .onChange(of: rate) { _, value in
+                    player.defaultRate = value
+                    if player.rate != 0 { player.rate = value }
+                }
+                if let audio {
+                    trackPicker("Audio", group: audio, selection: $audioIndex)
+                }
+                if let subtitles {
+                    trackPicker("Subtitles", group: subtitles, selection: $subtitleIndex)
+                }
+            }
+            .navigationTitle("Playback options")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .onAppear {
+                rate = player.defaultRate
+                audioIndex = selectedIndex(audio)
+                subtitleIndex = selectedIndex(subtitles)
+            }
+        }
+    }
+
+    private func selectedIndex(_ group: AVMediaSelectionGroup?) -> Int? {
+        guard let group, let selected = player.currentItem?.currentMediaSelection.selectedMediaOption(in: group) else { return nil }
+        return group.options.firstIndex(of: selected)
+    }
+
+    private func trackPicker(_ title: String, group: AVMediaSelectionGroup, selection: Binding<Int?>) -> some View {
+        Picker(title, selection: selection) {
+            if group.allowsEmptySelection || selection.wrappedValue == nil {
+                Text(group.allowsEmptySelection ? "Off" : "Automatic").tag(nil as Int?)
+            }
+            ForEach(Array(group.options.enumerated()), id: \.offset) { index, option in
+                Text(option.displayName).tag(Optional(index))
+            }
+        }
+        .onChange(of: selection.wrappedValue) { _, choice in
+            if let choice, group.options.indices.contains(choice) {
+                player.currentItem?.select(group.options[choice], in: group)
+            } else if group.allowsEmptySelection {
+                player.currentItem?.select(nil, in: group)
+            }
         }
     }
 }

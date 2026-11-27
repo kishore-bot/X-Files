@@ -31,6 +31,11 @@ final class ReaderProgress {
         update { $0.textOffset = textOffset }
     }
 
+    func update(block: Int, section: Int) {
+        guard block >= 0, section >= 0 else { return }
+        update { $0.block = block; $0.section = section }
+    }
+
     private func update(_ change: (inout DocumentPosition) -> Void) {
         let previous = position
         change(&position)

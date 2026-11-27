@@ -27,7 +27,7 @@ struct TextReader: View {
         }
     }
 
-    private nonisolated static func readText(_ url: URL) -> String? {
+    nonisolated static func readText(_ url: URL) -> String? {
         let limit = 1_048_576
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }

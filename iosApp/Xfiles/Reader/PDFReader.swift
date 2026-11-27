@@ -2,9 +2,15 @@ import PDFKit
 import SwiftUI
 import UIKit
 
+struct PDFPageJump: Equatable {
+    let id = UUID()
+    let page: Int
+}
+
 struct PDFReader: View {
     let url: URL
     let page: Int
+    let jump: PDFPageJump?
     let onPage: (Int) -> Void
     @State private var document: PDFDocument?
     @State private var failed = false
@@ -23,7 +29,7 @@ struct PDFReader: View {
                         if unlockFailed { Text("That password didn’t unlock the PDF.").foregroundStyle(.secondary) }
                     }
                 } else {
-                    PDFSurface(document: document, page: page, onPage: onPage)
+                    PDFSurface(document: document, page: page, jump: jump, onPage: onPage)
                 }
             } else if failed {
                 ContentUnavailableView("PDF couldn’t be opened", systemImage: "doc.text")
@@ -50,6 +56,7 @@ struct PDFReader: View {
 private struct PDFSurface: UIViewRepresentable {
     let document: PDFDocument
     let page: Int
+    let jump: PDFPageJump?
     let onPage: (Int) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onPage: onPage) }
@@ -69,6 +76,11 @@ private struct PDFSurface: UIViewRepresentable {
 
     func updateUIView(_ uiView: PositionedView, context: Context) {
         context.coordinator.onPage = onPage
+        if let jump, jump.id != context.coordinator.lastJump {
+            context.coordinator.lastJump = jump.id
+            uiView.pendingPage = jump.page
+            uiView.setNeedsLayout()
+        }
     }
 
     static func dismantleUIView(_ uiView: PositionedView, coordinator: Coordinator) {
@@ -91,6 +103,7 @@ private struct PDFSurface: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         var onPage: (Int) -> Void
+        var lastJump: UUID?
         init(onPage: @escaping (Int) -> Void) { self.onPage = onPage }
 
         @objc func pageChanged(_ notification: Notification) {

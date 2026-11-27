@@ -124,16 +124,20 @@ pub fn open_archive_fd(fd: i32) -> Result<Arc<ArchiveSession>, ReadError> {
         }
         // SAFETY: the caller transfers sole ownership of an open descriptor.
         let file = unsafe { File::from_raw_fd(fd) };
-        let byte_size = file.metadata().map_err(|e| ReadError::Io { detail: e.to_string() })?.len();
-        let cancel = CancelToken::default();
-        let index = ArchiveIndex::open(Box::new(file), byte_size, cancel.clone())?;
-        Ok(Arc::new(ArchiveSession { index: Mutex::new(index), cancel, progress: ExtractProgress::default() }))
+        open_archive_file(file, CancelToken::default())
     }
     #[cfg(not(unix))]
     {
         let _ = fd;
         Err(ReadError::Io { detail: "archive descriptors are only supported on Unix targets".into() })
     }
+}
+
+#[cfg(unix)]
+pub(crate) fn open_archive_file(file: File, cancel: CancelToken) -> Result<Arc<ArchiveSession>, ReadError> {
+    let byte_size = file.metadata().map_err(|e| ReadError::Io { detail: e.to_string() })?.len();
+    let index = ArchiveIndex::open(Box::new(file), byte_size, cancel.clone())?;
+    Ok(Arc::new(ArchiveSession { index: Mutex::new(index), cancel, progress: ExtractProgress::default() }))
 }
 
 fn poisoned() -> ReadError {

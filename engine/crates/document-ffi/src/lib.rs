@@ -21,6 +21,8 @@ use document_parsers::{
 };
 use zeroize::Zeroizing;
 
+#[cfg(target_os = "ios")]
+mod ios;
 mod fily;
 mod glance;
 mod sheet_edit;

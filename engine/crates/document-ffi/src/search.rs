@@ -75,6 +75,13 @@ impl NativeTextReader {
     }
 }
 
+#[cfg(target_os = "ios")]
+impl NativeTextReader {
+    pub(crate) fn cancel_token(&self) -> CancelToken {
+        self.cancel.clone()
+    }
+}
+
 fn push_block(text: &mut PlainText, block: Block) {
     match block {
         Block::Heading { text: t, .. }

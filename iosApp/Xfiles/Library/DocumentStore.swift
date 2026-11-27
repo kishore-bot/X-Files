@@ -46,8 +46,7 @@ actor DocumentStore {
                 try FileManager.default.copyItem(at: readableURL, to: target)
                 let copy = try target.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
                 guard copy.isRegularFile == true, copy.isSymbolicLink != true else { throw StoreError.invalidFile }
-                let declaredKind = DocumentKind(type: values.contentType)
-                let kind = declaredKind == .other ? DocumentKind(type: UTType(filenameExtension: source.pathExtension)) : declaredKind
+                let kind = DocumentKind.classify(name, type: values.contentType)
                 return DocumentRecord(
                     schemaVersion: 1,
                     id: id,
@@ -72,6 +71,25 @@ actor DocumentStore {
         record.openedAt = .now
         try write(record, directory: directory(id))
         return ReaderFile(record: record, url: payload(id, name: record.name))
+    }
+
+    func file(_ id: UUID) throws -> ReaderFile {
+        let record = try read(id)
+        return ReaderFile(record: record, url: payload(id, name: record.name))
+    }
+
+    func findContents(_ query: String) async throws -> [FileSearchHit] {
+        let indexDir = root.appendingPathComponent(".search", isDirectory: true)
+        let searchable = try records().filter {
+            [.text, .pdf, .book, .office, .sheet, .slides].contains($0.viewerKind)
+        }
+        let files = searchable.map {
+            EngineRequest.IndexFile(
+                id: $0.id.uuidString, path: payload($0.id, name: $0.name).path,
+                size: $0.byteCount, stamp: Int64($0.importedAt.timeIntervalSince1970)
+            )
+        }
+        return try await DocumentEngine.run(EngineRequest(operation: "search", index: indexDir.path, files: files, query: query))
     }
 
     func toggleBookmark(_ id: UUID) throws -> DocumentRecord {
