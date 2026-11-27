@@ -67,7 +67,8 @@ pub fn best_snippet(text: &str, terms: &[QueryTerm], max_chars: usize) -> Snippe
             distinct += 1;
         }
         counts[t] += 1;
-        while hits[right].1 - hits[left].0 > WINDOW_BYTES {
+        // `left < right`: a single hit longer than the window must stay in it, not push `left` past the end.
+        while left < right && hits[right].1 - hits[left].0 > WINDOW_BYTES {
             let lt = hits[left].2;
             counts[lt] -= 1;
             if counts[lt] == 0 {

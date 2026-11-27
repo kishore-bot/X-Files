@@ -331,6 +331,8 @@ pub(crate) fn copy_entry<R: Read + ?Sized>(reader: &mut R, target: &Path, progre
 ///
 /// Rejects NUL, backslashes, drive or stream markers (`:`), and any `..`
 /// component. Empty and `.` components are dropped, so `a//./b` becomes `a/b`.
+/// On Windows it also rejects components that end in a dot or space (which
+/// Windows trims, so `.. ` can act as `..`) and reserved device names.
 pub fn safe_relative(name: &str) -> Option<PathBuf> {
     if name.is_empty() || name.starts_with('/') || name.len() > 4096 || name.contains(['\0', '\\', ':']) {
         return None;
@@ -340,10 +342,26 @@ pub fn safe_relative(name: &str) -> Option<PathBuf> {
         match part {
             "" | "." => {}
             ".." => return None,
+            part if cfg!(windows) && !windows_safe(part) => return None,
             part => out.push(part),
         }
     }
     if out.as_os_str().is_empty() { None } else { Some(out) }
+}
+
+/// False for a component Windows would trim or treat as a device.
+fn windows_safe(part: &str) -> bool {
+    if part.ends_with(['.', ' ']) {
+        return false;
+    }
+    let stem = part.split('.').next().unwrap_or(part).trim_end().to_ascii_uppercase();
+    let numbered = |prefix: &str| {
+        stem.strip_prefix(prefix)
+            .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
+    };
+    let device =
+        matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT");
+    !device
 }
 
 #[cfg(test)]
@@ -352,6 +370,17 @@ mod tests {
 
     use super::*;
     use crate::archive_crypto::test_support::{winzip_aes_seal, zipcrypto_seal};
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_names_windows_rewrites() {
+        for bad in [".. /x", "a/.. /b", "a./b", "b ", "CON", "nul.txt", "a/Com1.log", "LPT9"] {
+            assert!(safe_relative(bad).is_none(), "{bad:?} should be rejected");
+        }
+        for good in ["console.txt", "com10", "a.b/c", ".hidden"] {
+            assert!(safe_relative(good).is_some(), "{good:?} should be accepted");
+        }
+    }
 
     #[test]
     fn rejects_traversal_and_markers() {

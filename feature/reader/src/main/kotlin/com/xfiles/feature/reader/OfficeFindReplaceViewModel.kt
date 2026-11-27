@@ -15,6 +15,7 @@ import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** What the panel's find text currently matches in the working copy. */
 sealed interface OfficeMatches {
@@ -96,6 +98,9 @@ class OfficeFindReplaceViewModel @Inject constructor(
     private var searchJob: Job? = null
     private var navJob: Job? = null
     private var editJob: Job? = null
+    private var bindJob: Job? = null
+    /** Bumped by every [bind]; a staging that finishes under an older value belongs to a document no longer shown. */
+    private var bindGeneration = 0
 
     /** Stages [uri] for editing. Calling it again with the same document does nothing. */
     fun bind(uri: Uri, name: String) {
@@ -112,20 +117,34 @@ class OfficeFindReplaceViewModel @Inject constructor(
         searchJob?.cancel()
         navJob?.cancel()
         editJob?.cancel()
+        bindJob?.cancel()
+        val generation = ++bindGeneration
         mutableState.value = OfficeEditUiState.Preparing
-        viewModelScope.launch {
+        bindJob = viewModelScope.launch {
             oldSession?.let { repository.close(it) }
             repository.discardAll(previous)
+            var staged: File? = null
+            var opened: OfficeEditSession? = null
             try {
-                val staged = repository.stage(uri, name)
-                source = staged
-                working = staged
-                session = repository.open(staged)
+                val copy = repository.stage(uri, name).also { staged = it }
+                val handle = repository.open(copy).also { opened = it }
+                // A newer bind owns the panel now; this document's copy is released below.
+                if (generation != bindGeneration) return@launch
+                source = copy
+                working = copy
+                session = handle
+                staged = null
+                opened = null
                 mutableState.value = OfficeEditUiState.Ready()
             } catch (error: OfficeEditException) {
-                mutableState.value = OfficeEditUiState.Failed(error.message ?: UNREADABLE)
+                if (generation == bindGeneration) mutableState.value = OfficeEditUiState.Failed(error.message ?: UNREADABLE)
             } catch (error: IllegalArgumentException) {
-                mutableState.value = OfficeEditUiState.Failed(UNSUPPORTED)
+                if (generation == bindGeneration) mutableState.value = OfficeEditUiState.Failed(UNSUPPORTED)
+            } finally {
+                withContext(NonCancellable) {
+                    opened?.let { repository.close(it) }
+                    staged?.let { repository.discardAll(listOf(it)) }
+                }
             }
         }
     }

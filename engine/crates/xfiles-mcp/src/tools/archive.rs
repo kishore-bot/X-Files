@@ -83,6 +83,7 @@ pub async fn extract(svc: Arc<Services>, args: ExtractArchiveEntryArgs) -> Resul
     let entry = validate::required_text(&args.entry, "entry", MAX_ENTRY_CHARS)?.to_owned();
     let output = svc.output(&args.output, args.overwrite, &[], std::slice::from_ref(&archive))?;
     let size = fs::metadata(&archive)?.len();
+    let overwrite = args.overwrite;
     let password = args.password.map(String::into_bytes);
     let shown_archive = display(&archive);
 
@@ -103,6 +104,13 @@ pub async fn extract(svc: Arc<Services>, args: ExtractArchiveEntryArgs) -> Resul
                 return Err(ToolError::invalid(format!("{entry} is a folder, so there is no single file to extract")));
             }
             ctx.check()?;
+            // The sandbox checked the destination before extraction; something may have created it since.
+            if !overwrite && fs::symlink_metadata(&output).is_ok() {
+                return Err(ToolError::Exists(format!(
+                    "{} already exists; set overwrite to true to replace it",
+                    display(&output)
+                )));
+            }
             fs::rename(&produced, &output)?;
             let bytes = fs::metadata(&output)?.len();
             Ok(json!({

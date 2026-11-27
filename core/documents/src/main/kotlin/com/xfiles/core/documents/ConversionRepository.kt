@@ -370,9 +370,11 @@ class ConversionRepository @Inject constructor(
             val descriptor = ParcelFileDescriptor.open(plain, ParcelFileDescriptor.MODE_READ_ONLY)
             val renderer = try {
                 PdfRenderer(descriptor)
-            } catch (error: SecurityException) {
+            } catch (error: Throwable) {
+                // The renderer owns the descriptor only once it is built; any failure before that leaves it to us.
                 descriptor.close()
-                throw PdfToolPasswordError(wrong = false)
+                if (error is SecurityException) throw PdfToolPasswordError(wrong = false)
+                throw error
             }
             return renderer.use { block(it) }
         } finally {

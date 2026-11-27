@@ -5,11 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import com.xfiles.android.MainActivity
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 /**
  * What the home-screen widget asks of the app. Buttons send an explicit intent to [MainActivity] with
  * [EXTRA] set to one of the action names; a recent file is an ACTION_VIEW on its content URI, which the
  * activity already opens in the reader.
+ *
+ * MainActivity is exported, so any app can send these extras. The plain screen actions only open a screen, like
+ * launching the app. [NOTE] carries caller text, so it is honoured only with [EXTRA_TOKEN], a per-install secret
+ * that only intents built in this process (the AppFunctions hand-off) carry.
  */
 object WidgetActions {
     const val EXTRA = "xfiles.action"
@@ -22,6 +28,10 @@ object WidgetActions {
     const val NOTE = "note"
     const val EXTRA_NOTE_TITLE = "xfiles.note.title"
     const val EXTRA_NOTE_TEXT = "xfiles.note.text"
+    private const val EXTRA_TOKEN = "xfiles.token"
+
+    private const val PREFS = "xfiles_internal_launch"
+    private const val TOKEN_KEY = "token"
 
     fun button(context: Context, action: String): Intent =
         Intent(context, MainActivity::class.java).putExtra(EXTRA, action)
@@ -35,4 +45,22 @@ object WidgetActions {
         button(context, NOTE)
             .putExtra(EXTRA_NOTE_TITLE, title)
             .putExtra(EXTRA_NOTE_TEXT, text)
+            .putExtra(EXTRA_TOKEN, token(context))
+
+    /** True when [intent] was built by [note] in this app, not sent by another app. */
+    fun isInternal(context: Context, intent: Intent): Boolean {
+        val presented = intent.getStringExtra(EXTRA_TOKEN) ?: return false
+        return MessageDigest.isEqual(presented.toByteArray(), token(context).toByteArray())
+    }
+
+    /** The per-install secret, created on first use. Backups are disabled, so it never leaves the device. */
+    @Synchronized
+    private fun token(context: Context): String {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.getString(TOKEN_KEY, null)?.let { return it }
+        val bytes = ByteArray(32).also(SecureRandom()::nextBytes)
+        val created = bytes.joinToString("") { "%02x".format(it) }
+        prefs.edit().putString(TOKEN_KEY, created).commit()
+        return created
+    }
 }

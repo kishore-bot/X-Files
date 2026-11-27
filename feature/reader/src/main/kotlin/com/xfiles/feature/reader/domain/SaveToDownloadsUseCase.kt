@@ -59,10 +59,11 @@ class SaveToDownloadsUseCase @Inject constructor(
         val target = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: return SaveResult.Failed("Downloads is not available.")
         try {
-            val out = resolver.openOutputStream(target) ?: return SaveResult.Failed("Downloads is not available.")
+            val out = resolver.openOutputStream(target) ?: throw IllegalStateException("Downloads is not available.")
             out.use { copy(source, it, onProgress) }
             resolver.update(target, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
         } catch (e: Exception) {
+            // Includes cancellation: no pending row is left behind in Downloads.
             resolver.delete(target, null, null)
             throw e
         }
@@ -76,7 +77,13 @@ class SaveToDownloadsUseCase @Inject constructor(
         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (!dir.exists() && !dir.mkdirs()) return SaveResult.Failed("Downloads is not available.")
         val file = uniqueFile(dir, name)
-        FileOutputStream(file).use { copy(source, it, onProgress) }
+        try {
+            FileOutputStream(file).use { copy(source, it, onProgress) }
+        } catch (e: Exception) {
+            // Includes cancellation: a partial copy is not left in Downloads.
+            file.delete()
+            throw e
+        }
         return SaveResult.Saved(file.name)
     }
 

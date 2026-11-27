@@ -933,7 +933,10 @@ pub(crate) fn font_stack(name: &str) -> String {
         _ => ("EzCarlito", "sans-serif"),
     };
     let clean: String =
-        name.chars().filter(|c| !matches!(c, '"' | '\'' | '\\' | ';' | '<' | '>' | '{' | '}')).collect();
+        // `&` and `#` too: inside a style attribute `&#59;` decodes to `;` before CSS sees it.
+        name.chars()
+            .filter(|c| !c.is_control() && !matches!(c, '"' | '\'' | '\\' | ';' | '<' | '>' | '{' | '}' | '&' | '#'))
+            .collect();
     format!("\"{clean}\",{fallback},{generic}")
 }
 

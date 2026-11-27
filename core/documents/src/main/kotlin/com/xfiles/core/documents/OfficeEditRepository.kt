@@ -2,6 +2,7 @@ package com.xfiles.core.documents
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import com.xfiles.documentengine.OfficeEditException
 import com.xfiles.documentengine.OfficeEditSession
 import com.xfiles.documentengine.OfficeFindQuery
@@ -121,7 +122,10 @@ class OfficeEditRepository @Inject constructor(@ApplicationContext context: Cont
         FilePreview.Structured(reader.readFile(file, name))
     }
 
-    /** Writes [file] to a location the user picked (Storage Access Framework). */
+    /**
+     * Writes [file] to a location the user picked (Storage Access Framework). The destination is a new document
+     * from the create-document picker, so a failed or cancelled write removes it rather than leave a partial file.
+     */
     suspend fun saveCopy(file: File, destination: Uri) = withContext(io) {
         file.inputStream().use { input ->
             currentCoroutineContext().ensureActive()
@@ -136,10 +140,21 @@ class OfficeEditRepository @Inject constructor(@ApplicationContext context: Cont
                         stream.write(buffer, 0, count)
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable) { deletePartial(destination) }
+                throw cancelled
             } catch (error: IOException) {
+                if (deletePartial(destination)) throw IOException("The copy could not be written.", error)
                 throw IncompleteOfficeCopyException(error)
             }
         }
+    }
+
+    /** Removes a partly written destination; false when the provider would not delete it. */
+    private fun deletePartial(destination: Uri): Boolean = try {
+        DocumentsContract.deleteDocument(resolver, destination)
+    } catch (_: Exception) {
+        false
     }
 
     /** Deletes workspace files. Files outside the workspace, such as the user's original, are never touched. */

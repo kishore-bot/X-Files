@@ -335,7 +335,7 @@ struct DocumentTools: View {
                 throw EngineError(message: "Enter a valid row and column.")
             }
             request.sheet = sheetName
-            request.row = r
+            request.row = r - 1
             request.column = c - 1
             request.text = text
         case .watermark, .note:

@@ -437,7 +437,8 @@ class ToolExecutor(
         const val MAX_EXCERPT_CHARS = 3000
         const val SOURCE_CHARS = 60_000
         const val MAX_DRAFT_CHARS = 20_000
-        val CONTENT_TOOLS = setOf("getDocumentExcerpt", "findTextInDocument")
+        /** Tools that read text inside files, so they need the content switch. Tidy compares documents by their text. */
+        val CONTENT_TOOLS = setOf("getDocumentExcerpt", "findTextInDocument", "startTidyScan", "getTidyReport")
     }
 }
 

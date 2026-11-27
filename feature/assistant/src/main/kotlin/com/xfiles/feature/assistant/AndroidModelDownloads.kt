@@ -1,6 +1,7 @@
 package com.xfiles.feature.assistant
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.util.Log
 import com.xfiles.fily.AssistantModel
@@ -39,6 +40,8 @@ internal class AndroidModelDownloads @javax.inject.Inject constructor(
 ) : ModelDownloads {
     private val app = context.applicationContext
     private val root = File(app.filesDir, "models")
+    /** Declared before [states], whose initializer calls [folder]. */
+    private val debuggable = (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val states = AssistantModel.entries.associateWith { MutableStateFlow(if (folder(it) != null) ModelInstall.Installed else ModelInstall.Missing) }
     private val lock = Any()
@@ -52,11 +55,14 @@ internal class AndroidModelDownloads @javax.inject.Inject constructor(
 
     override fun state(model: AssistantModel): StateFlow<ModelInstall> = states.getValue(model).asStateFlow()
 
-    /** The private copy, else a developer's copy pushed with adb (`/data/local/tmp`), if complete. */
-    override fun folder(model: AssistantModel): String? = listOf(dir(model), devDir(model))
+    /**
+     * The private copy, else (debuggable builds only) a developer's copy pushed with adb (`/data/local/tmp`), if
+     * complete. The adb copy is not checksummed, so release builds never look there.
+     */
+    override fun folder(model: AssistantModel): String? = listOfNotNull(dir(model), devDir(model))
         .firstOrNull { folder -> model.files.all { ready(folder, it) } }?.path
 
-    private fun devDir(model: AssistantModel) = when (model) {
+    private fun devDir(model: AssistantModel): File? = if (!debuggable) null else when (model) {
         AssistantModel.Fily -> File("/data/local/tmp")
     }
 
@@ -235,7 +241,10 @@ internal class AndroidModelDownloads @javax.inject.Inject constructor(
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** Files are only ever in place after their checksum passed, so presence and size suffice here. */
+    /**
+     * Files in the private folder are only ever in place after their checksum passed, so presence and size suffice
+     * there. The adb folder is unverified and only consulted by debuggable builds.
+     */
     private fun ready(folder: File, file: ModelFile) = File(folder, file.name).let { it.isFile && it.length() == file.bytes }
 
     private fun dir(model: AssistantModel) = File(root, model.folder)

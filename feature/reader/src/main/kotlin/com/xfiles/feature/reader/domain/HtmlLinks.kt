@@ -49,8 +49,13 @@ internal fun siblingUri(context: Context, base: Uri, encodedHref: String): Uri? 
     if (href.isEmpty() || href.startsWith("/")) return null
     return when (base.scheme) {
         "file" -> {
-            val parent = base.path?.let(::File)?.parentFile ?: return null
-            File(parent, href).takeIf { it.exists() }?.let(Uri::fromFile)
+            val parent = base.path?.let(::File)?.parentFile?.let(::canonical) ?: return null
+            val target = canonical(File(parent, href))?.takeIf { it.isFile } ?: return null
+            // `..` and symlinks may reach anywhere; the app's private data opens only for a page already inside it.
+            val private = listOfNotNull(context.applicationInfo.dataDir, context.applicationInfo.deviceProtectedDataDir)
+                .mapNotNull { canonical(File(it)) }
+            if (private.any { target.isWithin(it) } && !target.isWithin(parent)) return null
+            Uri.fromFile(target)
         }
         "content" -> {
             if (!DocumentsContract.isDocumentUri(context, base)) return null
@@ -62,6 +67,14 @@ internal fun siblingUri(context: Context, base: Uri, encodedHref: String): Uri? 
         else -> null
     }
 }
+
+private fun canonical(file: File): File? = try {
+    file.canonicalFile
+} catch (_: java.io.IOException) {
+    null
+}
+
+private fun File.isWithin(root: File): Boolean = path == root.path || path.startsWith(root.path + File.separator)
 
 /**
  * Document id of [href] beside [docId]: `primary:docs/a.html` plus `img/../b.html` gives `primary:docs/b.html`.

@@ -51,6 +51,11 @@ const WORD_GAP_EM: f64 = 0.2;
 /// Vertical moves larger than this (in em) start a new line.
 const LINE_GAP_EM: f64 = 0.5;
 const MAX_CMAP_ENTRIES: usize = 300_000;
+/// UTF-16 units decoded across one CMap's entries. Repeated ranges overwrite the same codes, so the entry cap alone
+/// does not bound the work.
+const MAX_CMAP_WORK: usize = 4_000_000;
+/// Units kept from one destination string; real ToUnicode targets are a few characters (ligatures, combining marks).
+const MAX_CMAP_DEST_UNITS: usize = 64;
 const MAX_CMAP_TOKENS: usize = 2_000_000;
 const MAX_ARRAY_ITEMS: usize = 65_536;
 const MAX_ARRAY_NESTING: usize = 16;
@@ -1067,6 +1072,8 @@ struct CMap {
     map: HashMap<u32, String>,
     /// Byte length of the codes, from the codespace ranges.
     width: Option<usize>,
+    /// Units decoded so far, against [MAX_CMAP_WORK].
+    work: usize,
 }
 
 enum CTok {
@@ -1090,9 +1097,16 @@ impl CMap {
         self.map.get(&code).map(String::as_str)
     }
 
-    fn put(&mut self, code: u32, text: String) {
-        if self.map.len() < MAX_CMAP_ENTRIES {
-            self.map.insert(code, text);
+    /// Charges one entry of `units` units; false once the budget is spent.
+    fn spend(&mut self, units: usize) -> bool {
+        self.work = self.work.saturating_add(units + 1);
+        self.work <= MAX_CMAP_WORK
+    }
+
+    fn put(&mut self, code: u32, units: &[u16]) {
+        let units = &units[..units.len().min(MAX_CMAP_DEST_UNITS)];
+        if self.map.len() < MAX_CMAP_ENTRIES && self.spend(units.len()) {
+            self.map.insert(code, units_text(units));
         }
     }
 
@@ -1100,12 +1114,16 @@ impl CMap {
         if hi < lo || hi - lo > 65_535 {
             return;
         }
+        let mut shifted = units[..units.len().min(MAX_CMAP_DEST_UNITS)].to_vec();
+        let base = shifted.last().copied();
         for code in lo..=hi {
-            let mut shifted = units.to_vec();
-            if let Some(last) = shifted.last_mut() {
-                *last = last.wrapping_add((code - lo) as u16);
+            if self.work > MAX_CMAP_WORK {
+                return;
             }
-            self.put(code, units_text(&shifted));
+            if let (Some(last), Some(base)) = (shifted.last_mut(), base) {
+                *last = base.wrapping_add((code - lo) as u16);
+            }
+            self.put(code, &shifted);
         }
     }
 
@@ -1128,7 +1146,7 @@ impl CMap {
                     i += 1;
                     while i < tokens.len() && tokens[i].word() != Some("endbfchar") {
                         if let (CTok::Hex(src), Some(CTok::Hex(dst))) = (&tokens[i], tokens.get(i + 1)) {
-                            cmap.put(hex_value(src), units_text(&utf16_units(dst)));
+                            cmap.put(hex_value(src), &utf16_units(dst));
                         }
                         i += 2;
                     }
@@ -1150,7 +1168,7 @@ impl CMap {
                                 let mut j = i + 3;
                                 let mut code = lo;
                                 while let Some(CTok::Hex(dst)) = tokens.get(j) {
-                                    cmap.put(code, units_text(&utf16_units(dst)));
+                                    cmap.put(code, &utf16_units(dst));
                                     code = code.saturating_add(1);
                                     j += 1;
                                 }

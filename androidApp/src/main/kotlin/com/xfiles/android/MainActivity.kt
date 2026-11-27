@@ -665,10 +665,15 @@ class MainActivity : ComponentActivity() {
                 library.receiveShared(files.drop(1))
             }
         }
-        intent.getStringExtra(WidgetActions.EXTRA)?.let { pendingAction.value = it }
-        if (intent.getStringExtra(WidgetActions.EXTRA) == WidgetActions.NOTE) {
-            pendingNote.value = intent.getStringExtra(WidgetActions.EXTRA_NOTE_TITLE).orEmpty() to
-                intent.getStringExtra(WidgetActions.EXTRA_NOTE_TEXT).orEmpty()
+        when (val action = intent.getStringExtra(WidgetActions.EXTRA)) {
+            null -> Unit
+            // A prefilled note carries caller text: only this app's own hand-off may open one.
+            WidgetActions.NOTE -> if (WidgetActions.isInternal(this, intent)) {
+                pendingAction.value = action
+                pendingNote.value = intent.getStringExtra(WidgetActions.EXTRA_NOTE_TITLE).orEmpty() to
+                    intent.getStringExtra(WidgetActions.EXTRA_NOTE_TEXT).orEmpty()
+            }
+            else -> pendingAction.value = action
         }
     }
 
