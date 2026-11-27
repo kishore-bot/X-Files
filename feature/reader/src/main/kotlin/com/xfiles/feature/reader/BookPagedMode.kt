@@ -15,6 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -53,6 +57,7 @@ internal fun PagedBook(
     marks: Map<Int, List<MarkRange<TextMark>>>,
     actions: BookBlockActions,
     marginDp: Int,
+    initialBlock: Int,
     jumpTo: Int?,
     onJumpHandled: () -> Unit,
     onBlock: (Int) -> Unit,
@@ -61,7 +66,12 @@ internal fun PagedBook(
     measure: (ContentBlock) -> Int,
 ) {
     val index = layout.index
-    val pagerState = rememberPagerState(pageCount = { layout.revision.let { index.pageCount + if (index.isComplete) 0 else 1 } })
+    val openingBlock = remember(layout) { initialBlock }
+    var opening by remember(layout) { mutableStateOf(true) }
+    val targetBlock = jumpTo ?: openingBlock.takeIf { opening }
+    val pagerState = rememberPagerState(initialPage = index.pageOf(openingBlock)) {
+        layout.revision.let { index.pageCount + if (index.isComplete) 0 else 1 }
+    }
     RegisterViewerScroll(pagerState) { PagerScroll(pagerState) }
     val scope = rememberCoroutineScope()
 
@@ -84,22 +94,24 @@ internal fun PagedBook(
 
     // Cut pages while the reader is near the end of those cut, or the jump target is not yet on one.
     // Yields between pages so frames keep their deadline; restarts (cancelling the rest) on a new page or jump.
-    LaunchedEffect(layout, jumpTo, pagerState.currentPage) {
+    LaunchedEffect(layout, targetBlock, pagerState.currentPage) {
         while (true) {
-            val needJump = jumpTo != null && !index.covers(jumpTo)
+            val needJump = targetBlock != null && !index.covers(targetBlock)
             val needAhead = !index.isComplete && index.pageCount <= pagerState.currentPage + AHEAD
             if (!needJump && !needAhead) break
             layout.cutPages(pages = 1, measure = measure)
             yield()
         }
-        if (jumpTo != null && index.covers(jumpTo)) {
-            pagerState.scrollToPage(index.pageOf(jumpTo))
-            onJumpHandled()
+        if (targetBlock != null && index.covers(targetBlock)) {
+            val targetPage = index.pageOf(targetBlock)
+            if (pagerState.currentPage != targetPage) pagerState.scrollToPage(targetPage)
+            opening = false
+            if (jumpTo != null) onJumpHandled()
         }
     }
-    // Reports the page's first block, but not while a jump is pending: until it lands, page 0 is not the reader's place.
-    LaunchedEffect(pagerState.currentPage, layout.revision, jumpTo) {
-        if (jumpTo == null && pagerState.currentPage < index.pageCount) onBlock(index.pageStart(pagerState.currentPage))
+    // The first block becomes the saved position once the initial page or requested jump has landed.
+    LaunchedEffect(pagerState.currentPage, layout.revision, targetBlock) {
+        if (targetBlock == null && pagerState.currentPage < index.pageCount) onBlock(index.pageStart(pagerState.currentPage))
     }
 
     HorizontalPager(

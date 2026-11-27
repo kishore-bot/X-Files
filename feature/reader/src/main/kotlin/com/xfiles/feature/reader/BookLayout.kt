@@ -116,7 +116,14 @@ internal fun bookTypography(settings: ReadingSettings, palette: BookPalette): Bo
 }
 
 /** Identifies one pagination: the book, the layout settings, and the page's size in pixels. */
-internal data class BookLayoutKey(val book: String, val layout: ReadingLayout, val widthPx: Int, val pageHeightPx: Int)
+internal data class BookLayoutKey(
+    val book: String,
+    val layout: ReadingLayout,
+    val widthPx: Int,
+    val pageHeightPx: Int,
+    val blockCount: Int,
+    val chapterStarts: List<Int>,
+)
 
 /**
  * One book paginated at one [BookLayoutKey]. Pages are cut on demand by [cutPages]; each block's

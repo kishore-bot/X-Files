@@ -100,7 +100,7 @@ internal fun BookReaderBody(
         val gapPx = with(density) { 10.dp.roundToPx() }
         val pageWidthPx = (constraints.maxWidth - 2 * marginPx).coerceAtLeast(1)
         val pageHeightPx = (constraints.maxHeight - topPx - bottomPx).coerceAtLeast(with(density) { 120.dp.roundToPx() })
-        val layoutKey = BookLayoutKey(bookKey, settings.layout, pageWidthPx, pageHeightPx)
+        val layoutKey = BookLayoutKey(bookKey, settings.layout, pageWidthPx, pageHeightPx, blocks.size, chapterStarts)
         // Paginated lazily; the cache keeps recent layouts, so returning to one is instant.
         val layout = remember(layoutKey) {
             vm.layouts.get(layoutKey) ?: BookLayout(blocks, pageHeightPx, gapPx, chapterStarts).also { vm.layouts.put(layoutKey, it) }
@@ -119,6 +119,7 @@ internal fun BookReaderBody(
                     marks = marks,
                     actions = actions,
                     marginDp = settings.margin.dp,
+                    initialBlock = current,
                     jumpTo = jumpTo,
                     onJumpHandled = onJumpHandled,
                     onBlock = onBlock,

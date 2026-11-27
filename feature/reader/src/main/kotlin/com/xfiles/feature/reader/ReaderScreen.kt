@@ -184,13 +184,13 @@ fun ReaderScreen(
         if (uri != null) onSaveMarkup(uri)
     }
     var awaitingAnnotatedCopy by rememberSaveable(documentKey) { mutableStateOf(false) }
-    LaunchedEffect(awaitingAnnotatedCopy, ui.editingMarkup, markup.output, markup.error) {
-        if (!awaitingAnnotatedCopy) return@LaunchedEffect
-        if (!ui.editingMarkup || markup.error != null) {
+    val annotatedName = "${fileName.substringBeforeLast('.')}-annotated.pdf"
+    LaunchedEffect(ui.editingMarkup, markup.output) {
+        if (!ui.editingMarkup) {
             awaitingAnnotatedCopy = false
-        } else if (markup.output != null) {
+        } else if (awaitingAnnotatedCopy && markup.output != null) {
             awaitingAnnotatedCopy = false
-            saveAnnotated.launch("${fileName.substringBeforeLast('.')}-annotated.pdf")
+            saveAnnotated.launch(annotatedName)
         }
     }
     val closeReader: () -> Unit = {
@@ -388,8 +388,12 @@ fun ReaderScreen(
                             onMode = { onEvent(ReaderUiEvent.SetMarkupMode(it)) },
                             onUndo = onUndoMarkup,
                             onSave = {
-                                if (markup.output == null) onPrepareMarkup()
-                                awaitingAnnotatedCopy = true
+                                if (markup.output != null) {
+                                    saveAnnotated.launch(annotatedName)
+                                } else {
+                                    awaitingAnnotatedCopy = true
+                                    onPrepareMarkup()
+                                }
                             },
                             modifier = Modifier.padding(top = 8.dp),
                         )
