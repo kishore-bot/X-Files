@@ -1,5 +1,7 @@
 package com.xfiles.feature.reader
 
+import android.graphics.Bitmap
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -8,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PdfRasterRegion
 import com.xfiles.core.documents.PdfMatchBox
 import com.xfiles.core.documents.PdfPageText
 import com.xfiles.design.LocalEzDarkTheme
@@ -29,6 +32,7 @@ internal fun ReaderPdfPage(
     pdfFind: PdfFindState,
     pdfText: suspend (Int) -> PdfPageText?,
     loadPage: suspend (Int) -> FilePreview.Pdf?,
+    loadRegion: suspend (Int, PdfRasterRegion) -> Bitmap?,
     onAddMarkup: (PdfMarkup) -> Unit,
     onPdfPageSettled: (Int) -> Unit,
     onPdfQuery: (String) -> Unit,
@@ -71,6 +75,7 @@ internal fun ReaderPdfPage(
                 twoUp = ui.pdfTwoUp,
                 zoom = ui.pdfZoom,
                 loadPage = loadPage,
+                loadRegion = loadRegion,
                 highlights = ::highlights,
                 marks = ::marksOn,
                 textSource = ::textSource,

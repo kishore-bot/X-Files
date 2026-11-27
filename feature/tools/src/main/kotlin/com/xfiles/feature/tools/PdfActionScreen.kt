@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.core.documents.PdfAction
 import com.xfiles.core.documents.PdfPaper
 import com.xfiles.core.documents.PdfToolOptions
+import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzTextButton
 import com.xfiles.design.HapticOnChange
@@ -60,7 +61,7 @@ internal fun PdfActionScreen(viewModel: PdfToolsViewModel, onBack: () -> Unit) {
     BackHandler(onBack = back)
 
     val multi = action.inputCount.last > 1
-    val tint = actionTint(action)
+    val tint = EzColors.Accent
     val step = when {
         state.output != null || state.saved -> ToolStep.Save
         state.inputs.isEmpty() -> ToolStep.Pick
@@ -244,25 +245,14 @@ private fun actionLabel(action: PdfAction, count: Int, paper: PdfPaper): String 
 }
 
 private fun actionIcon(action: PdfAction): ImageVector = when (action) {
-    PdfAction.Merge -> EzIcons.Lines
-    PdfAction.Extract -> EzIcons.Document
-    PdfAction.Insert -> EzIcons.TwoPages
-    PdfAction.Resize -> EzIcons.SinglePage
-    PdfAction.Protect, PdfAction.Unlock -> EzIcons.Lock
+    PdfAction.Merge -> EzIcons.MergePages
+    PdfAction.Extract -> EzIcons.ExtractPages
+    PdfAction.Insert -> EzIcons.InsertPages
+    PdfAction.Resize -> EzIcons.AspectRatio
+    PdfAction.Protect -> EzIcons.Lock
+    PdfAction.Unlock -> EzIcons.Unlock
     PdfAction.Rotate -> EzIcons.Rotate
     PdfAction.Delete -> EzIcons.Delete
-}
-
-/** Each tool keeps its hub colour, so the hero matches the tile that opened it. */
-private fun actionTint(action: PdfAction): Color = when (action) {
-    PdfAction.Merge -> Color(0xFFE60023)
-    PdfAction.Extract -> Color(0xFF5E6AD2)
-    PdfAction.Insert -> Color(0xFF1F7A5C)
-    PdfAction.Resize -> Color(0xFF087F42)
-    PdfAction.Protect -> Color(0xFFD9408A)
-    PdfAction.Unlock -> Color(0xFF6B3A63)
-    PdfAction.Rotate -> Color(0xFF0862D9)
-    PdfAction.Delete -> Color(0xFFB0124F)
 }
 
 private fun actionBlurb(action: PdfAction): String = when (action) {

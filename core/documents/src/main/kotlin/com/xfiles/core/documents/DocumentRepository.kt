@@ -209,6 +209,9 @@ class DocumentRepository @Inject constructor(
         }
     }
 
+    suspend fun pageRegion(file: FileEntry, index: Int, password: String?, region: PdfRasterRegion): Bitmap =
+        pdfs.renderRegion(file.uri, index, password, region)
+
     suspend fun page(file: FileEntry, index: Int, password: String?): FilePreview.Pdf =
         pdfs.render(file.uri, index, password)
 

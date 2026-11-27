@@ -146,7 +146,7 @@ internal fun ConvertToolScreen(viewModel: ConvertViewModel, onBack: () -> Unit) 
                 item("hero") {
                     ToolHero(
                         icon = toolIcon(tool),
-                        tint = toolTint(tool),
+                        tint = if (tool == ConvertTool.PictureToText) Color(0xFF2F3BB5) else EzColors.Accent,
                         title = tool.label,
                         blurb = toolBlurb(tool),
                         step = step,
@@ -265,20 +265,10 @@ private fun ConvertResultCard(output: ConvertOutput) {
 private fun toolIcon(tool: ConvertTool): ImageVector = when (tool) {
     ConvertTool.PicturesToPdf, ConvertTool.AddPictures, ConvertTool.PdfToPictures -> EzIcons.Image
     ConvertTool.ScanToPdf -> EzIcons.Camera
-    ConvertTool.TextToPdf, ConvertTool.PdfToText -> EzIcons.TextT
+    ConvertTool.TextToPdf -> EzIcons.NoteAdd
+    ConvertTool.PdfToText -> EzIcons.Lines
     ConvertTool.PictureToText -> EzIcons.Search
     ConvertTool.PdfToZip -> EzIcons.Archive
-}
-
-private fun toolTint(tool: ConvertTool): Color = when (tool) {
-    ConvertTool.PicturesToPdf -> Color(0xFF7A4A2E)
-    ConvertTool.ScanToPdf -> Color(0xFF373C47)
-    ConvertTool.TextToPdf -> Color(0xFF6832C1)
-    ConvertTool.PictureToText -> Color(0xFF2F3BB5)
-    ConvertTool.AddPictures -> Color(0xFF8E5BD9)
-    ConvertTool.PdfToPictures -> Color(0xFF2E9E6B)
-    ConvertTool.PdfToText -> Color(0xFF2F3BB5)
-    ConvertTool.PdfToZip -> Color(0xFFB0124F)
 }
 
 private fun toolBlurb(tool: ConvertTool): String = when (tool) {

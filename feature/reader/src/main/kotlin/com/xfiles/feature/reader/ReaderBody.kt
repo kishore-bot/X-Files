@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.xfiles.design.LocalEzDarkTheme
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PdfRasterRegion
 import com.xfiles.core.documents.PdfPageText
 import com.xfiles.documents.PdfMarkup
 import com.xfiles.documents.structure.DocumentFormat
@@ -59,6 +60,7 @@ internal fun ReaderBody(
     pdfText: suspend (Int) -> PdfPageText?,
     /** One page of the open PDF, for the continuous view; see DocumentAnalysisViewModel.pagePreview. */
     pagePreview: suspend (Int) -> FilePreview.Pdf?,
+    pdfRegion: suspend (Int, PdfRasterRegion) -> Bitmap?,
     onOpenArchiveEntry: (Uri) -> Unit,
     onGalleryPage: (Int) -> Unit,
     galleryPage: suspend (Int, Int) -> Bitmap?,
@@ -116,6 +118,7 @@ internal fun ReaderBody(
                         onAddMarkup = onAddMarkup,
                         pdfText = pdfText,
                         pagePreview = pagePreview,
+                        pdfRegion = pdfRegion,
                         onBack = onBack,
                         onClose = onClose,
                         onFily = onFily,
@@ -149,6 +152,7 @@ private fun ReaderPreview(
     onAddMarkup: (PdfMarkup) -> Unit,
     pdfText: suspend (Int) -> PdfPageText?,
     pagePreview: suspend (Int) -> FilePreview.Pdf?,
+    pdfRegion: suspend (Int, PdfRasterRegion) -> Bitmap?,
     onBack: () -> Unit,
     onClose: () -> Unit,
     onFily: () -> Unit,
@@ -236,6 +240,7 @@ private fun ReaderPreview(
             pdfFind = pdfFind,
             pdfText = pdfText,
             loadPage = pagePreview,
+            loadRegion = pdfRegion,
             onAddMarkup = onAddMarkup,
             onPdfPageSettled = onPdfPageSettled,
             onPdfQuery = onPdfQuery,

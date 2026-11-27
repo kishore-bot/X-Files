@@ -22,7 +22,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -34,7 +33,6 @@ import com.xfiles.design.HapticOnChange
 import com.xfiles.design.glassCard
 import com.xfiles.documents.MAX_SAVED_SIGNATURES
 
-private val SignTint = Color(0xFFE0570B)
 
 /**
  * A drawn signature, placed on a page. The pad and the saved signatures are visual only: they're drawn on the page as
@@ -105,8 +103,8 @@ fun PdfSignScreen(
         } else {
             item("hero") {
                 ToolHero(
-                    icon = EzIcons.Edit,
-                    tint = SignTint,
+                    icon = EzIcons.Signature,
+                    tint = EzColors.Accent,
                     title = "Signature",
                     blurb = "Draw your signature, then place it on a page. It is drawn in, not verified.",
                     step = step,
@@ -115,7 +113,7 @@ fun PdfSignScreen(
             item("source") {
                 PdfSourceSection(
                     frame = frame,
-                    tint = SignTint,
+                    tint = EzColors.Accent,
                     firstPage = viewModel::firstPreview,
                     onChoose = { choose.launch(arrayOf("application/pdf")) },
                     onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },

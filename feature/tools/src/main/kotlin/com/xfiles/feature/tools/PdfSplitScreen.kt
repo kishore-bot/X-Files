@@ -18,7 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -30,7 +29,6 @@ import com.xfiles.documents.PdfSpanParse
 import com.xfiles.documents.PdfSplitPlan
 import com.xfiles.documents.planPdfSplit
 
-private val SplitTint = Color(0xFF0B7F86)
 private val GridHeight = 460.dp
 
 /**
@@ -110,8 +108,8 @@ fun PdfSplitScreen(
         } else {
             item("hero") {
                 ToolHero(
-                    icon = EzIcons.Lines,
-                    tint = SplitTint,
+                    icon = EzIcons.SplitPages,
+                    tint = EzColors.Accent,
                     title = "Split PDF",
                     blurb = "Cut one PDF into several. Tap pages to choose where each part ends.",
                     step = step,
@@ -120,7 +118,7 @@ fun PdfSplitScreen(
             item("source") {
                 PdfSourceSection(
                     frame = frame,
-                    tint = SplitTint,
+                    tint = EzColors.Accent,
                     firstPage = viewModel::firstPreview,
                     onChoose = { choose.launch(arrayOf("application/pdf")) },
                     onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },

@@ -51,6 +51,13 @@ object EzIcons {
     val Minus = icon("M19,13H5v-2h14v2z")
     val Plus = icon("M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z")
     val DropDown = icon("M7,10l5,5 5,-5z")
+    // Page operations share the same 24 px grid as the reader controls.
+    val MergePages = icon("M2,3h6v2H4v5H2zM16,3h6v7h-2V5h-4zM11,11H8l4,4 4,-4h-3V5h-2zM7,17h10v4H7z")
+    val SplitPages = icon("M3,3h7v2H5v14h5v2H3zM14,3h7v18h-7v-2h5V5h-5zM11,3h2v4h-2zM11,10h2v4h-2zM11,17h2v4h-2z")
+    val ExtractPages = icon("M3,3h12v2H5v14h10v2H3zM14,8l6,4-6,4v-3H8v-2h6z")
+    val InsertPages = icon("M3,3h10v2H5v14h14v-7h2v9H3zM16,2h2v4h4v2h-4v4h-2V8h-4V6h4zM8,12h5v2H8zM8,16h8v2H8z")
+    val CompressPages = icon("M3,3h7v2H5v5H3zM14,3h7v7h-2V5h-5zM3,14h2v5h5v2H3zM19,14h2v7h-7v-2h5zM7,7h4v4H7V9h2V7zM13,13h4v2h-2v2h-2z")
+    val Unlock = icon("M7,10V7a5,5 0,0 1,9.6 -2h-2.3A3,3 0,0 0,9 7v3h9a2,2 0,0 1,2 2v8a2,2 0,0 1,-2 2H6a2,2 0,0 1,-2 -2v-8a2,2 0,0 1,2 -2zM6,12v8h12v-8zM11,14h2v4h-2z")
     val SinglePage = icon("M6,2h12c1.1,0 2,0.9 2,2v16c0,1.1 -0.9,2 -2,2H6c-1.1,0 -2,-0.9 -2,-2V4c0,-1.1 0.9,-2 2,-2zM6,4v16h12V4H6z")
     val TwoPages = icon("M2,4h9v16H2V4zM4,6v12h5V6H4zM13,4h9v16h-9V4zM15,6v12h5V6h-5z")
     val Grid = icon("M3,3h8v8H3V3zM5,5v4h4V5H5zM13,3h8v8h-8V3zM15,5v4h4V5h-4zM3,13h8v8H3v-8zM5,15v4h4v-4H5zM13,13h8v8h-8v-8zM15,15v4h4v-4h-4z")

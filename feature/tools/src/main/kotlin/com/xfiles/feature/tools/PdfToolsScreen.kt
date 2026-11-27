@@ -1,11 +1,12 @@
 package com.xfiles.feature.tools
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,7 +17,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,11 +25,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -40,6 +37,7 @@ import com.xfiles.design.EzIcons
 import com.xfiles.design.EzSectionHeader
 import com.xfiles.design.EzShapes
 import com.xfiles.design.EzTopBar
+import com.xfiles.design.glass
 import com.xfiles.design.glassCard
 import com.xfiles.design.pressScale
 import com.xfiles.design.rememberHaptics
@@ -47,34 +45,34 @@ import com.xfiles.design.rememberHaptics
 /** The single-PDF tools that have their own screens. */
 enum class PdfDedicatedTool { Reorder, Split, Compress, Watermark, Sign }
 
-/** A tile of the hub: what it says, how it looks, and the tool it opens. */
-private class HubTile(val title: String, val icon: ImageVector, val color: Color, val tool: OpenTool)
+private data class HubTile(val title: String, val description: String, val icon: ImageVector, val tool: OpenTool)
 
-/** The hub, in the order people reach for the tools. Rotating or deleting pages lives in Reorder, as in EzFiles. */
-private val HubSections: List<Pair<String, List<HubTile>>> = listOf(
-    "Edit" to listOf(
-        HubTile("Merge PDFs", EzIcons.Plus, Color(0xFFE60023), OpenTool.Pdf(PdfAction.Merge)),
-        HubTile("Add pictures to PDF", EzIcons.Image, Color(0xFF8E5BD9), OpenTool.Convert(ConvertTool.AddPictures)),
-        HubTile("Split", EzIcons.Lines, Color(0xFF0B7F86), OpenTool.Dedicated(PdfDedicatedTool.Split)),
-        HubTile("Reorder, rotate, delete", EzIcons.Rotate, Color(0xFF0862D9), OpenTool.Dedicated(PdfDedicatedTool.Reorder)),
-        HubTile("Extract pages", EzIcons.Document, Color(0xFF5E6AD2), OpenTool.Pdf(PdfAction.Extract)),
-        HubTile("Insert PDF pages", EzIcons.TwoPages, Color(0xFF1F7A5C), OpenTool.Pdf(PdfAction.Insert)),
-        HubTile("Page size", EzIcons.SinglePage, Color(0xFF087F42), OpenTool.Pdf(PdfAction.Resize)),
-        HubTile("Compress", EzIcons.Archive, Color(0xFFB8740B), OpenTool.Dedicated(PdfDedicatedTool.Compress)),
-        HubTile("Watermark", EzIcons.TextT, Color(0xFF7A5AF8), OpenTool.Dedicated(PdfDedicatedTool.Watermark)),
-        HubTile("Signature", EzIcons.Edit, Color(0xFFE0570B), OpenTool.Dedicated(PdfDedicatedTool.Sign)),
-        HubTile("Add password", EzIcons.Lock, Color(0xFFD9408A), OpenTool.Pdf(PdfAction.Protect)),
-        HubTile("Remove password", EzIcons.Lock, Color(0xFF6B3A63), OpenTool.Pdf(PdfAction.Unlock)),
+private val HubSections = listOf(
+    "Organize pages" to listOf(
+        HubTile("Merge PDFs", "Join several PDFs", EzIcons.MergePages, OpenTool.Pdf(PdfAction.Merge)),
+        HubTile("Split PDF", "Save page ranges", EzIcons.SplitPages, OpenTool.Dedicated(PdfDedicatedTool.Split)),
+        HubTile("Reorder pages", "Move, rotate or delete", EzIcons.Rotate, OpenTool.Dedicated(PdfDedicatedTool.Reorder)),
+        HubTile("Extract pages", "Save selected pages", EzIcons.ExtractPages, OpenTool.Pdf(PdfAction.Extract)),
+        HubTile("Insert PDF pages", "Insert from another PDF", EzIcons.InsertPages, OpenTool.Pdf(PdfAction.Insert)),
+        HubTile("Add pictures", "Insert images into a PDF", EzIcons.Image, OpenTool.Convert(ConvertTool.AddPictures)),
+        HubTile("Page size", "Fit pages to paper", EzIcons.AspectRatio, OpenTool.Pdf(PdfAction.Resize)),
     ),
-    "Convert a PDF" to listOf(
-        HubTile("PDF to pictures", EzIcons.Image, Color(0xFF2E9E6B), OpenTool.Convert(ConvertTool.PdfToPictures)),
-        HubTile("PDF to text", EzIcons.TextT, Color(0xFF2F3BB5), OpenTool.Convert(ConvertTool.PdfToText)),
-        HubTile("PDF to ZIP", EzIcons.Archive, Color(0xFFB0124F), OpenTool.Convert(ConvertTool.PdfToZip)),
+    "Finish and protect" to listOf(
+        HubTile("Compress PDF", "Reduce file size", EzIcons.CompressPages, OpenTool.Dedicated(PdfDedicatedTool.Compress)),
+        HubTile("Watermark", "Add text over pages", EzIcons.TextT, OpenTool.Dedicated(PdfDedicatedTool.Watermark)),
+        HubTile("Sign PDF", "Draw a signature", EzIcons.Signature, OpenTool.Dedicated(PdfDedicatedTool.Sign)),
+        HubTile("Add password", "Lock a PDF", EzIcons.Lock, OpenTool.Pdf(PdfAction.Protect)),
+        HubTile("Remove password", "Save an unlocked copy", EzIcons.Unlock, OpenTool.Pdf(PdfAction.Unlock)),
     ),
-    "Make a PDF" to listOf(
-        HubTile("Pictures to PDF", EzIcons.Image, Color(0xFF7A4A2E), OpenTool.Convert(ConvertTool.PicturesToPdf)),
-        HubTile("Text to PDF", EzIcons.Lines, Color(0xFF6832C1), OpenTool.Convert(ConvertTool.TextToPdf)),
-        HubTile("Scan to PDF", EzIcons.Camera, Color(0xFF373C47), OpenTool.Convert(ConvertTool.ScanToPdf)),
+    "Export from PDF" to listOf(
+        HubTile("PDF to pictures", "Save pages as images", EzIcons.Image, OpenTool.Convert(ConvertTool.PdfToPictures)),
+        HubTile("PDF to text", "Save plain text", EzIcons.Lines, OpenTool.Convert(ConvertTool.PdfToText)),
+        HubTile("PDF to ZIP", "Export resources", EzIcons.Archive, OpenTool.Convert(ConvertTool.PdfToZip)),
+    ),
+    "Create a PDF" to listOf(
+        HubTile("Pictures to PDF", "Combine selected images", EzIcons.Image, OpenTool.Convert(ConvertTool.PicturesToPdf)),
+        HubTile("Text to PDF", "Write or paste text", EzIcons.NoteAdd, OpenTool.Convert(ConvertTool.TextToPdf)),
+        HubTile("Scan to PDF", "Capture with the camera", EzIcons.Camera, OpenTool.Convert(ConvertTool.ScanToPdf)),
     ),
 )
 
@@ -85,9 +83,9 @@ private fun ToolsHub(onBack: () -> Unit, onOpen: (OpenTool) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         EzTopBar("PDF tools", onBack, backLabel = "Back to library", gutter = 0.dp)
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 96.dp),
+            columns = GridCells.Adaptive(minSize = 225.dp),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 16.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -109,26 +107,30 @@ private fun ToolsHub(onBack: () -> Unit, onOpen: (OpenTool) -> Unit) {
 @Composable
 private fun ToolCell(tile: HubTile, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
-    Column(
-        // Same width and at least three lines of label, so a row of tools lines up on a phone.
+    Row(
         Modifier
             .fillMaxWidth()
-            .pressScale(interaction, 0.97f)
-            .glassCard(EzShapes.Card, 0.5f)
+            .heightIn(min = 76.dp)
+            .pressScale(interaction, 0.98f)
+            .glassCard(EzShapes.Card, 0.55f)
             .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
-            .padding(vertical = 12.dp, horizontal = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(48.dp).clip(CircleShape).background(tile.color), contentAlignment = Alignment.Center) {
-            Icon(tile.icon, null, tint = Color.White, modifier = Modifier.size(24.dp))
+        Box(Modifier.size(44.dp).glass(EzShapes.Small, 0.85f), contentAlignment = Alignment.Center) {
+            Icon(tile.icon, null, tint = EzColors.Accent, modifier = Modifier.size(23.dp))
         }
-        Text(tile.title, style = MaterialTheme.typography.labelMedium, color = EzColors.Text, textAlign = TextAlign.Center, minLines = 3)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(tile.title, style = MaterialTheme.typography.titleSmall, color = EzColors.Text)
+            Text(tile.description, style = MaterialTheme.typography.bodySmall, color = EzColors.TextSecondary)
+        }
+        Icon(EzIcons.ChevronRight, null, tint = EzColors.TextSecondary, modifier = Modifier.size(18.dp))
     }
 }
 
-/** PDF tools and the create tools, as in EzFiles. The library's Tools sheet opens either the PDF tools grid or one
- * tool directly; a tool picked in the grid goes back to the grid, a tool opened directly goes back to the library.
+/** PDF tools and the create tools, as in EzFiles. The library's Tools sheet opens either the PDF tools hub or one
+ * tool directly; a tool picked in the hub goes back to the hub, a tool opened directly goes back to the library.
  * Fily and the widget open tools through [PdfToolsViewModel.open] too.
  */
 @Composable

@@ -255,6 +255,41 @@ class AndroidPdfDocument @Inject constructor(
         }
     }
 
+    /** Renders only the visible portion of a zoomed page, using the same renderer and password path. */
+    suspend fun renderRegion(uri: Uri, index: Int, password: String?, region: PdfRasterRegion): Bitmap {
+        require(region.left in 0 until region.right && region.right <= region.pageWidth &&
+            region.top in 0 until region.bottom && region.bottom <= region.pageHeight)
+        var owned: Bitmap? = null
+        try {
+            return PerformanceTrace.onLane("XfilesPdfRegion", "XfilesPdfRenderQueue", io) {
+                currentCoroutineContext().ensureActive()
+                openRenderer(uri, password).use { pdf ->
+                    pdf.openPage(index).use { page ->
+                        val pixels = region.width.toLong() * region.height
+                        val scale = minOf(1.0, 4096.0 / maxOf(region.width, region.height),
+                            kotlin.math.sqrt(4_000_000.0 / pixels))
+                        val width = (region.width * scale).toInt().coerceAtLeast(1)
+                        val height = (region.height * scale).toInt().coerceAtLeast(1)
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        owned = bitmap
+                        val sx = width.toFloat() / region.width
+                        val sy = height.toFloat() / region.height
+                        val transform = android.graphics.Matrix().apply {
+                            setScale(sx * region.pageWidth / page.width, sy * region.pageHeight / page.height)
+                            postTranslate(-region.left * sx, -region.top * sy)
+                        }
+                        bitmap.eraseColor(Color.WHITE)
+                        page.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        bitmap
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            owned?.recycle()
+            throw error
+        }
+    }
+
     private fun renderBitmap(page: PdfRenderer.Page, scale: Float): Bitmap {
         val bitmap = Bitmap.createBitmap(
             (page.width * scale).toInt().coerceAtLeast(1),

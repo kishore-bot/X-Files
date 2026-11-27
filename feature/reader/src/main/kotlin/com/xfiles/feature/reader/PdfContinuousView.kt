@@ -47,16 +47,22 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PdfRasterRegion
 import com.xfiles.core.documents.PdfMatchBox
 import com.xfiles.documents.PdfBox
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val PAPER_ASPECT = 1f / 1.414f
@@ -76,6 +82,7 @@ internal fun PdfContinuousView(
     twoUp: Boolean,
     zoom: Int,
     loadPage: suspend (Int) -> FilePreview.Pdf?,
+    loadRegion: suspend (Int, PdfRasterRegion) -> Bitmap?,
     highlights: (Int) -> List<PdfMatchBox>,
     marks: (Int) -> List<PdfBox>,
     textSource: (Int) -> PdfTextSource,
@@ -177,8 +184,7 @@ internal fun PdfContinuousView(
     SaveViewerProgress("pdf-position") { settledPosition }
 
     BoxWithConstraints(modifier.fillMaxSize().onSizeChanged { viewportWidth = it.width }) {
-        val contentWidth: Dp = maxWidth * (zoom / 100f)
-        val rowWidth = if (zoom > 100) contentWidth else maxWidth
+        val rowWidth = maxWidth * (zoom / 100f)
         val slotWidth = (rowWidth - 8.dp * (perRow - 1)) / perRow
         Box(
             Modifier
@@ -205,6 +211,7 @@ internal fun PdfContinuousView(
                     }
                 }
                 .graphicsLayerScale(pinch),
+            contentAlignment = Alignment.TopCenter,
         ) {
             LazyColumn(
                 state = listState,
@@ -220,6 +227,8 @@ internal fun PdfContinuousView(
                                 index = index,
                                 width = slotWidth,
                                 loadPage = loadPage,
+                                loadRegion = loadRegion,
+                                settlingZoom = pinch != 1f,
                                 highlights = highlights(index),
                                 marks = marks(index),
                                 source = textSource(index),
@@ -245,7 +254,9 @@ private fun Modifier.graphicsLayerScale(scale: Float): Modifier =
 private fun PdfPageSlot(
     index: Int,
     width: Dp,
+    settlingZoom: Boolean,
     loadPage: suspend (Int) -> FilePreview.Pdf?,
+    loadRegion: suspend (Int, PdfRasterRegion) -> Bitmap?,
     highlights: List<PdfMatchBox>,
     marks: List<PdfBox>,
     source: PdfTextSource,
@@ -267,6 +278,18 @@ private fun PdfPageSlot(
     val paper = RoundedCornerShape(4.dp)
     val image = remember(bitmap) { bitmap?.asImageBitmap() }
     val palette = LocalReaderColors.current
+    var region by remember(index) { mutableStateOf<PdfRasterRegion?>(null) }
+    val detail by produceState<PdfPageDetail?>(null, index, region, settlingZoom, bitmap) {
+        if (settlingZoom) return@produceState
+        val target = region
+        if (target == null || bitmap == null || target.pageWidth <= bitmap.width && target.pageHeight <= bitmap.height) {
+            value = null
+            return@produceState
+        }
+        // Keep the previous detail during a quick scroll or zoom, and coalesce new viewport requests.
+        delay(90)
+        value = loadRegion(index, target)?.let { PdfPageDetail(target, it.asImageBitmap()) }
+    }
     Box(
         Modifier
             .width(width)
@@ -275,6 +298,7 @@ private fun PdfPageSlot(
             .clip(paper)
             .background(palette.page)
             .onSizeChanged { viewport = it }
+            .onGloballyPositioned { if (!settlingZoom) region = it.visibleRasterRegion() }
             .then(
                 if (image == null) Modifier else Modifier
                     .pointerInput(index, bitmap) {
@@ -323,6 +347,16 @@ private fun PdfPageSlot(
             )
             val selectionColor = palette.selection.copy(alpha = 0.36f)
             Canvas(Modifier.fillMaxSize()) {
+                detail?.let { (target, sharp) ->
+                    if (target.pageWidth == size.width.roundToInt() && target.pageHeight == size.height.roundToInt()) {
+                        drawImage(
+                            sharp,
+                            dstOffset = IntOffset(target.left, target.top),
+                            dstSize = IntSize(target.width, target.height),
+                            colorFilter = colorFilter,
+                        )
+                    }
+                }
                 for (box in marks) {
                     if (box.right <= box.left || box.bottom <= box.top) continue
                     drawRect(
@@ -356,4 +390,21 @@ private fun PdfPageSlot(
             )
         }
     }
+}
+
+private data class PdfPageDetail(val region: PdfRasterRegion, val image: androidx.compose.ui.graphics.ImageBitmap)
+
+/** Round the visible rectangle out to a 256 px grid so small pans reuse the current detail. */
+private fun LayoutCoordinates.visibleRasterRegion(): PdfRasterRegion? {
+    val visible = boundsInWindow()
+    if (visible.isEmpty || size.width == 0 || size.height == 0) return null
+    val topLeft = windowToLocal(visible.topLeft)
+    val bottomRight = windowToLocal(visible.bottomRight)
+    if (!topLeft.x.isFinite() || !topLeft.y.isFinite() || !bottomRight.x.isFinite() || !bottomRight.y.isFinite()) return null
+    val left = (kotlin.math.floor(topLeft.x / 256).toInt() * 256).coerceIn(0, size.width)
+    val top = (kotlin.math.floor(topLeft.y / 256).toInt() * 256).coerceIn(0, size.height)
+    val right = (kotlin.math.ceil(bottomRight.x / 256).toInt() * 256).coerceIn(0, size.width)
+    val bottom = (kotlin.math.ceil(bottomRight.y / 256).toInt() * 256).coerceIn(0, size.height)
+    if (right <= left || bottom <= top) return null
+    return PdfRasterRegion(size.width, size.height, left, top, right, bottom)
 }

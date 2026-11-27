@@ -8,6 +8,7 @@ import com.xfiles.core.documents.DocumentRepository
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfPageText
+import com.xfiles.core.documents.PdfRasterRegion
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +17,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -79,6 +81,18 @@ class PdfPagesUseCase @Inject constructor(
                 render.result.cancel()
             }
         }
+    }
+
+    suspend fun region(file: FileEntry, index: Int, password: String?, region: PdfRasterRegion): Bitmap? {
+        if (owner == null || uri != file.uri) return null
+        val session = generation
+        val raster = documents.pageRegion(file, index, password, region)
+        if (generation != session || !currentCoroutineContext().isActive) {
+            raster.recycle()
+            currentCoroutineContext().ensureActive()
+            return null
+        }
+        return raster
     }
 
     /** Warms the neighbours of what is shown, so the next turn is already rendered. Failures are silent. */

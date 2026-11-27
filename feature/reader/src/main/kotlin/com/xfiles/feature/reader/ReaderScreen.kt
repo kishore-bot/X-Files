@@ -38,6 +38,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
+import com.xfiles.core.documents.PdfRasterRegion
 import com.xfiles.core.documents.PdfPageText
 import com.xfiles.design.EzIcons
 import com.xfiles.design.LocalEzDarkTheme
@@ -109,6 +110,7 @@ fun ReaderScreen(
     pdfText: suspend (Int) -> PdfPageText? = { null },
     /** One page of the open PDF for the continuous view and its thumbnails; see DocumentAnalysisViewModel.pagePreview. */
     pagePreview: suspend (Int) -> FilePreview.Pdf? = { null },
+    pdfRegion: suspend (Int, PdfRasterRegion) -> Bitmap? = { _, _ -> null },
     /** Registers the HTML or spreadsheet viewer for the assistant's scroll commands; see DocumentAnalysisViewModel.attachViewerScroll. */
     onAttachScroll: (ViewerScroll) -> () -> Unit = { {} },
     onAttachPdfPage: ((String) -> Int?) -> () -> Unit = { {} },
@@ -369,6 +371,7 @@ fun ReaderScreen(
                     pdfThumbnail = pdfThumbnail,
                     pdfText = pdfText,
                     pagePreview = pagePreview,
+                    pdfRegion = pdfRegion,
                     onOpenArchiveEntry = onOpenArchiveEntry,
                     onGalleryPage = onGalleryPage,
                     galleryPage = galleryPage,

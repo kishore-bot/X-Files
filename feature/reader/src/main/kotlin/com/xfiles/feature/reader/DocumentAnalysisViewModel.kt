@@ -14,6 +14,7 @@ import com.xfiles.core.documents.FileBookmark
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfPageText
+import com.xfiles.core.documents.PdfRasterRegion
 import com.xfiles.documents.PdfMarkup
 import com.xfiles.feature.reader.domain.BookmarkPlaceUseCase
 import com.xfiles.feature.reader.domain.DocumentSummaryUseCase
@@ -247,6 +248,19 @@ class DocumentAnalysisViewModel @Inject constructor(
             throw cancelled
         } catch (error: Exception) {
             Log.w("XfilesReader", "PDF page could not be rendered", error)
+            null
+        }
+    }
+
+    suspend fun pdfRegion(index: Int, region: PdfRasterRegion): Bitmap? {
+        val ready = state.value as? ReaderState.Ready ?: return null
+        if (ready.preview !is FilePreview.Pdf) return null
+        return try {
+            pdfPages.region(ready.file, index, pdfPassword, region)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("XfilesReader", "PDF detail render failed", error)
             null
         }
     }

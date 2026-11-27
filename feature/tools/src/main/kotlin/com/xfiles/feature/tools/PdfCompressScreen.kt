@@ -33,7 +33,6 @@ import com.xfiles.design.HapticOnChange
 import com.xfiles.documents.PdfCompressQuality
 import com.xfiles.design.EzTextButton
 
-private val CompressTint = Color(0xFFB8740B)
 
 /**
  * Compression at a chosen quality, with the source's protection kept or replaced on the result. Each quality is a card
@@ -105,8 +104,8 @@ fun PdfCompressScreen(
         } else {
             item("hero") {
                 ToolHero(
-                    icon = EzIcons.Archive,
-                    tint = CompressTint,
+                    icon = EzIcons.CompressPages,
+                    tint = EzColors.Accent,
                     title = "Compress",
                     blurb = "Make a PDF smaller on this phone. Pick how much image detail to keep.",
                     step = step,
@@ -115,7 +114,7 @@ fun PdfCompressScreen(
             item("source") {
                 PdfSourceSection(
                     frame = frame,
-                    tint = CompressTint,
+                    tint = EzColors.Accent,
                     firstPage = viewModel::firstPreview,
                     onChoose = { choose.launch(arrayOf("application/pdf")) },
                     onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },

@@ -21,7 +21,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -35,7 +34,6 @@ import com.xfiles.documents.PdfSpanParse
 import com.xfiles.documents.PdfWatermarkSpec
 import com.xfiles.documents.parsePdfSpans
 
-private val WatermarkTint = Color(0xFF7A5AF8)
 private val WatermarkColours = listOf(0x808080 to "Grey", 0xC62828 to "Red", 0x1565C0 to "Blue")
 
 /**
@@ -111,7 +109,7 @@ fun PdfWatermarkScreen(
             item("hero") {
                 ToolHero(
                     icon = EzIcons.TextT,
-                    tint = WatermarkTint,
+                    tint = EzColors.Accent,
                     title = "Watermark",
                     blurb = "Stamp text over pages. The preview shows where it lands.",
                     step = step,
@@ -120,7 +118,7 @@ fun PdfWatermarkScreen(
             item("source") {
                 PdfSourceSection(
                     frame = frame,
-                    tint = WatermarkTint,
+                    tint = EzColors.Accent,
                     firstPage = viewModel::firstPreview,
                     onChoose = { choose.launch(arrayOf("application/pdf")) },
                     onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },

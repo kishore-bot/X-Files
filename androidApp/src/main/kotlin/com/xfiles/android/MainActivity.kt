@@ -459,6 +459,7 @@ class MainActivity : ComponentActivity() {
             pdfThumbnail = analysis::pdfThumbnail,
             pdfText = analysis::pdfText,
             pagePreview = analysis::pagePreview,
+            pdfRegion = analysis::pdfRegion,
             gallery = gallery,
             onGalleryPage = analysis::selectGalleryPage,
             galleryPage = analysis::galleryPage,

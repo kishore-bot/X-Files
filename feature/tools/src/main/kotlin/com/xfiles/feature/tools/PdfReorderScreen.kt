@@ -15,7 +15,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -24,7 +23,6 @@ import com.xfiles.design.EzIcons
 import com.xfiles.design.EzTextButton
 import com.xfiles.design.HapticOnChange
 
-private val ReorderTint = Color(0xFF0862D9)
 private val GridHeight = 520.dp
 
 /**
@@ -98,7 +96,7 @@ fun PdfReorderScreen(
             item("hero") {
                 ToolHero(
                     icon = EzIcons.Rotate,
-                    tint = ReorderTint,
+                    tint = EzColors.Accent,
                     title = "Reorder pages",
                     blurb = "Drag pages into order, turn them or remove them. Nothing changes until you apply.",
                     step = step,
@@ -107,7 +105,7 @@ fun PdfReorderScreen(
             item("source") {
                 PdfSourceSection(
                     frame = frame,
-                    tint = ReorderTint,
+                    tint = EzColors.Accent,
                     firstPage = viewModel::firstPreview,
                     onChoose = { choose.launch(arrayOf("application/pdf")) },
                     onUnlock = { password -> pickedUri?.let { viewModel.open(Uri.parse(it), password) } },
