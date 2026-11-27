@@ -10,7 +10,7 @@
 PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that lives on your device.
 
 <p>
-  <a href="https://github.com/kishore-bot/X-Files/releases"><img alt="Release: beta" src="https://img.shields.io/badge/release-1.0.0--beta-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
+  <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.05"><img alt="Release: 1.0.0-beta.05" src="https://img.shields.io/badge/release-1.0.0--beta.05-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-6366F1?style=for-the-badge" /></a>
   <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
 </p>
@@ -41,7 +41,11 @@ PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that
 
 ## ⬇️ Get it
 
-Grab the latest signed APK from **[Releases](https://github.com/kishore-bot/X-Files/releases)**. Each release has an `Xfiles-<version>.apk` and its `.sha256` checksum.
+**Xfiles 1.0.0-beta.05** is available as a signed Android APK.
+
+- [Download the APK](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.05/Xfiles-1.0.0-beta.05.apk)
+- [SHA-256 checksum](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.05/Xfiles-1.0.0-beta.05.apk.sha256)
+- [Release notes](https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.05) · [All releases](https://github.com/kishore-bot/X-Files/releases)
 
 > 🧪 Xfiles is in **beta** (`1.0.0-beta.xx`). Releases are built, tested and signed automatically by GitHub Actions.
 
@@ -90,17 +94,28 @@ Every tool follows the same visual flow: **Pick → Adjust → Save**, with live
 
 <img align="right" src="docs/assets/xfiles-logo.svg" width="96" alt="" />
 
-Fily is a voice assistant running a **350M-parameter model locally** through llama.cpp. It answers questions about your files, with page citations, and drives the app through 45 tools: open documents, run PDF tools, scroll and turn pages, tidy storage and more. It speaks its answers back on-device. Voice input requires an on-device recognizer on Android 12 or later. Spoken replies require an installed offline TTS voice.
+Fily is a voice assistant running a **350M-parameter model locally** through llama.cpp. It answers questions about your files, with page citations, and uses local tools to open documents, prepare PDF workflows for review, move between pages and spreadsheet tabs, and inspect storage. It speaks its answers back on-device. Voice input requires an on-device recognizer on Android 12 or later. Spoken replies require an installed offline TTS voice.
 
 | 🧠 Technique | 🎯 Why | ⚙️ How |
 |---|---|---|
-| **RAG** | A long PDF won't fit a 4K-token context | Passages of about 250 tokens, indexed with **BM25** in Rust, de-duplicated with MMR and labelled `[page N]` |
+| **Offline hybrid RAG** | Document wording can differ from a question | Rust combines BM25 and compact English business-concept vectors with reciprocal rank fusion. Queries containing digits use BM25 to preserve exact terms. Passages are de-duplicated with MMR and carry PDF page labels. |
+| **Live app state** | Reader position and action results can change between tool calls | Android supplies the active screen, PDF page or spreadsheet tab and cell, selected file aliases, available reader operations, and the last reported tool outcome. Direct PDF save questions use the current tool screen's save state. |
 | **KV-cache reuse** | Re-reading the long system prompt costs seconds | The context stays alive, and only the new suffix is decoded |
 | **GPU crash guard** | Some GPU drivers crash while loading models | A persisted state machine falls back to the CPU |
 | **Quick commands** | Instant screen control, no model round-trip | "Scroll down the page" or "next slide" act at once |
 | **Prompt contract test** | A retrained model must see the prompt it was trained on | The app's prompt is tested against training fixtures |
 
-The model downloads once, on request, from this repository's `models-v1` release. Training scripts are in [`training/`](training/README.md).
+The beta.05 Linux runner compared retrieval modes on five labelled queries against the same five-page fixture.
+
+| Retrieval | Correct first page | Mean time per query |
+|---|---:|---:|
+| BM25 | 2/5 | 1.5 µs |
+| Concept vectors | 4/5 | 3.4 µs |
+| Hybrid | 5/5 | 3.7 µs |
+
+The shared index was estimated at 2,546 bytes. These figures cover passage retrieval on that fixture. Phone latency and generated citation accuracy require separate measurement. [Beta.05 build and test results](https://github.com/kishore-bot/X-Files/actions/runs/45913509970)
+
+The model downloads once on request from the `models-v1` release. Beta.05 uses the existing 350M weights. [Training and export pipeline](training/README.md)
 
 <details>
 <summary>🔌 <b>MCP server: the engine as AI tools</b></summary>
