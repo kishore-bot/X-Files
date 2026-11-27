@@ -11,6 +11,8 @@ struct LibraryScreen: View {
     @State private var query = ""
     @State private var importing = false
     @State private var panel: Panel?
+    @State private var destinationAfterDismissal: FilyDestination?
+    @State private var toolPreset: DocumentTools.Operation?
     @State private var deleteCandidate: DocumentRecord?
 
     private enum Panel: String, Identifiable {
@@ -69,7 +71,7 @@ struct LibraryScreen: View {
                         .disabled(model.importCount > 0)
                     Menu {
                         Button("Search contents", systemImage: "magnifyingglass") { panel = .contents }
-                        Button("Document tools", systemImage: "wrench.and.screwdriver") { panel = .tools }
+                        Button("Document tools", systemImage: "wrench.and.screwdriver") { toolPreset = nil; panel = .tools }
                         Button("Scan document", systemImage: "doc.viewfinder") { panel = .scanner }
                         Button("Find duplicates", systemImage: "doc.on.doc") { panel = .duplicates }
                         Button("Ask Fily", systemImage: "sparkles") { panel = .fily }
@@ -88,14 +90,16 @@ struct LibraryScreen: View {
             .navigationDestination(for: ReadDestination.self) { destination in
                 ReaderScreen(id: destination.id, library: model, startPage: destination.page)
             }
-            .sheet(item: $panel) { selected in
+            .sheet(item: $panel, onDismiss: handleFilyDismissal) { selected in
                 switch selected {
                 case .settings: SettingsScreen(appearance: $appearance)
                 case .contents: ContentSearch(library: model) { route.append($0) }
-                case .tools: DocumentTools(library: model, initial: nil) { route.append($0) }
+                case .tools: DocumentTools(library: model, initial: nil, preset: toolPreset) { route.append($0) }
                 case .scanner: DocumentScanner(library: model) { route.append($0) }
                 case .duplicates: DuplicateFiles(library: model)
-                case .fily: FilyScreen(library: model, selected: nil, openFile: { route.append($0) }, goToPage: nil)
+                case .fily:
+                    FilyScreen(library: model, selected: nil, openFile: { route.append($0) }, goToPage: nil,
+                               openDestination: { destinationAfterDismissal = $0 })
                 }
             }
             .task { await model.reload() }
@@ -199,4 +203,16 @@ struct LibraryScreen: View {
             if urls.count == 1, let id = ids.first { route.append(ReadDestination(id: id)) }
         }
     }
+
+    private func handleFilyDismissal() {
+        guard let destination = destinationAfterDismissal else { return }
+        destinationAfterDismissal = nil
+        switch destination {
+        case .tools(let operation): toolPreset = operation; panel = .tools
+        case .scanner: panel = .scanner
+        case .duplicates: panel = .duplicates
+        case .contents: panel = .contents
+        }
+    }
+
 }

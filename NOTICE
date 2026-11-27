@@ -13,3 +13,9 @@ It includes or downloads the following third-party components, each under its ow
   the app downloads it on request from a release asset. The model is governed by Liquid AI's model
   licence (https://huggingface.co/LiquidAI/LFM2.5-350M), not by the Apache License.
 - Other libraries are fetched by Gradle and Cargo under their own licences (mostly Apache-2.0 and MIT).
+
+iOS compatibility playback uses MPVKit v0.1.0
+(https://github.com/zinoio/MPVKit/releases/tag/v0.1.0), pinned to commit
+407721c38c99e977d79ba6a4969392302f55d797. MPVKit and its bundled playback
+libraries carry their upstream licenses. See the release and source
+repository for their license texts, build scripts, and binary notices.

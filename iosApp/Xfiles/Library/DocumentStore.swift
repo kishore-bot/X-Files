@@ -99,6 +99,15 @@ actor DocumentStore {
         return record
     }
 
+    func setBookmark(_ id: UUID, saved: Bool) throws -> DocumentRecord {
+        var record = try read(id)
+        if record.bookmarked != saved {
+            record.bookmarked = saved
+            try write(record, directory: directory(id))
+        }
+        return record
+    }
+
     func savePosition(_ position: DocumentPosition, id: UUID, revision: UInt64) throws {
         guard revision > lastPositionWrite[id, default: 0] else { return }
         var record = try read(id)
@@ -107,6 +116,36 @@ actor DocumentStore {
             try write(record, directory: directory(id))
         }
         lastPositionWrite[id] = revision
+    }
+
+    func notebook(_ id: UUID) throws -> [NotebookEntry] {
+        _ = try read(id)
+        let url = directory(id).appendingPathComponent("notebook.json")
+        guard files.fileExists(atPath: url.path) else { return [] }
+        return try JSONDecoder().decode([NotebookEntry].self, from: Data(contentsOf: url))
+    }
+
+    func changeNotebook(_ id: UUID, _ change: NotebookChange) throws -> [NotebookEntry] {
+        var entries = try notebook(id)
+        switch change {
+        case .toggle(let entry):
+            if let index = entries.firstIndex(where: { $0.kind == entry.kind && $0.anchor == entry.anchor }) {
+                entries.remove(at: index)
+            } else {
+                entries.append(entry)
+            }
+        case .note(let entry):
+            if let index = entries.firstIndex(where: { $0.kind == .note && $0.anchor == entry.anchor }) {
+                entries[index].note = entry.note
+            } else {
+                entries.append(entry)
+            }
+        case .remove(let entryID):
+            entries.removeAll { $0.id == entryID }
+        }
+        entries.sort { $0.anchor < $1.anchor }
+        try JSONEncoder().encode(entries).write(to: directory(id).appendingPathComponent("notebook.json"), options: .atomic)
+        return entries
     }
 
     func remove(_ id: UUID) throws {

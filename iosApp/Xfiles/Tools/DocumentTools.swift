@@ -3,6 +3,7 @@ import SwiftUI
 struct DocumentTools: View {
     let library: LibraryModel
     let initial: ReaderFile?
+    var preset: Operation? = nil
     let onOutput: (ReadDestination) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var operation: Operation?
@@ -107,6 +108,9 @@ struct DocumentTools: View {
             .navigationTitle("Document tools")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .onAppear {
+                if operation == nil, let preset { operation = preset }
+            }
             .onChange(of: operation) { _, next in
                 selected = initial.flatMap { next?.accepts($0.record) == true ? [$0.record.id] : nil } ?? []
                 password = ""

@@ -58,6 +58,10 @@ final class LibraryModel {
         catch { message = error.localizedDescription }
     }
 
+    func setBookmark(_ id: UUID, saved: Bool) async throws {
+        update(try await store.setBookmark(id, saved: saved))
+    }
+
     func remove(_ id: UUID) async {
         do {
             try await store.remove(id)

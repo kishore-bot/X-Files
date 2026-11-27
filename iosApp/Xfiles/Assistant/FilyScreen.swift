@@ -4,11 +4,19 @@ import SwiftUI
 import FoundationModels
 #endif
 
+enum FilyDestination {
+    case tools(DocumentTools.Operation?)
+    case scanner, duplicates, contents
+}
+
 struct FilyScreen: View {
     let library: LibraryModel
     let selected: ReaderFile?
     let openFile: (ReadDestination) -> Void
     let goToPage: ((Int) -> Void)?
+    var control: ReaderControl? = nil
+    var presentReaderAction: ((ReaderCommand) -> Void)? = nil
+    var openDestination: ((FilyDestination) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var question = ""
     @State private var answer: String?
@@ -48,7 +56,9 @@ struct FilyScreen: View {
                 } header: {
                     Text(selected.map { "Current file · \($0.record.name)" } ?? "Local library")
                 } footer: {
-                    Text("Try “find invoice”, “go to page 4”, or a question about the text in your files.")
+                    let examples = control?.examples ?? []
+                    Text(examples.isEmpty ? "Try “find invoice”, “recent files”, or “scan a document”."
+                         : examples.joined(separator: " · "))
                 }
                 if let answer {
                     Section("Answer") {
@@ -93,17 +103,21 @@ struct FilyScreen: View {
 
     private func ask() {
         let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = text.lowercased()
+        let normalized = text.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " .!?"))
         answer = nil
         sources = []
         speaker.stopSpeaking(at: .immediate)
         speech.stop()
-        if normalized.hasPrefix("go to page "), let page = Int(normalized.dropFirst("go to page ".count)), page > 0,
-           selected?.record.viewerKind == .pdf, let goToPage {
-            goToPage(page - 1)
+        if let command = ReaderCommand.parse(text) {
+            handleReaderCommand(command)
+            return
+        }
+        if let destination = destination(for: normalized), let openDestination {
+            openDestination(destination)
             dismiss()
             return
         }
+        if handleLibraryCommand(normalized, original: text) { return }
         if normalized.hasPrefix("open ") {
             let query = String(text.dropFirst("open ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
             let matches = library.documents.filter { !query.isEmpty && $0.name.localizedStandardContains(query) }
@@ -148,6 +162,103 @@ struct FilyScreen: View {
                 answer = sources.isEmpty ? error.localizedDescription
                     : "The on-device model couldn’t answer. You can still open the matching passages below."
             }
+        }
+    }
+
+    private func handleReaderCommand(_ command: ReaderCommand) {
+        guard let control, control.accepts(command) else {
+            answer = "This action isn’t available for the current file."
+            return
+        }
+        switch command {
+        case .contents, .notebook, .audio, .subtitles:
+            guard let presentReaderAction else { return }
+            presentReaderAction(command)
+            dismiss()
+        default:
+            switch control.send(command) {
+            case .done: dismiss()
+            case .unavailable(let message): answer = message
+            }
+        }
+    }
+
+    private func destination(for text: String) -> FilyDestination? {
+        switch text {
+        case "open tools", "pdf tools", "open pdf tools", "document tools": .tools(nil)
+        case "scan", "scan a document", "open scanner", "scan document": .scanner
+        case "find duplicates", "tidy up", "open tidy up": .duplicates
+        case "search contents", "open content search": .contents
+        case "text to pdf", "convert text to pdf": .tools(.textPDF)
+        case "images to pdf", "convert images to pdf": .tools(.imagesPDF)
+        case "merge pdfs", "merge pdf documents": .tools(.merge)
+        case "extract pages", "extract pdf pages", "reorder pages": .tools(.pages)
+        case "rotate pages", "rotate pdf": .tools(.rotate)
+        case "compress pdf", "compress this pdf": .tools(.compress)
+        case "watermark pdf", "add watermark": .tools(.watermark)
+        case "protect pdf", "password protect pdf": .tools(.protect)
+        case "remove pdf password", "unlock pdf": .tools(.unlock)
+        case "pdf to text", "extract pdf text": .tools(.pdfText)
+        case "office find and replace", "find and replace": .tools(.officeReplace)
+        case "edit spreadsheet", "edit xlsx": .tools(.cellEdit)
+        case "reorder slides": .tools(.slides)
+        case "create zip", "compress to zip": .tools(.zip)
+        default: nil
+        }
+    }
+
+    private func handleLibraryCommand(_ text: String, original: String) -> Bool {
+        switch text {
+        case "recent files", "list recent files", "show recent files", "open most recent file", "open latest imported file":
+            let importOrder = text == "open latest imported file"
+            let records = library.documents
+                .filter { importOrder || $0.openedAt != nil }
+                .sorted { left, right in
+                    let leftDate = importOrder ? left.importedAt : left.openedAt ?? .distantPast
+                    let rightDate = importOrder ? right.importedAt : right.openedAt ?? .distantPast
+                    return leftDate > rightDate
+                }
+            if text.hasPrefix("open "), let first = records.first {
+                openFile(ReadDestination(id: first.id))
+                dismiss()
+            } else {
+                showFiles(records, description: "Recent files", empty: "There are no recent files.")
+            }
+            return true
+        case "file details", "document info", "what file is open", "show file details":
+            guard let record = selected?.record else { answer = "Open a file first."; return true }
+            let size = ByteCountFormatter.string(fromByteCount: record.byteCount, countStyle: .file)
+            answer = "\(record.name)\n\(record.viewerKind.title) · \(size)"
+            return true
+        case "bookmark this", "bookmark this file", "remove bookmark", "remove this bookmark":
+            guard let selected else { answer = "Open a file first."; return true }
+            let saved = text.hasPrefix("bookmark")
+            job = Task {
+                defer { job = nil }
+                do {
+                    try await library.setBookmark(selected.record.id, saved: saved)
+                    answer = saved ? "Bookmark saved." : "Bookmark removed."
+                } catch {
+                    answer = error.localizedDescription
+                }
+            }
+            return true
+        default:
+            let prefixes = ["find file ", "find filename ", "search file names for "]
+            guard let prefix = prefixes.first(where: { text.hasPrefix($0) }) else { return false }
+            let terms = String(original.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !terms.isEmpty else { return false }
+            let records = library.documents.filter { $0.name.localizedStandardContains(terms) }
+            showFiles(records, description: "Matching file names", empty: "No matching file names.")
+            return true
+        }
+    }
+
+    private func showFiles(_ records: [DocumentRecord], description: String, empty: String) {
+        answer = records.isEmpty ? empty : description
+        sources = records.prefix(12).enumerated().map { index, record in
+            let hit = FileSearchHit(id: record.id, snippet: record.viewerKind.title, page: nil)
+            return Citation(id: index + 1, hit: hit, name: record.name)
         }
     }
 

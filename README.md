@@ -96,9 +96,9 @@ The SwiftUI app targets **iOS and iPadOS 17 or later** and uses Swift 6 language
 
 - Import files from Files and keep local copies for offline access.
 - Search filenames and document contents. Open PDF hits at the cited page.
-- Read PDFs, EPUB, Office documents, spreadsheets, and slides. Browse ZIPs, preview images, and play media supported by iOS.
+- Read PDFs, paged EPUBs with a notebook, Office documents, spreadsheets, and slides. Browse ZIPs, preview images, and use AVKit or the FFmpeg-backed compatibility player for local media.
 - Create edited copies, convert text or images to PDF, scan with on-device OCR, and find exact duplicates.
-- Ask Fily about local files and open its sources. Generated answers use Apple Foundation Models where available.
+- Ask Fily about local files, open its sources, or control the current reader. Generated answers use Apple Foundation Models where available.
 
 The [iOS architecture and delivery plan](docs/IOS_ARCHITECTURE.md) covers resume state, the shared Rust engine, platform limits, and device validation.
 

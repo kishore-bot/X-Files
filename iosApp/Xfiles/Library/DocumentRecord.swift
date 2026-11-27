@@ -21,6 +21,7 @@ enum DocumentKind: String, CaseIterable, Codable, Sendable {
         case "xls", "xlsx", "ods", "csv", "tsv": return .sheet
         case "ppt", "pptx", "odp": return .slides
         case "zip": return .archive
+        case "mkv", "webm", "avi", "ac3", "eac3", "dts", "truehd", "m2ts", "opus", "oga", "ogg": return .media
         default:
             let declared = DocumentKind(type: type)
             return declared == .other ? DocumentKind(type: UTType(filenameExtension: (name as NSString).pathExtension)) : declared
@@ -64,6 +65,7 @@ struct DocumentPosition: Codable, Equatable, Sendable {
     var textOffset = 0.0
     var block: Int?
     var section: Int?
+    var bookOffset: Int?
 }
 
 struct DocumentRecord: Codable, Identifiable, Sendable {
