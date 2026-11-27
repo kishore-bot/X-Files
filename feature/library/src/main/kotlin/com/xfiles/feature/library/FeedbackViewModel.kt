@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xfiles.feedback.FeedbackCategory
-import com.xfiles.feedback.FeedbackDestination
 import com.xfiles.feedback.FeedbackEnvironment
 import com.xfiles.feedback.FeedbackReport
 import com.xfiles.feedback.FeedbackResult
@@ -50,24 +49,21 @@ sealed interface FeedbackStatus {
     data object Sending : FeedbackStatus
     data object Sent : FeedbackStatus
     data object Queued : FeedbackStatus
-    data object Shared : FeedbackStatus
     data class Failed(val reason: String) : FeedbackStatus
 }
 
 data class FeedbackUiState(
-    val destination: FeedbackDestination = FeedbackDestination.Cloud,
+    val available: Boolean = true,
     val category: FeedbackCategory = FeedbackCategory.Bug,
     val message: String = "",
-    val replyTo: String = "",
     val includeDetails: Boolean = true,
     val status: FeedbackStatus = FeedbackStatus.Idle,
     val cooldownSeconds: Int = 0,
 ) {
     val messageLength: Int get() = FeedbackRules.length(message)
     val messageTooLong: Boolean get() = messageLength > FeedbackRules.MAX_MESSAGE_LENGTH
-    val replyInvalid: Boolean get() = replyTo.isNotBlank() && !FeedbackRules.isValidEmail(replyTo.trim())
     val canSend: Boolean
-        get() = message.isNotBlank() && !messageTooLong && !replyInvalid &&
+        get() = available && message.isNotBlank() && !messageTooLong &&
             cooldownSeconds == 0 && status != FeedbackStatus.Sending
 }
 
@@ -78,7 +74,7 @@ class FeedbackViewModel @Inject constructor(
     val environment: FeedbackEnvironment,
     private val cooldown: FeedbackCooldown,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(FeedbackUiState(destination = sender.destination))
+    private val _state = MutableStateFlow(FeedbackUiState(available = sender.available))
     val state: StateFlow<FeedbackUiState> = _state.asStateFlow()
     private var ticker: Job? = null
 
@@ -90,8 +86,6 @@ class FeedbackViewModel @Inject constructor(
 
     fun onMessage(text: String) = _state.update { it.copy(message = text) }
 
-    fun onReplyTo(text: String) = _state.update { it.copy(replyTo = text) }
-
     fun onIncludeDetails(include: Boolean) = _state.update { it.copy(includeDetails = include) }
 
     fun send() {
@@ -100,29 +94,25 @@ class FeedbackViewModel @Inject constructor(
         val report = FeedbackReport(
             category = current.category,
             message = current.message.trim(),
-            replyTo = current.replyTo.trim().ifEmpty { null },
             environment = if (current.includeDetails) environment else null,
         )
         _state.update { it.copy(status = FeedbackStatus.Sending) }
         viewModelScope.launch {
             val result = sender.send(report)
             when (result) {
-                FeedbackResult.Sent -> finish(FeedbackStatus.Sent, clearMessage = true)
-                FeedbackResult.Queued -> finish(FeedbackStatus.Queued, clearMessage = true)
-                // The draft stays: the user may cancel in the share sheet and want to send it again.
-                FeedbackResult.Shared -> finish(FeedbackStatus.Shared, clearMessage = false)
+                FeedbackResult.Sent -> finish(FeedbackStatus.Sent)
+                FeedbackResult.Queued -> finish(FeedbackStatus.Queued)
                 is FeedbackResult.Failed -> _state.update { it.copy(status = FeedbackStatus.Failed(result.reason)) }
             }
         }
     }
 
-    private fun finish(status: FeedbackStatus, clearMessage: Boolean) {
+    private fun finish(status: FeedbackStatus) {
         cooldown.markSent()
         _state.update {
             it.copy(
                 status = status,
-                message = if (clearMessage) "" else it.message,
-                replyTo = if (clearMessage) "" else it.replyTo,
+                message = "",
             )
         }
         startCooldownTicker()
@@ -130,13 +120,15 @@ class FeedbackViewModel @Inject constructor(
 
     /** Counts the cooldown down once a second while it runs; stops at zero. */
     private fun startCooldownTicker() {
-        if (ticker?.isActive == true) return
+        ticker?.cancel()
         ticker = viewModelScope.launch {
-            do {
-                val seconds = cooldownSeconds()
-                _state.update { it.copy(cooldownSeconds = seconds) }
+            var seconds = cooldownSeconds()
+            _state.update { it.copy(cooldownSeconds = seconds) }
+            while (seconds > 0) {
                 delay(1_000L)
-            } while (seconds > 0)
+                seconds = cooldownSeconds()
+                _state.update { it.copy(cooldownSeconds = seconds) }
+            }
         }
     }
 

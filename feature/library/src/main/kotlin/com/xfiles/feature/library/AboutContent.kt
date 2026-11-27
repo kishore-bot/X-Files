@@ -14,7 +14,7 @@ val PrivacyPromises: List<String> = listOf(
     "No ads, no accounts and no usage analytics.",
     "The internet is used only for the Fily model download you start, feedback you choose to send, and crash diagnostics you allow. " +
         "Sharing and printing send a file only where you choose.",
-    "Crash reports are kept on this phone until you choose to share one. Cloud diagnostics are off by default and need your consent.",
+    "Feedback and crash reports go to Xfiles via Firestore. You can send a crash report yourself or opt in to automatic uploads.",
 )
 
 /** One group of supported files: its icon, extensions and, in plain words, what Xfiles does with them. */
@@ -70,5 +70,5 @@ val Licences: List<Licence> = listOf(
     Licence("RustCrypto aes, cbc, sha1, sha2, md-5 and rc4; getrandom, zeroize, serde_json and libc", "MIT or Apache License 2.0"),
     Licence("llama.cpp and ggml, through the llama-cpp-2 crate (on-device Fily engine)", "MIT License; llama-cpp-2 is MIT or Apache License 2.0"),
     Licence("Fily model, fine-tuned from Liquid AI LFM2.5-350M", "LFM Open License 1.0"),
-    Licence("Firebase Crashlytics (optional build only)", "Apache License 2.0; Firebase service terms apply"),
+    Licence("Cloud Firestore (configured Android builds)", "Apache License 2.0; Firebase service terms apply"),
 )

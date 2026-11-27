@@ -4,7 +4,7 @@
     <!--
       The one INTERNET declaration in the app (every flavor merges it from here). Used only for the opt-in
       Fily model download (AndroidModelDownloads, from the release host) and, in the Firebase build only, the
-      opt-in crash reports. Nothing else opens a connection; documents, search and Fily run on the device.
+      opt-in crash reports. Documents, search and Fily run on the device.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />

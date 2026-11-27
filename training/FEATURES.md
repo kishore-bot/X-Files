@@ -195,15 +195,13 @@ Editing supports UTF-8 and UTF-16 with BOM where required. Mixed line endings/un
 
 - Files are reached through explicit grants, not broad storage/media permission. Camera permission is requested for camera tools; gallery paths do not need it.
 - Document parsing, OCR, grouping, summaries and reading are local. Sharing, printing and optional assistants intentionally hand approved information to other software with its own privacy/network behavior.
-- The default build has no Internet permission. The optional diagnostics build adds Internet permission but keeps document WebViews offline through interception/CSP and does not add Analytics, accounts or ads.
+- Internet access supports user-initiated model downloads, feedback, and consented crash reporting. Document WebViews use offline interception/CSP.
 - Offline HTML may run its own scripts within the viewer sandbox. Book chapter scripts, Markdown scripts, macros and active Office content do not execute. External links require review before leaving the app.
 - Parsing, decompression, XML depth, images and output are bounded; parser panics become typed errors. This is not process isolation or an external security certification.
 - Passwords are not persisted. Cloud backup and phone-to-phone app-data transfer are disabled. Local caches/preferences can contain authorized names, references, bookmarks and reading snippets.
 - Sensitive-document hints can offer Hide from screenshots, including recent-app preview protection for the active document. Classification/OEM behavior needs acceptance.
-- A local crash report is stored privately, at most five reports/64 KiB each, with message scrubbing. The next launch offers manual viewing/sharing to the configured contact.
-- Optional Firebase diagnostics have their own explicit, default-off consent. Firebase receives SDK diagnostic/device/app/installation data; documents are not attached and existing local reports are not retroactively uploaded.
-- The local crash recorder stays outermost and forwards a bounded scrubbed exception copy to Crashlytics only while allowed. Its transport permits only consented Crashlytics report events, dropping OCR/other telemetry.
-- Turning off stops forwarding new crashes and blocks future report transport sends. A process restart fully unloads diagnostics; already-started/sent uploads cannot be recalled. Native signal/NDK reporting is not added.
+- Android saves uncaught Java and Kotlin crashes locally. Configured builds send technical reports to Firestore on request or with default-off consent for automatic uploads. Users can review the report.
+- The in-app feedback form sends suggestions, bugs and other messages to the same Firestore project.
 
 ## Android build and Firebase setup
 
@@ -211,32 +209,24 @@ Editing supports UTF-8 and UTF-16 with BOM where required. Mixed line endings/un
 
 Android package/application ID: **`com.xfiles`**. `com.xfiles.android` is the source namespace, not the Firebase registration package.
 
+See [Firebase reporting setup](../firebase/README.md) for configuration and collection rules.
+
 Prerequisites: JDK 17, Android SDK platform 37, NDK 29.0.14206865 and Rust stable 1.85+. Current pins include AGP 9.5.1, Gradle 9.7.1, Kotlin 2.4.20 and Compose Multiplatform 1.11.1. The [version catalog](../gradle/libs.versions.toml) and [Gradle properties](../gradle.properties) are authoritative; retain the current Gobley compatibility flags until a verified migration.
 
 ```sh
-# Default offline APK
-./gradlew :androidApp:assembleShare
+# Local dev APK
+./gradlew :androidApp:assembleDevDebug
 
 # Optional Firebase diagnostics APK
 ./gradlew -Pxfiles.firebaseCrashReports=true :androidApp:assembleProdRelease
 
-# Static checks; add the Firebase property to check that profile
-./gradlew :shared:lintDebug :androidApp:lintDebug
+# Android app lint
+./gradlew :androidApp:lintProdRelease
 ```
 
-Debug is for development. Share is optimized and can use the existing debug key for local testing when owner signing is absent. Release requires configured signing; do not treat an unsigned APK as installable. Updating an installed app requires a matching signing certificate to preserve its private data.
+Dev is for development. Release requires configured signing for distribution. Updating an installed app requires a matching signing certificate to preserve its private data.
 
-The standard Share APK path is `androidApp/build/outputs/apk/share/androidApp-share.apk`. Switching profiles overwrites that path. Named local Firebase/offline artifacts and matching mappings, when present, are recorded in [NOTES.md](../NOTES.md); old artifacts are not guaranteed current after rebuilding.
-
-### Firebase Android setup
-
-1. In [Firebase Console](https://console.firebase.google.com/), create/select a project and register an Android app using **com.xfiles**. An optional nickname is Xfiles Android; no iOS registration is required for this scope.
-2. Put the downloaded client file at `androidApp/google-services.json`. The supplied file was validated and copied there; it is Git-ignored. Do not put a service-account private key in the mobile app.
-3. Build/install the optional diagnostics APK. In About, enable Share crash diagnostics and accept the disclosure. Activation requires a new process: use Android Settings → Apps → Xfiles → Force stop, then reopen for a deterministic manual check.
-4. Verify opt-out/restart, queued-report refusal and a synthetic report's actual receipt in the intended project. No report was sent by the coding agent during setup.
-5. Preserve/upload the exact corresponding R8 mapping through an approved release step for readable obfuscated stacks. Local build mapping/symbol upload tasks are disabled.
-
-The integration pins Firebase BoM 35.1.0, Google services plugin 4.5.0 and Crashlytics plugin 3.0.8. The filtered backend uses the bundled transport 5.0.0 APIs; upgrades must revalidate that filter and its report-event identifier. See [Firebase Android setup](https://firebase.google.com/docs/android/setup) and [opt-in Crashlytics guidance](https://firebase.google.com/docs/crashlytics/android/customize-crash-reports).
+The release APK path is `androidApp/build/outputs/apk/prod/release/`. Configure GitHub Actions as described in [Firebase reporting setup](../firebase/README.md).
 
 ## Performance and resource limits
 

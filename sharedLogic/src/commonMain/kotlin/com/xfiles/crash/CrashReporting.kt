@@ -2,21 +2,6 @@ package com.xfiles.crash
 
 import kotlin.concurrent.Volatile
 
-/*
- * Crash reports without the network: a crash is written to app-private
- * storage, and on the next launch the user may read it and share it through
- * an app of their choice. Everything here is pure, so it is unit-tested; the
- * platform writes the files and opens the share sheet.
- *
- * A report must never carry the user's documents: no file names, URIs, paths
- * or document text. [CrashScrubber] removes them from exception messages.
- */
-
-/**
- * The developer address that crash reports and feedback are addressed to.
- */
-const val CRASH_REPORT_EMAIL = "kishoreabhi333@gmail.com"
-
 /** At most this many reports are kept; older ones are deleted first. */
 const val MAX_CRASH_REPORTS = 5
 
@@ -24,7 +9,7 @@ const val MAX_CRASH_REPORTS = 5
 const val MAX_CRASH_REPORT_BYTES = 64 * 1024
 
 /** A report waiting to be sent or dismissed. [id] is its file name. */
-data class CrashReport(val id: String, val text: String, val versionName: String)
+data class CrashReport(val id: String, val text: String, val versionName: String, val savedAtMillis: Long)
 
 /** What a report says about the app and device: no user data. */
 data class DeviceDescription(
@@ -147,22 +132,6 @@ object CrashReportFormatter {
         return line.substring(0, end)
     }
 
-    /** Subject line of a crash report message. */
-    fun subject(versionName: String): String = "Xfiles crash report $versionName"
-}
-
-/** The blank feedback message: the app version and device, nothing else. */
-object FeedbackTemplate {
-    fun subject(versionName: String): String = "Xfiles feedback $versionName"
-
-    fun body(device: DeviceDescription): String = buildString {
-        appendLine()
-        appendLine()
-        appendLine("--")
-        appendLine("Xfiles ${device.versionName} (${device.versionCode})")
-        appendLine(device.system)
-        append(device.model)
-    }
 }
 
 /** Report files are named by the time of the crash, so they sort by age. */

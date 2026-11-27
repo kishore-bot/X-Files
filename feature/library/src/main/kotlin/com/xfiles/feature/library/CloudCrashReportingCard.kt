@@ -27,7 +27,7 @@ import com.xfiles.design.glassCard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** The opt-in switch for Firebase crash diagnostics. Shows nothing in builds without the SDK. */
+/** The opt-in switch for Firebase crash diagnostics. Shows in Firestore-enabled builds. */
 @Composable
 internal fun CloudCrashReportingCard(reports: CloudCrashReporting) {
     if (!reports.available) return
@@ -55,9 +55,9 @@ internal fun CloudCrashReportingCard(reports: CloudCrashReporting) {
     Column(Modifier.fillMaxWidth().glassCard().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Share crash diagnostics", style = MaterialTheme.typography.titleMedium)
+                Text("Send crash diagnostics automatically", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Optional Firebase Crashlytics reporting. Off by default; document reading and editing stay offline.",
+                    "Send technical crash reports to Xfiles via Firestore. Off by default.",
                     color = EzColors.TextSecondary,
                 )
             }
@@ -70,10 +70,8 @@ internal fun CloudCrashReportingCard(reports: CloudCrashReporting) {
             when {
                 saving -> "Saving your preference..."
                 failed -> "Could not save the preference. Please try again."
-                enabled && !reports.active -> "Close and reopen Xfiles to activate reporting for future crashes. Existing local reports can still be shared manually."
-                !enabled && reports.active -> "New crash forwarding is off. Close and reopen Xfiles to fully unload diagnostics; reports already sent cannot be recalled."
-                enabled -> "Future crash diagnostics may be sent to Firebase. Turn this off at any time."
-                else -> "No Firebase initialization or crash uploads while this stays off."
+                enabled -> "Future reports will be sent when Xfiles opens again."
+                else -> "Xfiles asks before sending each report."
             },
             color = if (failed) EzColors.Accent else EzColors.TextSecondary,
         )
@@ -84,10 +82,9 @@ internal fun CloudCrashReportingCard(reports: CloudCrashReporting) {
         title = { Text("Allow crash diagnostics?") },
         text = {
             Text(
-                "After you restart Xfiles, Firebase Crashlytics can receive future technical crash diagnostics, " +
-                    "app/device information and installation identifiers. Exception messages are scrubbed before " +
-                    "forwarding; documents are not attached. The SDK report is different from the local report preview. " +
-                    "No Analytics is added. You can turn this off here; already sent reports cannot be recalled.",
+                "When Xfiles opens after a future crash, it can send the app version, device model, " +
+                    "Android version and technical stack trace to the Xfiles team via Firestore. " +
+                    "You can turn automatic uploads off here at any time.",
             )
         },
         confirmButton = { TextButton(onClick = { confirming = false; save(true) }) { Text("Allow") } },

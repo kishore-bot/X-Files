@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,7 +29,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.alpha
@@ -47,7 +45,6 @@ import com.xfiles.design.EzTextButton
 import com.xfiles.design.glassCard
 import com.xfiles.design.glossyPrimary
 import com.xfiles.feedback.FeedbackCategory
-import com.xfiles.feedback.FeedbackDestination
 import com.xfiles.feedback.FeedbackRules
 
 /**
@@ -58,6 +55,7 @@ import com.xfiles.feedback.FeedbackRules
 @Composable
 internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val sending = state.status == FeedbackStatus.Sending
     EzControlSheet(onDismiss) {
         LazyColumn(
             Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
@@ -72,12 +70,13 @@ internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel =
                     modifier = Modifier.semantics { heading() },
                 )
                 Text(
-                    if (state.destination == FeedbackDestination.Cloud) PrivacyCloud else PrivacyShare,
+                    if (state.available) PrivacyCloud else "Feedback is unavailable in this build.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = EzColors.TextSecondary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
+            if (!state.available) return@LazyColumn
             item("category") {
                 Row(
                     Modifier.semantics { contentDescription = "Feedback type" },
@@ -87,7 +86,7 @@ internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel =
                         EzChip(
                             label = category.label,
                             selected = state.category == category,
-                            onClick = { viewModel.onCategory(category) },
+                            onClick = { if (!sending) viewModel.onCategory(category) },
                         )
                     }
                 }
@@ -95,6 +94,7 @@ internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel =
             item("message") {
                 OutlinedTextField(
                     value = state.message,
+                    readOnly = sending,
                     onValueChange = viewModel::onMessage,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Your message") },
@@ -108,23 +108,6 @@ internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel =
                     },
                 )
             }
-            item("reply") {
-                OutlinedTextField(
-                    value = state.replyTo,
-                    onValueChange = viewModel::onReplyTo,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Reply email (optional)") },
-                    singleLine = true,
-                    isError = state.replyInvalid,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    supportingText = {
-                        Text(
-                            if (state.replyInvalid) "Enter an email address like name@example.com" else "Only if you want a reply",
-                            color = if (state.replyInvalid) MaterialTheme.colorScheme.error else EzColors.TextSecondary,
-                        )
-                    },
-                )
-            }
             item("details") {
                 Column(
                     Modifier.fillMaxWidth().glassCard(strength = 0.45f).padding(horizontal = 14.dp, vertical = 12.dp),
@@ -134,7 +117,7 @@ internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel =
                         Modifier
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
-                            .clickable(role = Role.Checkbox) { viewModel.onIncludeDetails(!state.includeDetails) }
+                            .clickable(enabled = !sending, role = Role.Checkbox) { viewModel.onIncludeDetails(!state.includeDetails) }
                             .semantics { contentDescription = "Include app version and device model" },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -159,12 +142,12 @@ internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel =
             item("send") {
                 SendButton(
                     enabled = state.canSend,
-                    sending = state.status == FeedbackStatus.Sending,
+                    sending = sending,
                     cooldownSeconds = state.cooldownSeconds,
                     onClick = viewModel::send,
                 )
             }
-            if (state.status == FeedbackStatus.Sent || state.status == FeedbackStatus.Queued || state.status == FeedbackStatus.Shared) {
+            if (state.status == FeedbackStatus.Sent || state.status == FeedbackStatus.Queued) {
                 item("done") {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         EzTextButton("Done", onDismiss)
@@ -181,7 +164,6 @@ private fun StatusLine(status: FeedbackStatus) {
         FeedbackStatus.Idle, FeedbackStatus.Sending -> return
         FeedbackStatus.Sent -> "Thank you. Your feedback reached the Xfiles team." to EzColors.Text
         FeedbackStatus.Queued -> "Saved on this phone. It will be sent when you are back online." to EzColors.Text
-        FeedbackStatus.Shared -> "Pick an app in the share sheet to finish sending." to EzColors.Text
         is FeedbackStatus.Failed -> status.reason to MaterialTheme.colorScheme.error
     }
     Text(
@@ -220,4 +202,3 @@ private fun SendButton(enabled: Boolean, sending: Boolean, cooldownSeconds: Int,
 }
 
 private const val PrivacyCloud = "Sent to the Xfiles team via Google Firebase. No files or file names are sent."
-private const val PrivacyShare = "Opens your phone's share sheet, and you choose where it goes. No files or file names are sent."

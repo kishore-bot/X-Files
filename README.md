@@ -183,8 +183,8 @@ flowchart TD
 - 📴 **Offline-first:** documents, file names and Fily conversations never leave the phone.
 - 🌐 **Internet is used only for:**
   - the one-time Fily model download, when you ask for it;
-  - opt-in crash reports;
-  - feedback you choose to send.
+  - crash reports you send or opt in to sending automatically;
+  - feedback you choose to send. Reporting uses [Cloud Firestore](firebase/README.md) in configured Android builds.
 - 🗑️ **No backups:** uninstalling removes all app data.
 
 ---

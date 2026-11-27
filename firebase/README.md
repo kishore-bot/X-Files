@@ -1,49 +1,39 @@
-# Xfiles Firebase setup (feedback)
+# Xfiles reporting through Firestore
 
-In-app feedback is stored in Cloud Firestore, collection `feedback`, one document per report. It is only
-compiled into the prod build with `-Pxfiles.firebaseCrashReports=true` and `androidApp/google-services.json`.
-Other builds open the share sheet instead.
+Firebase-enabled Android builds create documents directly in two collections.
 
-The rules in `firestore.rules` let the app **create** feedback and nothing else. Clients cannot read,
-change or delete reports. The team reads them in the console.
+| Collection | Contents | When written |
+| --- | --- | --- |
+| `feedback` | Category, message, server timestamp, and optional app and device details | The user taps Send |
+| `crash_reports` | App version, platform, server timestamp, and the previewed technical report | The user taps Send report, or reopens Xfiles after a crash with automatic reporting enabled |
 
-## One-time console setup
+Crash reports include app and OS versions, device model, crash time, and stack frames. Exception messages
+are omitted from the upload. Automatic reporting is off until the user enables it in Settings → Diagnostics.
+The local crash recorder captures uncaught Java and Kotlin exceptions. Native crashes and ANRs are outside
+its coverage. If Firestore is unavailable, Xfiles keeps the crash report on the phone for retry.
+Feedback can queue locally through Firestore.
 
-1. Open the Firebase project that matches `androidApp/google-services.json` (package `com.xfiles`).
-2. Build > Firestore Database > **Create database**. Pick a location near your users (it cannot be changed
-   later). Choose production mode; the rules file replaces the default rules.
-3. Optional but recommended: Build > App Check. Register the Android app with Play Integrity, then turn on
-   enforcement for Cloud Firestore. This stops scripts that are not the Xfiles app from creating feedback.
-   Enabling it needs an App Check client in the app, which this change does not add; enable it only when
-   you are ready to ship that step.
-4. Reading feedback: Firestore > `feedback`. Consider a Firestore index only if you later query by
-   `createdAt` or `category`; the console lists documents without one.
+The rules permit validated creates. Clients cannot read, update, or delete reports. Use the Firebase
+console to inspect submissions. Email addresses are not requested by either reporting form.
+
+## Configure Android and GitHub Actions
+
+Register the Android package `com.xfiles` in your Firebase project and enable Cloud Firestore. Put the
+project's `google-services.json` in `androidApp/` for local prod builds. This file is gitignored. The
+`xfiles.firebaseCrashReports` Gradle property can explicitly enable or disable Firestore for prod.
+Dev builds and unconfigured prod builds have no report sender.
+
+For release builds, set the GitHub Actions secret `XFILES_GOOGLE_SERVICES_JSON_BASE64` to the base64
+encoding of the matching Android configuration. The release workflow supplies it to Gradle when present.
 
 ## Deploy the rules
 
-```
-npm install -g firebase-tools
-firebase login
-cd firebase
-firebase use <your-project-id>
-firebase deploy --only firestore:rules
+With the Firebase CLI authenticated to the same project, run from this directory:
+
+```sh
+firebase deploy --project <project-id> --only firestore:rules
 ```
 
-Run the deploy again after any change to `firestore.rules`. Deploying rules does not change the data.
-
-## Document shape
-
-| Field | Type | Notes |
-| --- | --- | --- |
-| `category` | string | `bug`, `idea` or `other` |
-| `message` | string | 1 to 2000 characters |
-| `createdAt` | timestamp | Server time (`request.time`) |
-| `replyTo` | string | Optional, validated email |
-| `appVersion`, `versionCode`, `deviceModel`, `androidSdk`, `flavor`, `locale` | string / int | Optional; only when the user keeps "Include app version and device model" on |
-
-No file names, paths, document text or assistant conversations are sent.
-
-## Client limits (for reference)
-
-- One send per 30 seconds per phone, stored on the phone.
-- Offline reports wait in Firestore's on-device cache and send when the phone is online.
+Deploy the rules before distributing a release with Firestore reporting. The collection rules validate
+payloads and block client reads. They do not authenticate submitters or rate-limit writes at the server.
+Firebase App Check is a separate rollout and requires a matching app integration before enforcement.

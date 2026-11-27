@@ -7,9 +7,10 @@ plugins {
     alias(libs.plugins.androidx.baselineprofile)
 }
 
-// Opt-in Firebase Crashlytics. Off unless -Pxfiles.firebaseCrashReports=true (needs androidApp/google-services.json).
-// The default build has no Firebase code, no google-services plugin and no network permission beyond the app's own.
-val firebaseReports = providers.gradleProperty("xfiles.firebaseCrashReports").map { it.toBoolean() }.getOrElse(false)
+// A configured prod build sends reports to Firestore. The property can override local configuration.
+val firebaseReports = providers.gradleProperty("xfiles.firebaseCrashReports")
+    .map { it.toBooleanStrict() }
+    .getOrElse(file("google-services.json").isFile)
 
 /**
  * The app version, SemVer with an optional pre-release label: 1.0.0-alpha.03, 1.0.0-beta.01, 1.0.0-rc.02, 1.0.0.
@@ -40,7 +41,6 @@ val appVersionCode: Int = run {
 if (firebaseReports) {
     check(file("google-services.json").isFile) { "Firebase diagnostics requires androidApp/google-services.json" }
     apply(plugin = "com.google.gms.google-services")
-    apply(plugin = "com.google.firebase.crashlytics")
 }
 
 android {
@@ -100,7 +100,7 @@ android {
     }
     // Custom build types must explicitly consume the release profiles.
     sourceSets.getByName("benchmark").baselineProfiles.directories.add("src/prodRelease/generated/baselineProfiles")
-    // dev never carries Firebase; prod does only in the opt-in firebase build.
+    // Dev is offline. Prod includes Firestore when configured.
     sourceSets.getByName("dev").kotlin.directories.add("src/offline/kotlin")
     sourceSets.getByName("prod").kotlin.directories.add(if (firebaseReports) "src/firebase/kotlin" else "src/offline/kotlin")
     // The overlay turns off Firebase's default collection in every prod variant, so none collects before consent.
@@ -127,12 +127,7 @@ androidComponents {
 dependencies {
     if (firebaseReports) {
         "prodImplementation"(platform(libs.firebase.bom))
-        "prodImplementation"(libs.firebase.crashlytics)
-        // Feedback reports (src/firebase FirestoreFeedbackSender). Absent from builds without Firebase config.
         "prodImplementation"(libs.firebase.firestore)
-        // Already shipped by this Crashlytics version; exposed for ConsentedCrashBackendFactory.
-        "prodImplementation"("com.google.android.datatransport:transport-runtime:5.0.0")
-        "prodImplementation"("com.google.android.datatransport:transport-backend-cct:5.0.0")
     }
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
@@ -175,11 +170,9 @@ baselineProfile {
     dexLayoutOptimization = true
 }
 
-// Local mapping and symbol files only; uploading them to Firebase is a separate release step.
-// google-services.json knows only com.xfiles, so dev variants skip the Firebase tasks.
+// The Firebase configuration registers only the prod application ID.
 tasks.configureEach {
-    if (name.startsWith("uploadCrashlytics")) enabled = false
-    if (firebaseReports && name.contains("Dev") && (name.endsWith("GoogleServices") || name.contains("Crashlytics"))) enabled = false
+    if (firebaseReports && name.contains("Dev") && name.endsWith("GoogleServices")) enabled = false
 }
 
 // Optional local-only dependencies; the app builds the same without this file.

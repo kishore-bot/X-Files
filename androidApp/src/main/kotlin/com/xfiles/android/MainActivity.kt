@@ -39,7 +39,6 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.xfiles.core.documents.DocumentRepository
 import com.xfiles.crash.CrashBreadcrumbs
-import com.xfiles.crash.CrashReports
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PrintRequest
@@ -103,7 +102,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class MainActivity : ComponentActivity() {
     @Inject internal lateinit var appearance: AppearanceStore
     @Inject lateinit var documents: DocumentRepository
-    @Inject lateinit var crashReports: CrashReports
+    private val crashReportViewModel: CrashReportViewModel by viewModels()
     @Inject lateinit var cloudCrash: CrashReportingSetup
     private val library by viewModels<LibraryViewModel>()
     private val analysis by viewModels<DocumentAnalysisViewModel>()
@@ -303,7 +302,7 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                         if (showFily && !inPip) FilyOverlay(navigator, { displayedFiles }, { selectedFiles }, onDismiss = { showFily = false })
-                        if (!inPip && !showFily) CrashReportPrompt(crashReports)
+                        if (!inPip && !showFily) CrashReportPrompt(crashReportViewModel)
                         // The screen name only (never a file name), for the crash report.
                         SideEffect(navigator.top) { CrashBreadcrumbs.screen = (navigator.top as? Route)?.toString() }
                     }

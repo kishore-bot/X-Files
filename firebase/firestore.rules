@@ -1,7 +1,6 @@
 rules_version = '2';
 
-// Feedback from the Xfiles app (prod build with Firebase). The app may only CREATE a document in `feedback`.
-// Nobody can read, update or delete feedback from the client; the team reads it in the Firebase console.
+// Client submissions are write-only. The team reads reports in the Firebase console.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -9,7 +8,7 @@ service cloud.firestore {
       let data = request.resource.data;
       let keys = data.keys();
       return keys.hasOnly([
-          'category', 'message', 'createdAt', 'replyTo',
+          'category', 'message', 'createdAt',
           'appVersion', 'versionCode', 'deviceModel', 'androidSdk', 'flavor', 'locale'
         ])
         && keys.hasAll(['category', 'message', 'createdAt'])
@@ -19,10 +18,6 @@ service cloud.firestore {
         && data.message.size() > 0
         && data.message.size() <= 2000
         && data.createdAt == request.time
-        // Optional reply address.
-        && (!('replyTo' in keys) || (data.replyTo is string
-            && data.replyTo.size() <= 254
-            && data.replyTo.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')))
         // Optional device details, attached only when the user keeps the option on.
         && (!('appVersion' in keys) || (data.appVersion is string && data.appVersion.size() <= 40))
         && (!('versionCode' in keys) || (data.versionCode is int && data.versionCode >= 0))
@@ -37,6 +32,23 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
-    // Everything else is denied by default.
+    match /crash_reports/{reportId} {
+      allow create: if reportId.matches('^[0-9a-f]{64}$') && validCrashReport();
+      allow read, update, delete: if false;
+    }
+
+    function validCrashReport() {
+      let data = request.resource.data;
+      let fields = ['report', 'appVersion', 'platform', 'createdAt'];
+      return data.keys().hasOnly(fields)
+        && data.keys().hasAll(fields)
+        && data.report is string
+        && data.report.size() > 0
+        && data.report.size() <= 65536
+        && data.appVersion is string
+        && data.appVersion.size() <= 40
+        && data.platform == 'android'
+        && data.createdAt == request.time;
+    }
   }
 }
