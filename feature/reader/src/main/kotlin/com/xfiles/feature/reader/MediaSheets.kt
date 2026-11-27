@@ -6,6 +6,17 @@ import androidx.compose.runtime.Composable
 import androidx.media3.exoplayer.ExoPlayer
 import com.xfiles.core.documents.FileEntry
 
+internal data class PlaybackControls(
+    val canSwitchDecoder: Boolean,
+    val softwarePreferred: Boolean,
+    val switchDecoder: () -> Unit,
+    val toggleAudioBoost: () -> Unit,
+    val setAutoLossless: (Boolean) -> Unit,
+    val canBoostPicture: Boolean,
+    val pictureBoost: Boolean,
+    val togglePictureBoost: () -> Unit,
+)
+
 private val SUBTITLE_TYPES = arrayOf("application/x-subrip", "text/vtt", "text/x-ssa", "text/*", "application/octet-stream")
 
 /** Shows the one sheet that is open, if any, and routes its choices to [onEvent]. */
@@ -15,6 +26,9 @@ internal fun MediaSheetHost(
     file: FileEntry,
     player: ExoPlayer,
     device: MediaDevice,
+    output: MediaOutput,
+    hdrDisplay: String?,
+    controls: PlaybackControls,
     onEvent: (MediaPlayerEvent) -> Unit,
 ) {
     val close: () -> Unit = { onEvent(MediaPlayerEvent.OpenSheet(null)) }
@@ -36,10 +50,13 @@ internal fun MediaSheetHost(
         MediaSheet.Playback -> MediaPlaybackSheet(
             speedIndex = state.speedIndex,
             device = device,
+            output = output,
+            controls = controls,
+            video = state.video,
             onSpeed = { onEvent(MediaPlayerEvent.SetSpeed(it)) },
             onDismiss = close,
         )
-        MediaSheet.Details -> MediaDetailsSheet(file, player, close)
+        MediaSheet.Details -> MediaDetailsSheet(file, player, state, output, hdrDisplay, close)
         null -> Unit
     }
 }

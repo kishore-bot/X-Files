@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
+import androidx.media3.common.MimeTypes
 import com.xfiles.design.EzControlSheet
 import com.xfiles.core.documents.FileEntry
 import com.xfiles.design.EzColors
@@ -30,7 +31,10 @@ import java.util.Date
  * its resolution, duration and codecs from the player's tracks. Rows the platform does not give are left out.
  */
 @Composable
-internal fun MediaDetailsSheet(file: FileEntry, player: Player, onDismiss: () -> Unit) {
+internal fun MediaDetailsSheet(
+    file: FileEntry, player: Player, state: MediaPlayerUiState, output: MediaOutput, hdrDisplay: String?,
+    onDismiss: () -> Unit,
+) {
     val context = LocalContext.current
     val rows = buildList {
         add("Name" to file.name)
@@ -41,7 +45,34 @@ internal fun MediaDetailsSheet(file: FileEntry, player: Player, onDismiss: () ->
         add("Duration" to formatPlaybackTime(player.duration.coerceAtLeast(0L)))
         val size = player.videoSize
         if (size.width > 0 && size.height > 0) add("Resolution" to "${size.width} × ${size.height}")
-        codecsOf(player).takeIf { it.isNotEmpty() }?.let { add("Codecs" to it.joinToString(", ")) }
+        codecsOf(player).takeIf { it.isNotEmpty() }?.let { add("Selected codecs" to it.joinToString(", ")) }
+        if (state.video) {
+            add("Source color" to if (output.hasHdr10PlusMetadata) "HDR10+ metadata detected" else state.color.label)
+            hdrDisplay?.let { add("Display capabilities" to it) }
+            if (state.color.hdr || output.hasHdr10PlusMetadata) add("HDR output" to "Unverified")
+        }
+        output.videoDecoder?.let { add("Video decoder" to it) }
+        output.audioDecoder?.let { add("Audio decoder" to it) }
+        add("FFmpeg" to (output.ffmpegVersion ?: "Unavailable in this install"))
+        output.route?.let { add("System media route" to it) }
+        output.usbLosslessStatus?.let { add("USB lossless" to it) }
+        output.outputFormat?.let { add("AudioTrack format" to it) }
+        if (state.audioTracks.isNotEmpty()) add("Output quality" to "Unverified")
+        output.spatial?.let { add("Spatial audio" to it) }
+        if (output.headTrackingAvailable) add("Head tracking" to "Available")
+        state.playbackError?.let { add("Playback error" to it) }
+        state.audioTracks.forEach { track ->
+            val source = track.group.getTrackFormat(0)
+            val description = listOfNotNull(
+                track.detail.takeIf { it.isNotBlank() },
+                source.sampleRate.takeIf { it > 0 }?.let { "$it Hz source" },
+                pcmLabel(source.losslessPcmEncoding() ?: source.pcmEncoding),
+                if (source.sampleMimeType in losslessSources) "Lossless source" else null,
+                if (track.selected) "Selected" else null,
+                track.reason,
+            )
+            add(track.title to description.joinToString(" · "))
+        }
     }
     EzControlSheet(onDismiss) {
         Column(
@@ -77,3 +108,6 @@ private fun codecsOf(player: Player): List<String> {
     }
     return out.toList()
 }
+
+
+private val losslessSources = setOf(MimeTypes.AUDIO_RAW, MimeTypes.AUDIO_FLAC, MimeTypes.AUDIO_ALAC, MimeTypes.AUDIO_TRUEHD)

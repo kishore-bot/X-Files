@@ -297,6 +297,8 @@ internal class MediaPlayerViewModel @Inject constructor(
                 duration = exo.duration.coerceAtLeast(0L),
                 seekable = exo.isCurrentMediaItemSeekable,
                 failed = exo.playerError != null,
+                playbackError = exo.playerError?.errorCodeName,
+                color = (exo as? ExoPlayer)?.videoFormat.mediaColor(),
                 aspect = exo.videoSize.displayAspect(),
             )
         }

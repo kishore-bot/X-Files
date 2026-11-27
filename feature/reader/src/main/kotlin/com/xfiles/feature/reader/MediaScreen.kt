@@ -17,6 +17,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.TrackSelectionParameters
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import kotlinx.coroutines.delay
@@ -37,7 +43,15 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit, o
     val activity = LocalActivity.current
     val pip = LocalMediaPip.current
     val progress = LocalViewerProgress.current
-    var player by remember(file.uri) { mutableStateOf<ExoPlayer?>(null) }
+    var session by remember(file.uri) { mutableStateOf<AndroidMediaSession?>(null) }
+    var preferSoftware by rememberSaveable(file.uri) { mutableStateOf(false) }
+    var retried by rememberSaveable(file.uri) { mutableStateOf(false) }
+    var handoff by remember(file.uri) { mutableStateOf<AudioRecovery?>(null) }
+    fun switchAudio(active: ExoPlayer, software: Boolean) {
+        if (preferSoftware == software || session?.player !== active) return
+        handoff = AudioRecovery(active.currentMediaItem, active.resumePosition(), active.playWhenReady, active.trackSelectionParameters)
+        preferSoftware = software
+    }
     // Survives rotation and process death, so the video picks up where it was instead of restarting.
     var resumeAt by rememberSaveable(file.uri) { mutableLongStateOf(progress?.read("media-at")?.toLongOrNull()?.coerceAtLeast(0) ?: 0L) }
     var resumePlaying by rememberSaveable(file.uri) { mutableStateOf(false) }
@@ -50,33 +64,54 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit, o
         }
     }
 
-    DisposableEffect(file.uri, lifecycle) {
+    DisposableEffect(file.uri, lifecycle, preferSoftware) {
+        val recovery = handoff
         val activePlayer = ExoPlayer.Builder(
             context,
             DefaultRenderersFactory(context)
                 // The phone's own decoders first; FFmpeg only for what they can't play (AC3, DTS, TrueHD...).
-                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+                .setExtensionRendererMode(
+                    if (preferSoftware) DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                    else DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON,
+                )
                 .setEnableDecoderFallback(true),
         )
             .setSeekBackIncrementMs(SKIP_MS)
             .setSeekForwardIncrementMs(SKIP_MS)
             .build()
-        val clampResume = object : Player.Listener {
+        val playbackListener = object : Player.Listener {
+            private var clamped = false
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (retried || preferSoftware || !canRetryAudio(activePlayer, error)) return
+                retried = true
+                switchAudio(activePlayer, software = true)
+            }
+
             override fun onEvents(player: Player, events: Player.Events) {
                 val duration = player.duration
-                if (player.isCurrentMediaItemSeekable && duration > 0L) {
-                    player.removeListener(this)
+                if (!clamped && player.isCurrentMediaItemSeekable && duration > 0L) {
+                    clamped = true
                     if (player.currentPosition > duration) player.seekTo(duration)
                 }
             }
         }
-        activePlayer.addListener(clampResume)
-        activePlayer.setAudioAttributes(AudioAttributes.DEFAULT, true)
+        activePlayer.addListener(playbackListener)
+        activePlayer.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(if (video) C.AUDIO_CONTENT_TYPE_MOVIE else C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+            true,
+        )
         activePlayer.setHandleAudioBecomingNoisy(true)
-        activePlayer.setMediaItem(MediaItem.fromUri(file.uri), resumeAt)
-        activePlayer.playWhenReady = resumePlaying
-        activePlayer.prepare()
-        player = activePlayer
+        recovery?.let { activePlayer.trackSelectionParameters = it.tracks }
+        activePlayer.setMediaItem(recovery?.item ?: MediaItem.fromUri(file.uri), recovery?.position ?: resumeAt)
+        activePlayer.playWhenReady = recovery?.play ?: resumePlaying
+        handoff = null
+        val monitor = MediaOutputMonitor(context, activePlayer, video)
+        monitor.start()
+        session = AndroidMediaSession(activePlayer, monitor)
         fun keepPlace() {
             if (activePlayer.playerError == null) {
                 resumeAt = activePlayer.resumePosition()
@@ -96,13 +131,15 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit, o
         onDispose {
             lifecycle.removeObserver(observer)
             keepPlace()
-            activePlayer.removeListener(clampResume)
+            activePlayer.removeListener(playbackListener)
+            monitor.close()
             activePlayer.release()
-            player = null
+            session = null
         }
     }
 
-    val activePlayer = player
+    val activeSession = session
+    val activePlayer = activeSession?.player
     LaunchedEffect(activePlayer, progress) {
         if (activePlayer == null || progress == null) return@LaunchedEffect
         while (true) {
@@ -112,10 +149,12 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit, o
             }
         }
     }
-    if (activePlayer == null) {
+    if (activeSession == null) {
         CircularProgressIndicator()
     } else {
-        MediaPlayerContent(activePlayer, video, file, onClose, onFily)
+        MediaPlayerContent(activeSession.player, activeSession.output, video, file, onClose, onFily, preferSoftware) {
+            switchAudio(activeSession.player, software = !preferSoftware)
+        }
     }
 }
 
@@ -125,3 +164,21 @@ private fun Player.resumePosition(): Long {
 }
 
 private const val SKIP_MS = 10_000L
+
+private data class AndroidMediaSession(val player: ExoPlayer, val output: MediaOutputMonitor)
+
+private data class AudioRecovery(val item: MediaItem?, val position: Long, val play: Boolean, val tracks: TrackSelectionParameters)
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private fun canRetryAudio(player: ExoPlayer, error: PlaybackException): Boolean {
+    val renderer = error as? ExoPlaybackException
+    val rendererMime = renderer?.rendererFormat?.sampleMimeType
+    val sinkError = error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
+        error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
+    if (!sinkError && !MimeTypes.isAudio(rendererMime.orEmpty()) &&
+        renderer?.rendererName?.contains("AudioRenderer") != true) return false
+    val mime = rendererMime ?: player.audioFormat?.sampleMimeType ?: player.currentTracks.groups
+        .firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
+        ?.getTrackFormat(0)?.sampleMimeType
+    return mime?.let(FfmpegLibrary::supportsFormat) == true
+}

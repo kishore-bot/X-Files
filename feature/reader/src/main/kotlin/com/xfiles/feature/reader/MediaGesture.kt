@@ -159,6 +159,7 @@ internal fun Modifier.mediaDragGestures(
     onSeek: (Long) -> Unit,
     transform: VideoTransform,
     fitAspect: Float?,
+    allowVolume: Boolean,
     onTransform: (VideoTransform) -> Unit,
 ): Modifier {
     val density = LocalDensity.current
@@ -169,7 +170,7 @@ internal fun Modifier.mediaDragGestures(
     val currentTransform by rememberUpdatedState(transform)
     val currentFitAspect by rememberUpdatedState(fitAspect)
     val changeTransform by rememberUpdatedState(onTransform)
-    return this.pointerInput(player, device, enabled, slopPx, edgePx) {
+    return this.pointerInput(player, device, enabled, allowVolume, slopPx, edgePx) {
         if (!enabled) return@pointerInput
         try {
             awaitEachGesture {
@@ -210,6 +211,7 @@ internal fun Modifier.mediaDragGestures(
                         if (moved.getDistance() < slopPx) continue
                         val kind = MediaGestures.kindFor(moved.x, moved.y, down.position.x, width)
                         if (kind == MediaDrag.Seek && !player.isCurrentMediaItemSeekable) break
+                        if (kind == MediaDrag.Volume && !allowVolume) break
                         current = when (kind) {
                             MediaDrag.Seek -> MediaDragState(
                                 MediaDrag.Seek,

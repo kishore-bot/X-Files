@@ -2,6 +2,7 @@ package com.xfiles.feature.reader.domain
 
 import androidx.media3.common.C
 import androidx.media3.common.Tracks
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import javax.inject.Inject
 
 /**
@@ -33,7 +34,14 @@ class MediaTracksUseCase @Inject constructor() {
                 detail = detail,
                 selected = group.isSelected,
                 supported = group.isSupported,
-                reason = if (group.isSupported) null else "This audio format isn't supported on this phone",
+                reason = when {
+                    group.isSupported -> null
+                    group.getTrackSupport(0) == C.FORMAT_EXCEEDS_CAPABILITIES -> "Track exceeds playback capabilities"
+                    !FfmpegLibrary.isAvailable() -> "No supported system decoder · FFmpeg unavailable"
+                    group.getTrackFormat(0).sampleMimeType?.let(FfmpegLibrary::supportsFormat) == true ->
+                        "Track unavailable with the current decoder or audio output"
+                    else -> "No compatible audio decoder was reported"
+                },
                 group = group,
             )
         }

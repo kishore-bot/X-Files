@@ -63,7 +63,7 @@ jobs:
           sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -x "$sdk" ] || sdk=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
           yes | "$sdk" --licenses > /dev/null || true
-          "$sdk" --install "$SDK_PLATFORM_PACKAGE" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
+          "$sdk" --install "$SDK_PLATFORM_PACKAGE" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" "build-tools;36.0.0" > /dev/null
           ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
           {
             echo "ANDROID_NDK_HOME=$ndk"

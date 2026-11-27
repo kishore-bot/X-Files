@@ -66,7 +66,7 @@ jobs:
           sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -x "$sdk" ] || sdk=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
           yes | "$sdk" --licenses > /dev/null || true
-          "$sdk" --install "$SDK_PLATFORM_PACKAGE" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" > /dev/null
+          "$sdk" --install "$SDK_PLATFORM_PACKAGE" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" "build-tools;36.0.0" > /dev/null
           ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/ndk"
           # The image presets its default NDK in these variables; point every one at the pinned NDK.
           ndk="$ANDROID_HOME/ndk/$NDK_VERSION"

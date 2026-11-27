@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -32,6 +33,9 @@ import kotlin.math.roundToInt
 internal fun MediaPlaybackSheet(
     speedIndex: Int,
     device: MediaDevice,
+    output: MediaOutput,
+    controls: PlaybackControls,
+    video: Boolean,
     onSpeed: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -50,12 +54,13 @@ internal fun MediaPlaybackSheet(
                     FilterChip(index == speedIndex, onClick = {
                         haptics.tick()
                         onSpeed(index)
-                    }, label = { Text(speedLabel(speed)) })
+                    }, enabled = !output.usbDirectRequested, label = { Text(speedLabel(speed)) })
                 }
             }
             Text("Volume ${(volume * 100).roundToInt()}%")
             Slider(
                 value = volume,
+                enabled = !output.usbDirectRequested,
                 onValueChange = {
                     volume = it
                     device.setVolume(it)
@@ -63,17 +68,39 @@ internal fun MediaPlaybackSheet(
                 onValueChangeFinished = { haptics.tick() },
                 modifier = Modifier.semantics { contentDescription = "Media volume" },
             )
-            Text("Brightness ${(brightness * 100).roundToInt()}%")
-            Slider(
-                value = brightness,
-                onValueChange = {
-                    brightness = it
-                    device.setBrightness(it)
-                },
-                onValueChangeFinished = { haptics.tick() },
-                modifier = Modifier.semantics { contentDescription = "Player brightness" },
-            )
-            Text(
+            if (video) {
+                Text("Brightness ${(brightness * 100).roundToInt()}%")
+                Slider(
+                    value = brightness,
+                    onValueChange = {
+                        brightness = it
+                        device.setBrightness(it)
+                    },
+                    onValueChangeFinished = { haptics.tick() },
+                    modifier = Modifier.semantics { contentDescription = "Player brightness" },
+                )
+                if (controls.canBoostPicture) {
+                    FilterChip(controls.pictureBoost, controls.togglePictureBoost, label = { Text("SDR picture boost") })
+                }
+            }
+            if (output.canBoost || output.boosted) {
+                FilterChip(output.boosted, controls.toggleAudioBoost, label = { Text("Audio boost +3 dB") })
+            }
+            if (controls.canSwitchDecoder && !output.usbDirectRequested) {
+                TextButton(onClick = { onDismiss(); controls.switchDecoder() }) {
+                    Text(if (controls.softwarePreferred) "Use automatic audio decoding" else "Prefer software audio")
+                }
+            }
+            if (output.autoLosslessAvailable) {
+                FilterChip(output.autoLossless, { controls.setAutoLossless(!output.autoLossless) },
+                    label = { Text("Auto lossless for USB") })
+                output.usbLosslessDevice?.let { Text(it, style = MaterialTheme.typography.titleSmall) }
+                output.usbLosslessStatus?.let { Text(it, color = EzColors.TextSecondary) }
+            }
+            output.spatial?.let { Text("Spatial audio · $it") }
+            if (output.headTrackingAvailable) Text("Head tracking available")
+            output.notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (video) Text(
                 "Swipe left or right to seek. Swipe up or down on the left for brightness, on the right for volume. Double-tap a side to skip 10 seconds. Hold the picture for double speed.",
                 color = EzColors.TextSecondary,
                 style = MaterialTheme.typography.bodyMedium,

@@ -37,7 +37,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel)
     implementation(libs.media3.exoplayer)
     // Audio formats the phone can't decode (AC3, E-AC3, DTS, TrueHD) go through FFmpeg.
-    runtimeOnly(project(":ffmpeg"))
+    implementation(project(":ffmpeg"))
     implementation(libs.media3.ui.compose)
     implementation(libs.androidx.core)
 }

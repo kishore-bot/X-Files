@@ -30,6 +30,8 @@ internal data class MediaPlayerUiState(
     val duration: Long = 0L,
     val seekable: Boolean = false,
     val failed: Boolean = false,
+    val playbackError: String? = null,
+    val color: MediaColor = MediaColor.Unknown,
     /** Width over height of the picture, 0 when there is no picture yet. */
     val aspect: Float = 0f,
     val speedIndex: Int = MediaSpeedDefault,

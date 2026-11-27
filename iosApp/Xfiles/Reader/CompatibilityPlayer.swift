@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import MPVKit
 import SwiftUI
@@ -10,6 +11,7 @@ struct CompatibilityPlayer: View {
     let onTime: (Double) -> Void
     let onCheckpoint: () -> Void
     let sidecar: MediaSubtitleSession
+    let reason: String?
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: MPVKit.Player?
@@ -66,7 +68,7 @@ struct CompatibilityPlayer: View {
                         .font(.title3)
                         .buttonStyle(.bordered)
                     }
-                    Text("Compatibility playback").font(.caption).foregroundStyle(.secondary)
+                    Text(reason ?? "Compatibility playback").font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 8)
@@ -78,6 +80,7 @@ struct CompatibilityPlayer: View {
             if let player {
                 NavigationStack {
                     Form {
+                        MediaRouteDetails(engine: "MPVKit", reportsSystemSpatialSupport: false, showsHDR: player.state.videoInfo != nil)
                         if !player.state.audioTracks.isEmpty {
                             Picker("Audio", selection: $audioSelection) {
                                 Text("Automatic").tag(nil as Int?)
@@ -118,6 +121,9 @@ struct CompatibilityPlayer: View {
             return
         }
         do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try? session.setSupportsMultichannelContent(false)
             let active = try MPVKit.Player()
             player = active
             // The engine starts on file-loaded. Keep it silent until Xfiles pauses and restores position.

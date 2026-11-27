@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -26,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
+import com.xfiles.design.EzChip
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzMotion
 import com.xfiles.design.LocalReducedMotion
@@ -42,12 +44,21 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.compose.ContentFrame
 import androidx.media3.ui.compose.SURFACE_TYPE_TEXTURE_VIEW
+import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
+import android.os.Build
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Column
 import com.xfiles.core.documents.FileEntry
 import kotlinx.coroutines.delay
 
@@ -57,7 +68,11 @@ import kotlinx.coroutines.delay
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEntry, onClose: () -> Unit, onFily: (() -> Unit)?) {
+internal fun MediaPlayerContent(
+    player: ExoPlayer, monitor: MediaOutputMonitor, video: Boolean, file: FileEntry,
+    onClose: () -> Unit, onFily: (() -> Unit)?,
+    softwarePreferred: Boolean, onSwitchDecoder: () -> Unit,
+) {
     val context = LocalContext.current
     val reduced = LocalReducedMotion.current
     val activity = LocalActivity.current
@@ -65,9 +80,33 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
     val inPip by pip.isInPictureInPicture.collectAsStateWithLifecycle()
     val viewModel: MediaPlayerViewModel = hiltViewModel(key = file.uri.toString())
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val output by monitor.snapshot.collectAsStateWithLifecycle()
     DisposableEffect(player, file.uri, video) {
         viewModel.attach(player, file, video)
+        player.prepare()
         onDispose { viewModel.detach() }
+    }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(monitor, lifecycle, state.playing, output.autoLosslessAvailable) {
+        if (!state.playing && !output.autoLosslessAvailable) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                monitor.refresh()
+                delay(1_500)
+            }
+        }
+    }
+    val hdrDisplay = if (video) rememberHdrDisplay() else null
+    val canSwitchDecoder = remember(state.audioTracks, softwarePreferred) {
+        softwarePreferred || state.audioTracks.any { track ->
+            track.group.getTrackFormat(0).sampleMimeType?.let(FfmpegLibrary::supportsFormat) == true
+        }
+    }
+    var pictureBoost by rememberSaveable(file.uri) { mutableStateOf(false) }
+    val hdrSource = state.color.hdr || output.hasHdr10PlusMetadata
+    val canBoostPicture = video && !hdrSource && state.color == MediaColor.Sdr && Build.VERSION.SDK_INT >= 31
+    val pictureEffect = remember(canBoostPicture, pictureBoost, inPip) {
+        if (Build.VERSION.SDK_INT >= 31 && canBoostPicture && pictureBoost && !inPip) sdrPictureEffect() else null
     }
 
     val haptics = rememberMediaHaptics()
@@ -133,7 +172,22 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
     }
 
     if (state.failed) {
-        ExternalOpen(file, message = "This media could not be played in Xfiles.")
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f)) {
+                ExternalOpen(file, message = "This media could not be played in Xfiles.")
+            }
+            TextButton(onClick = { viewModel.onEvent(MediaPlayerEvent.OpenSheet(MediaSheet.Details)) }) {
+                Text("File details")
+            }
+            if (canSwitchDecoder) TextButton(onClick = onSwitchDecoder) {
+                Text(if (softwarePreferred) "Use automatic audio decoding" else "Prefer software audio")
+            }
+        }
+        if (!filyOpen && state.sheet == MediaSheet.Details) {
+            MediaDetailsSheet(file, player, state, output, hdrDisplay) {
+                viewModel.onEvent(MediaPlayerEvent.OpenSheet(null))
+            }
+        }
         return
     }
 
@@ -176,7 +230,9 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
                             viewModel.onEvent(if (forward) MediaPlayerEvent.SeekForward else MediaPlayerEvent.SeekBack)
                         },
                         onPlayPause = { viewModel.onEvent(MediaPlayerEvent.PlayPause) },
-                        onBoost = { on -> viewModel.onEvent(MediaPlayerEvent.Boost(on)) },
+                        onBoost = { on ->
+                            if (!on || !output.usbDirectRequested) viewModel.onEvent(MediaPlayerEvent.Boost(on))
+                        },
                     )
                     .mediaDragGestures(
                         player = player,
@@ -186,6 +242,7 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
                         onDrag = onDrag,
                         onSeek = { viewModel.onEvent(MediaPlayerEvent.SeekTo(it)) },
                         transform = transform,
+                        allowVolume = !output.usbDirectRequested,
                         fitAspect = state.aspect.takeIf { it > 0f && state.scale == VideoScale.Fit },
                         onTransform = { transform = it },
                     )
@@ -209,13 +266,14 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
                 ContentFrame(
                     player = player,
                     contentScale = state.scale.scale,
-                    surfaceType = SURFACE_TYPE_TEXTURE_VIEW,
+                    surfaceType = if (hdrSource) SURFACE_TYPE_SURFACE_VIEW else SURFACE_TYPE_TEXTURE_VIEW,
                     modifier = Modifier.fillMaxSize().graphicsLayer {
                         val shown = if (inPip) VideoTransform() else transform
                         scaleX = shown.scale
                         scaleY = shown.scale
                         translationX = shown.offset.x
                         translationY = shown.offset.y
+                        renderEffect = pictureEffect
                     },
                 )
             }
@@ -264,10 +322,10 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
         ) {
             Box(Modifier.fillMaxSize()) {
                 val actions = buildList {
-                    if (state.audioTracks.size > 1) add(ReaderAction("Audio tracks", EzIcons.Audio) {
+                    if (state.audioTracks.isNotEmpty()) add(ReaderAction("Audio tracks", EzIcons.Audio) {
                         viewModel.onEvent(MediaPlayerEvent.OpenSheet(MediaSheet.Audio))
                     })
-                    add(ReaderAction("Playback speed", EzIcons.Music) {
+                    add(ReaderAction("Playback settings", EzIcons.Music) {
                         viewModel.onEvent(MediaPlayerEvent.OpenSheet(MediaSheet.Playback))
                     })
                     if (video) {
@@ -297,15 +355,24 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
                         viewModel.onEvent(MediaPlayerEvent.OpenSheet(MediaSheet.Details))
                     })
                 }
-                MediaTopBar(
-                    title = file.name,
-                    onClose = onClose,
-                    onFily = onFily,
-                    actions = actions,
-                    menuOpen = menuOpen,
-                    onMenuOpen = { menuOpen = it; viewModel.onEvent(MediaPlayerEvent.TouchControls) },
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
+                Column(Modifier.align(Alignment.TopCenter), horizontalAlignment = Alignment.CenterHorizontally) {
+                    MediaTopBar(
+                        title = file.name,
+                        onClose = onClose,
+                        onFily = onFily,
+                        actions = actions,
+                        menuOpen = menuOpen,
+                        onMenuOpen = { menuOpen = it; viewModel.onEvent(MediaPlayerEvent.TouchControls) },
+                    )
+                    if (output.usbLosslessDevice != null) {
+                        EzChip(
+                            label = if (output.usbLosslessEnabled) "USB Lossless" else "USB Audio",
+                            selected = output.usbLosslessEnabled,
+                            icon = EzIcons.Audio,
+                            onClick = { viewModel.onEvent(MediaPlayerEvent.OpenSheet(MediaSheet.Playback)) },
+                        )
+                    }
+                }
                 MediaTransport(
                     playing = state.playing,
                     seekable = state.seekable,
@@ -329,5 +396,26 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
             }
         }
     }
-    if (!filyOpen) MediaSheetHost(state, file, player, device, viewModel::onEvent)
+    if (!filyOpen) MediaSheetHost(
+        state, file, player, device, output, hdrDisplay,
+        PlaybackControls(
+            canSwitchDecoder, softwarePreferred, onSwitchDecoder, monitor::toggleBoost, monitor::setAutoLossless,
+            canBoostPicture, pictureBoost, { pictureBoost = !pictureBoost },
+        ),
+        viewModel::onEvent,
+    )
+}
+
+
+@androidx.annotation.RequiresApi(31)
+private fun sdrPictureEffect(): androidx.compose.ui.graphics.RenderEffect {
+    val contrast = 1.08f
+    val offset = (1f - contrast) * 128f + 4f
+    val matrix = android.graphics.ColorMatrix(floatArrayOf(
+        contrast, 0f, 0f, 0f, offset,
+        0f, contrast, 0f, 0f, offset,
+        0f, 0f, contrast, 0f, offset,
+        0f, 0f, 0f, 1f, 0f,
+    ))
+    return android.graphics.RenderEffect.createColorFilterEffect(android.graphics.ColorMatrixColorFilter(matrix)).asComposeRenderEffect()
 }

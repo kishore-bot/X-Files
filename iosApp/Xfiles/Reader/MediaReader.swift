@@ -9,6 +9,7 @@ struct MediaReader: View {
     let onCheckpoint: () -> Void
     var control: ReaderControl? = nil
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("xfiles.media.autoLosslessUSB") private var autoLosslessUSB = true
     @State private var player: AVPlayer?
     @State private var sidecar = MediaSubtitleSession()
     @State private var optionsOpen = false
@@ -18,21 +19,31 @@ struct MediaReader: View {
     @State private var fallback: Fallback?
     @State private var requestedPlay = false
     @State private var nativeAttempt = 0
+    @State private var diagnostics = MediaSourceDiagnostics()
+    @State private var usbAudioStatus: String?
 
     private struct Fallback {
         let seconds: Double
         let playing: Bool
+        let reason: String?
     }
 
     var body: some View {
         Group {
             if let fallback {
                 CompatibilityPlayer(url: url, seconds: fallback.seconds, resumePlaying: fallback.playing,
-                                    control: control, onTime: onTime, onCheckpoint: onCheckpoint, sidecar: sidecar)
+                                    control: control, onTime: onTime, onCheckpoint: onCheckpoint, sidecar: sidecar, reason: fallback.reason)
             } else if let player {
                 VStack(spacing: 0) {
                     VideoPlayer(player: player).background(.black)
                         .overlay { TimedSidecarOverlay(session: sidecar) { player.currentTime().seconds } }
+                    if let usbAudioStatus {
+                        Label(usbAudioStatus, systemImage: "cable.connector")
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.regularMaterial, in: Capsule())
+                    }
                     Menu {
                         Button("Playback options", systemImage: "slider.horizontal.3") { optionsOpen = true }
                         Button("Use compatibility playback", systemImage: "play.rectangle") { switchToFallback() }
@@ -47,7 +58,8 @@ struct MediaReader: View {
         }
         .sheet(isPresented: $optionsOpen) {
             if let player {
-                MediaOptions(player: player, audio: audioTracks, subtitles: subtitles, sidecar: sidecar)
+                MediaOptions(player: player, audio: audioTracks, subtitles: subtitles, sidecar: sidecar, diagnostics: diagnostics, usbStatus: usbAudioStatus,
+                             autoLosslessUSB: $autoLosslessUSB, onCompatibility: { switchToFallback() })
             }
         }
         .task(id: url) {
@@ -61,14 +73,31 @@ struct MediaReader: View {
             let asset = AVURLAsset(url: url)
             do {
                 guard try await asset.load(.isPlayable) else {
-                    switchToFallback()
+                    switchToFallback(reason: "AVPlayer could not open this format.")
+                    return
+                }
+                let facts = await MediaSourceDiagnostics.load(from: asset)
+                try Task.checkCancellation()
+                diagnostics = facts
+                if !facts.audio.isEmpty && facts.audio.allSatisfy({ !$0.playable }) {
+                    switchToFallback(reason: "AVPlayer found audio tracks but could not play them.")
                     return
                 }
                 let duration = try await asset.load(.duration).seconds
                 try Task.checkCancellation()
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-                let active = AVPlayer(playerItem: AVPlayerItem(asset: asset))
-                defer { active.pause(); control?.remove(owner: owner) }
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.playback, mode: .default)
+                try? session.setSupportsMultichannelContent(facts.audio.contains { $0.playable && $0.channels > 2 })
+                let item = AVPlayerItem(asset: asset)
+                item.allowedAudioSpatializationFormats = [.monoAndStereo, .multichannel]
+                let active = AVPlayer(playerItem: item)
+                let usbRate = MediaUSBRatePreference()
+                defer {
+                    usbRate.clear(session: session)
+                    usbAudioStatus = nil
+                    active.pause()
+                    control?.remove(owner: owner)
+                }
                 let position = seconds.isFinite ? max(seconds, 0) : 0
                 if duration.isFinite, duration > 0, position > 0 {
                     _ = await active.seek(
@@ -88,8 +117,27 @@ struct MediaReader: View {
                 installControl(active)
                 while !Task.isCancelled {
                     if active.currentItem?.status == .failed || active.error != nil {
-                        switchToFallback()
+                        switchToFallback(reason: "Native playback failed.")
                         break
+                    }
+                    if active.currentItem?.status == .readyToPlay,
+                       item.tracks.contains(where: { activeTrack in
+                           guard activeTrack.isEnabled, let id = activeTrack.assetTrack?.trackID else { return false }
+                           return facts.audio.contains { $0.id == id && !$0.playable }
+                       }) {
+                        switchToFallback(reason: "AVPlayer could not play the selected audio track.")
+                        break
+                    }
+                    if scenePhase == .active {
+                        let selected = Set(item.tracks.compactMap { track in
+                            track.isEnabled ? track.assetTrack?.trackID : nil
+                        })
+                        let selectedAudio = facts.audio.filter { selected.contains($0.id) }
+                        let source = selectedAudio.count == 1 ? selectedAudio.first : (facts.audio.count == 1 ? facts.audio.first : nil)
+                        usbAudioStatus = usbRate.update(session: session, sourceRate: autoLosslessUSB ? source?.losslessRate : nil)
+                    } else {
+                        usbRate.clear(session: session)
+                        usbAudioStatus = nil
                     }
                     requestedPlay = active.timeControlStatus != .paused
                     record(active)
@@ -99,7 +147,7 @@ struct MediaReader: View {
                 // The reader left the screen.
             } catch {
                 guard fallback == nil else { return }
-                switchToFallback()
+                switchToFallback(reason: "Native playback could not start.")
             }
         }
         .onDisappear { finish(); control?.remove(owner: owner) }
@@ -152,7 +200,7 @@ struct MediaReader: View {
         }
     }
 
-    private func switchToFallback() {
+    private func switchToFallback(reason: String? = nil) {
         guard fallback == nil else { return }
         let now = player?.currentTime().seconds
         let position = now.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? seconds
@@ -161,7 +209,7 @@ struct MediaReader: View {
         player = nil
         optionsOpen = false
         control?.remove(owner: owner)
-        fallback = Fallback(seconds: position, playing: playing)
+        fallback = Fallback(seconds: position, playing: playing, reason: reason)
         nativeAttempt += 1
     }
 
@@ -187,6 +235,10 @@ private struct MediaOptions: View {
     let audio: AVMediaSelectionGroup?
     let subtitles: AVMediaSelectionGroup?
     let sidecar: MediaSubtitleSession
+    let diagnostics: MediaSourceDiagnostics
+    let usbStatus: String?
+    @Binding var autoLosslessUSB: Bool
+    let onCompatibility: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var rate: Float = 1
     @State private var audioIndex: Int?
@@ -210,6 +262,17 @@ private struct MediaOptions: View {
                 if let subtitles {
                     trackPicker("Subtitles", group: subtitles, selection: $subtitleIndex, embedded: true)
                 }
+                Section("Source audio tracks") {
+                    ForEach(diagnostics.audio) { track in
+                        LabeledContent(track.language ?? "Audio", value: track.playable ? track.format : track.format + " · unavailable in AVPlayer")
+                    }
+                    Button("Use compatibility playback", action: onCompatibility)
+                }
+                if let sourceColor = diagnostics.sourceColor {
+                    LabeledContent("Source color", value: sourceColor)
+                }
+                Toggle("Match source rate on USB", isOn: $autoLosslessUSB)
+                MediaRouteDetails(engine: "AVPlayer", showsHDR: diagnostics.hasVideo, usbStatus: usbStatus)
                 SidecarTimingOptions(session: sidecar) {
                     if let subtitles, subtitles.allowsEmptySelection {
                         player.currentItem?.select(nil, in: subtitles)
