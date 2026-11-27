@@ -73,7 +73,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     fun selectGalleryPage(index: Int) {
         val file = gallery.select(index) ?: return
         saved[OPEN_URI] = file.uri.toString()
-        progress.viewImage(file.uri.toString())
+        progress.markViewed(file)
         rememberJob?.cancel()
         rememberJob = viewModelScope.launch {
             delay(REMEMBER_DELAY_MS)
@@ -174,7 +174,7 @@ class DocumentAnalysisViewModel @Inject constructor(
                     pdfPages.remember(opened.file, preview, viewModelScope)
                     progress.write(uri.toString(), "pdf-page", preview.page.toString())
                 }
-                if (preview is FilePreview.Picture) progress.viewImage(uri.toString())
+                if (preview != FilePreview.Unsupported) progress.markViewed(opened.file)
                 (preview as? FilePreview.Structured)?.let { structuredEdits.bind(opened.file.uri, opened.file.name, it) } ?: structuredEdits.close()
             }
             mutableState.value = opened

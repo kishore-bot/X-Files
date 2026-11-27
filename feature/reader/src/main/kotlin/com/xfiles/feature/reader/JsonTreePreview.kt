@@ -119,7 +119,8 @@ private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String
     val stringInk = remember(palette) { readableInk(STRING, palette.page) }
     val literalInk = remember(palette) { readableInk(LITERAL, palette.page) }
     val rows = remember(root, expanded) { jsonRows(root, expanded).take(MAX_ROWS).toList() }
-    val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp)
+    val scale = LocalTextScale.current
+    val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp * scale, lineHeight = 20.sp * scale)
     val jsonList = rememberViewerList("json-tree", rows.size)
     RegisterViewerScroll(jsonList) { LazyScroll(jsonList) }
     Box(Modifier.fillMaxSize().pagePanel()) {
@@ -155,7 +156,8 @@ private fun JsonTree(root: JsonElement, expanded: Set<String>, onToggle: (String
 /** Pretty, minified, or raw text: scrolls vertically and horizontally over the whole panel. */
 @Composable
 private fun JsonText(text: String, view: JsonView) {
-    val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp)
+    val scale = LocalTextScale.current
+    val mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp * scale, lineHeight = 19.sp * scale)
     val vertical = androidx.compose.runtime.key(view) { rememberViewerScroll("json-y:${view.name}") }
     val horizontal = androidx.compose.runtime.key(view) { rememberViewerScroll("json-x:${view.name}") }
     RegisterViewerScroll(vertical) { ColumnScroll(vertical) }

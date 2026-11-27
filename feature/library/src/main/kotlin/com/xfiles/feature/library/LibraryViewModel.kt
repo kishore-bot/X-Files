@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
  * original order for a blank query.
  */
 data class LibraryListing(
+    val category: LibraryCategory = LibraryCategory.All,
     val recents: List<FileEntry> = emptyList(),
     val files: List<FileEntry> = emptyList(),
 )
@@ -56,7 +57,9 @@ class LibraryViewModel @Inject constructor(
     private val conversions: ConversionRepository,
 ) : ViewModel() {
     val recents = documents.recents
-    val lastImage = progress.lastImage
+    val lastViewed = progress.lastViewed
+    val playbackRevision = progress.playbackRevision
+    fun playback(file: FileEntry) = progress.playback(file.uri.toString())
     private val printRequests = Channel<PrintRequest>(Channel.BUFFERED)
     /** Print previews ready for the system print screen, or refusals to show; collected while the library is shown. */
     val prints = printRequests.receiveAsFlow()
@@ -92,6 +95,7 @@ class LibraryViewModel @Inject constructor(
     /** The lists for the query and filter; ranked off the main thread so big libraries stay smooth. */
     val listing: StateFlow<LibraryListing> = combine(query, mutableCategory, fileCorpus, recentCorpus) { q, c, files, recent ->
         LibraryListing(
+            category = c,
             recents = recent.matching(q, LibraryCategory.All),
             files = files.matching(q, c),
         )

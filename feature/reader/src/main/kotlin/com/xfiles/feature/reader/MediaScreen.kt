@@ -80,7 +80,7 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit, o
         fun keepPlace() {
             if (activePlayer.playerError == null) {
                 resumeAt = activePlayer.resumePosition()
-                progress?.save("media-at", resumeAt.toString())
+                progress?.let { it.store.savePlayback(it.file, resumeAt, activePlayer.duration) }
             }
             // Rotation keeps playing; leaving the app comes back paused.
             resumePlaying = activePlayer.playWhenReady && activity?.isChangingConfigurations == true
@@ -108,7 +108,7 @@ internal fun MediaScreen(file: FileEntry, video: Boolean, onClose: () -> Unit, o
         while (true) {
             delay(4_000)
             if (activePlayer.playerError == null && activePlayer.playbackState != Player.STATE_IDLE) {
-                progress.save("media-at", activePlayer.resumePosition().toString())
+                progress.store.savePlayback(progress.file, activePlayer.resumePosition(), activePlayer.duration)
             }
         }
     }

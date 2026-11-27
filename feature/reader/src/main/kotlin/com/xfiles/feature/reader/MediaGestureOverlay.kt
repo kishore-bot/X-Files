@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import com.xfiles.documents.formatPlaybackTime
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -77,10 +78,10 @@ internal fun ScrubBubble(target: Long, total: Long, position: Long) {
         Modifier.background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(14.dp)).padding(horizontal = 18.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("${formatTime(target)} / ${formatTime(total)}", color = Color.White, style = MaterialTheme.typography.titleMedium)
+        Text("${formatPlaybackTime(target)} / ${formatPlaybackTime(total)}", color = Color.White, style = MaterialTheme.typography.titleMedium)
         if (delta != 0L) {
             Text(
-                (if (delta > 0) "+" else "−") + formatTime(abs(delta) * 1000),
+                (if (delta > 0) "+" else "−") + formatPlaybackTime(abs(delta) * 1000),
                 color = Color.White.copy(alpha = 0.75f),
                 style = MaterialTheme.typography.bodySmall,
             )

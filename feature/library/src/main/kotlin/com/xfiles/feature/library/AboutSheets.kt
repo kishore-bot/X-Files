@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.xfiles.design.EzControlSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,7 +31,7 @@ import com.xfiles.design.glassCard
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SupportedFilesSheet(onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    EzControlSheet(onDismiss) {
         LazyColumn(
             Modifier.fillMaxWidth().navigationBarsPadding(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
@@ -68,7 +68,7 @@ internal fun SupportedFilesSheet(onDismiss: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LicencesSheet(onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    EzControlSheet(onDismiss) {
         LazyColumn(
             Modifier.fillMaxWidth().navigationBarsPadding(),
             contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 24.dp),

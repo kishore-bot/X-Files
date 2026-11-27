@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -223,6 +224,8 @@ internal fun PdfPageGrid(
     pageCount: Int,
     current: Int,
     load: suspend (Int) -> Bitmap?,
+    paperColor: Color,
+    colorFilter: ColorFilter?,
     onOpen: (Int) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -250,12 +253,12 @@ internal fun PdfPageGrid(
                             .fillMaxWidth()
                             .aspectRatio(0.72f)
                             .clip(shape)
-                            .background(Color.White)
+                            .background(paperColor)
                             .border(if (active) 2.dp else 1.dp, if (active) primary else outline, shape)
                             .clickable(role = Role.Button, onClickLabel = "Go to page ${index + 1}") { onOpen(index) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        PdfThumbnail(index, load)
+                        PdfThumbnail(index, load, colorFilter)
                     }
                     Text("${index + 1}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
                 }
@@ -265,11 +268,11 @@ internal fun PdfPageGrid(
 }
 
 @Composable
-private fun PdfThumbnail(index: Int, load: suspend (Int) -> Bitmap?) {
+private fun PdfThumbnail(index: Int, load: suspend (Int) -> Bitmap?, colorFilter: ColorFilter?) {
     val image by produceState<ImageBitmap?>(null, index, load) {
         value = load(index)?.asImageBitmap()
     }
-    image?.let { Image(it, "Page ${index + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+    image?.let { Image(it, "Page ${index + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit, colorFilter = colorFilter) }
 }
 
 /** Two pages side by side (left is the lower page number). Each page keeps its own pinch and pan. */

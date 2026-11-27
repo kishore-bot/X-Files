@@ -11,14 +11,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
+import com.xfiles.design.EzControlSheet
 import com.xfiles.design.PrimaryActionButton
 import com.xfiles.design.rememberHaptics
 import androidx.compose.material3.MaterialTheme
@@ -43,8 +42,7 @@ fun SharedLinkSheet(
 ) {
     val context = LocalContext.current
     val haptics = rememberHaptics()
-    val sheetState = rememberModalBottomSheetState()
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    EzControlSheet(onDismiss, skipPartiallyExpanded = false) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Text("Shared link", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))

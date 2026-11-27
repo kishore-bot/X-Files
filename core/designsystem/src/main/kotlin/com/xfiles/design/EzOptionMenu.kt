@@ -1,7 +1,6 @@
 package com.xfiles.design
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,7 +29,7 @@ fun <T> EzOptionMenu(
         TextButton(onClick = { expanded = true }, enabled = options.isNotEmpty()) {
             Text(selected?.let(optionLabel) ?: placeholder)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        EzGlassDropdown(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(optionLabel(option)) },

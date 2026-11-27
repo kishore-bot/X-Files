@@ -21,29 +21,30 @@ enum class PageStyle(val label: String) {
     Dark("Dark"),
     Sepia("Sepia");
 
-    /** The filter for rendered pages (PDF): dark inverts with the hues kept, sepia tones the paper. Null otherwise. */
-    fun pageFilter(): ColorFilter? = when (this) {
-        Dark -> ColorFilter.colorMatrix(ColorMatrix(DARK_PAGE))
-        Sepia -> ColorFilter.colorMatrix(ColorMatrix(SEPIA_PAGE))
-        else -> null
+    internal fun pdfFilter(darkApp: Boolean): ColorFilter? = when (this) {
+        Original -> null
+        Standard -> if (darkApp) DARK_FILTER else null
+        Dark -> DARK_FILTER
+        Sepia -> SEPIA_FILTER
     }
 
     companion object {
         /** Invert, then rotate the hues by 180 degrees: the usual dark-reading filter. */
-        private val DARK_PAGE: FloatArray = multiply(hueRotate180(), invert())
+        private val DARK_FILTER = ColorFilter.colorMatrix(ColorMatrix(multiply(hueRotate180(), invert())))
 
         /** The sepia tone matrix (W3C feColorMatrix). */
-        private val SEPIA_PAGE = floatArrayOf(
+        private val SEPIA_FILTER = ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
             0.393f, 0.769f, 0.189f, 0f, 0f,
             0.349f, 0.686f, 0.168f, 0f, 0f,
             0.272f, 0.534f, 0.131f, 0f, 0f,
             0f, 0f, 0f, 1f, 0f,
-        )
+        )))
 
+        // ColorMatrix offsets use 8-bit channel units. White becomes dark charcoal, black becomes near-white.
         private fun invert() = floatArrayOf(
-            -1f, 0f, 0f, 0f, 1f,
-            0f, -1f, 0f, 0f, 1f,
-            0f, 0f, -1f, 0f, 1f,
+            -0.86f, 0f, 0f, 0f, 245f,
+            0f, -0.86f, 0f, 0f, 245f,
+            0f, 0f, -0.86f, 0f, 245f,
             0f, 0f, 0f, 1f, 0f,
         )
 

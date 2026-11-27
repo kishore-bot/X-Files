@@ -40,6 +40,7 @@ import com.xfiles.core.documents.FileEntry
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfPageText
 import com.xfiles.design.EzIcons
+import com.xfiles.design.LocalEzDarkTheme
 import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.DocumentKind
@@ -202,6 +203,8 @@ fun ReaderScreen(
     // An EPUB book has its own chrome (with Fily), so the parent reader bar stays hidden.
     val epub = (ready?.preview as? FilePreview.Structured)?.document?.info?.format == DocumentFormat.Epub
     val preview = ready?.preview
+    val archive = ready?.file?.name?.let(::isZipName) == true
+    val structuredDocument = preview is FilePreview.Structured && !archive
     val textOf = when (preview) {
         is FilePreview.Text -> preview
         is FilePreview.Structured -> preview.source
@@ -217,13 +220,13 @@ fun ReaderScreen(
                     if (ui.showPdfFind) onClosePdfFind()
                 })
             }
-            if (preview is FilePreview.Structured || (textOf != null && textOf.content.isNotBlank())) {
+            if (structuredDocument || !textOf?.content.isNullOrBlank()) {
                 add(ReaderAction("Find in file", EzIcons.Search) { onEvent(ReaderUiEvent.SetSearch(!ui.showSearch)) })
             }
             val rich = when (preview) {
                 is FilePreview.Html -> true
-                is FilePreview.Text -> fileName.let { it.endsWith(".json", ignoreCase = true) || isSourceCode(it) }
-                is FilePreview.Structured -> preview.source != null
+                is FilePreview.Text -> isSvgName(fileName) || fileName.endsWith(".json", ignoreCase = true) || isSourceCode(fileName)
+                is FilePreview.Structured -> structuredDocument && preview.source != null
                 else -> false
             }
             if (rich) {
@@ -237,7 +240,7 @@ fun ReaderScreen(
                     if (openFile != null) openFile(ready.file.uri, ready.file.name) else onEdit(ready.file.name, textOf.content)
                 })
             }
-            if (preview is FilePreview.Structured && isOfficeEditable(fileName)) {
+            if (structuredDocument && isOfficeEditable(fileName)) {
                 add(ReaderAction("Find & replace", EzIcons.Edit) { onEvent(ReaderUiEvent.SetOffice(!ui.showOffice)) })
             }
             if (preview is FilePreview.Pdf) {
@@ -245,11 +248,13 @@ fun ReaderScreen(
                     onEvent(ReaderUiEvent.SetEditingMarkup(true))
                     onClosePdfFind()
                 })
-                add(ReaderAction("Page grid", EzIcons.Grid) { onEvent(ReaderUiEvent.SetGrid(!ui.showGrid)) })
-                add(ReaderAction(if (ui.pdfTwoUp) "Single column" else "Two-page spread", if (ui.pdfTwoUp) EzIcons.SinglePage else EzIcons.TwoPages) {
-                    onEvent(ReaderUiEvent.SetGrid(false))
-                    onEvent(ReaderUiEvent.SetPdfTwoUp(!ui.pdfTwoUp))
-                })
+                if (preview.pageCount > 1) {
+                    add(ReaderAction("Page grid", EzIcons.Grid) { onEvent(ReaderUiEvent.SetGrid(!ui.showGrid)) })
+                    add(ReaderAction(if (ui.pdfTwoUp) "Single column" else "Two-page spread", if (ui.pdfTwoUp) EzIcons.SinglePage else EzIcons.TwoPages) {
+                        onEvent(ReaderUiEvent.SetGrid(false))
+                        onEvent(ReaderUiEvent.SetPdfTwoUp(!ui.pdfTwoUp))
+                    })
+                }
             }
             if (preview is FilePreview.Picture) {
                 add(ReaderAction("Rotate", EzIcons.Rotate) { documentKey?.let(onRotate) })
@@ -266,32 +271,33 @@ fun ReaderScreen(
                     },
                 )
             }
-            if (preview is FilePreview.Pdf || preview is FilePreview.Structured || (textOf != null && textOf.content.isNotBlank())) {
+            if (preview is FilePreview.Pdf || structuredDocument || !textOf?.content.isNullOrBlank()) {
                 add(ReaderAction("At a glance", EzIcons.Lightbulb) { onSummary() })
             }
-            if (preview is FilePreview.Text) {
+            if (preview is FilePreview.Text && (!isSvgName(fileName) || ui.showSource || ui.showSearch)) {
                 val percent = (textScale * 100).toInt()
-                add(ReaderAction("Larger text ($percent%)", EzIcons.TextT) {
+                if (textScale < TEXT_SCALE_MAX) add(ReaderAction("Larger text ($percent%)", EzIcons.TextT) {
                     val next = (textScale + TEXT_SCALE_STEP).coerceAtMost(TEXT_SCALE_MAX)
                     textScale = next
                     progress?.save("text-scale", next.toString())
                 })
-                add(ReaderAction("Smaller text ($percent%)", EzIcons.TextT) {
+                if (textScale > TEXT_SCALE_MIN) add(ReaderAction("Smaller text ($percent%)", EzIcons.TextT) {
                     val next = (textScale - TEXT_SCALE_STEP).coerceAtLeast(TEXT_SCALE_MIN)
                     textScale = next
                     progress?.save("text-scale", next.toString())
                 })
             }
-            if (preview is FilePreview.Pdf || preview is FilePreview.Structured || preview is FilePreview.Text || preview is FilePreview.Html) {
+            if (preview is FilePreview.Pdf || structuredDocument || preview is FilePreview.Text || preview is FilePreview.Html) {
                 add(ReaderAction("Page style: ${pageStyle.label}", EzIcons.Theme) { onEvent(ReaderUiEvent.SetPageStyleSheet(true)) })
             }
-            val printable = ready.file.kind !in setOf(DocumentKind.Audio, DocumentKind.Video, DocumentKind.Unknown)
+            val printable = preview != FilePreview.Unsupported && !archive &&
+                ready.file.kind !in setOf(DocumentKind.Audio, DocumentKind.Video, DocumentKind.Unknown)
             if (printable) add(ReaderAction("Print", EzIcons.Print) { onPrint() })
             add(ReaderAction("Share original", EzIcons.Share) { onShare() })
             if (!isInDeviceStorage(ready.file.uri)) {
                 add(ReaderAction("Save to Downloads", EzIcons.Share) { saveVm.onEvent(SaveUiEvent.Save(ready.file.uri, ready.file.name)) })
             }
-            if (structuredUi.edited) add(ReaderAction("Save edited copy", EzIcons.Share) { saveEdited.launch(fileName) })
+            if (structuredDocument && structuredUi.edited) add(ReaderAction("Save edited copy", EzIcons.Share) { saveEdited.launch(fileName) })
         }
     }
 
@@ -380,6 +386,7 @@ fun ReaderScreen(
                         pageCount = pdf.pageCount,
                         zoom = ui.pdfZoom,
                         grid = ui.showGrid,
+                        colorFilter = pageStyle.pdfFilter(LocalEzDarkTheme.current),
                         thumbnail = pdfThumbnail,
                         onPage = onPage,
                         onJump = { onEvent(ReaderUiEvent.SetJump(true)) },

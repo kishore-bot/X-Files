@@ -1,5 +1,6 @@
 package com.xfiles.feature.reader
 
+import com.xfiles.documents.formatPlaybackTime
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -93,8 +94,8 @@ internal fun MediaTransport(
             modifier = Modifier.semantics { contentDescription = "Seek" },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(time), color = Color.White, fontSize = 12.sp)
-            Text("−${formatTime((duration - time).coerceAtLeast(0))}", color = Color.White, fontSize = 12.sp)
+            Text(formatPlaybackTime(time), color = Color.White, fontSize = 12.sp)
+            Text("−${formatPlaybackTime((duration - time).coerceAtLeast(0))}", color = Color.White, fontSize = 12.sp)
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
             RoundButton(EzIcons.Rewind, "Back 10 seconds", onBack, enabled = seekable)

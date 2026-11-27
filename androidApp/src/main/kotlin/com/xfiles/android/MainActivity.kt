@@ -5,6 +5,15 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -129,8 +138,9 @@ class MainActivity : ComponentActivity() {
             if (savedInstanceState != null || !android.animation.ValueAnimator.areAnimatorsEnabled()) {
                 splash.remove()
             } else {
-                // The system mark stays in place over the first app frame during this brief handoff.
-                splash.view.animate().alpha(0f).setDuration(120L).withEndAction(splash::remove).start()
+                // Animate the existing system logo across the first frame of the app.
+                splash.iconView.animate().scaleX(0.92f).scaleY(0.92f).setDuration(180L).start()
+                splash.view.animate().alpha(0f).setDuration(180L).withEndAction(splash::remove).start()
             }
         }
         enableEdgeToEdge()
@@ -247,6 +257,9 @@ class MainActivity : ComponentActivity() {
                         NavDisplay(
                             backStack = stack,
                             onBack = navigator::back,
+                            transitionSpec = { routeTransition(forward = true, animate = !reducedMotion && !inPip && !mediaOnTop) },
+                            popTransitionSpec = { routeTransition(forward = false, animate = !reducedMotion && !inPip) },
+                            predictivePopTransitionSpec = { routeTransition(forward = false, animate = !reducedMotion && !inPip) },
                             entryProvider = entryProvider {
                                 entry<Route.Library> {
                                     LibraryRoute(
@@ -325,7 +338,8 @@ class MainActivity : ComponentActivity() {
             reconnecting = null
             if (tree != null) library.addFolder(tree, previous)
         }
-        val lastImage by library.lastImage.collectAsStateWithLifecycle()
+        val lastViewed by library.lastViewed.collectAsStateWithLifecycle()
+        val playbackRevision by library.playbackRevision.collectAsStateWithLifecycle()
         val context = LocalContext.current
         LaunchedEffect(library) {
             library.prints.collect { request ->
@@ -341,7 +355,9 @@ class MainActivity : ComponentActivity() {
             recentFiles = recentFiles,
             listing = listing,
             category = category,
-            lastImage = lastImage,
+            lastViewed = lastViewed,
+            playbackRevision = playbackRevision,
+            playbackFor = library::playback,
             onCategory = library::setCategory,
             onQueryChange = library::setQuery,
             bookmarks = bookmarks,
@@ -659,4 +675,13 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val MAX_NOTE_NAME = 60
     }
+}
+
+
+private fun routeTransition(forward: Boolean, animate: Boolean): ContentTransform {
+    if (!animate) return EnterTransition.None togetherWith ExitTransition.None
+    val direction = if (forward) 1 else -1
+    val enter = fadeIn(tween(180)) + slideInHorizontally(tween(240)) { width -> direction * width / 10 }
+    val exit = fadeOut(tween(140)) + slideOutHorizontally(tween(200)) { width -> -direction * width / 14 }
+    return enter togetherWith exit
 }

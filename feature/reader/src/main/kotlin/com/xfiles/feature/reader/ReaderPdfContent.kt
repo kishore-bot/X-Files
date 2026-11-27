@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 import com.xfiles.core.documents.FilePreview
 import com.xfiles.core.documents.PdfMatchBox
 import com.xfiles.core.documents.PdfPageText
+import com.xfiles.design.LocalEzDarkTheme
 import com.xfiles.documents.PdfBox
 import com.xfiles.documents.PdfMarkup
 
@@ -32,6 +33,7 @@ internal fun ReaderPdfPage(
     onPdfPageSettled: (Int) -> Unit,
     onPdfQuery: (String) -> Unit,
 ) {
+    val pageFilter = LocalPageStyle.current.pdfFilter(LocalEzDarkTheme.current)
     Box(Modifier.fillMaxSize()) {
         if (ui.editingMarkup) {
             PdfMarkupCanvas(
@@ -41,6 +43,7 @@ internal fun ReaderPdfPage(
                 markup.marks.filter { it.page == preview.page },
                 enabled = !markup.working && !ready.turningPage,
                 onAdd = onAddMarkup,
+                colorFilter = pageFilter,
             )
         } else {
             val active = pdfFind.matches.getOrNull(pdfFind.selected)
@@ -71,7 +74,7 @@ internal fun ReaderPdfPage(
                 highlights = ::highlights,
                 marks = ::marksOn,
                 textSource = ::textSource,
-                colorFilter = LocalPageStyle.current.pageFilter(),
+                colorFilter = pageFilter,
                 onPageSettled = onPdfPageSettled,
                 onVisiblePage = { onEvent(ReaderUiEvent.SetVisiblePdfPage(it)) },
                 onZoom = { onEvent(ReaderUiEvent.SetPdfZoom(it)) },

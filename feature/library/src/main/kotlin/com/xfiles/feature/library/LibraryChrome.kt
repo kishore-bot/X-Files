@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -50,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -106,12 +108,13 @@ import com.xfiles.documents.library.libraryCategories
 
 internal enum class HomeTab { Library, Recent, Bookmarks }
 
-/** Menu, the app's name, Fily and Settings (when there is one). */
+/** App title and the actions for the current library tab. */
 @Composable
 internal fun Header(
     onSettings: (() -> Unit)?,
     onVoice: (() -> Unit)?,
     compact: Boolean,
+    onFolders: (() -> Unit)?,
 ) {
     Row(
         Modifier
@@ -125,7 +128,10 @@ internal fun Header(
             style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
             color = EzColors.Text,
             modifier = Modifier.weight(1f).semantics { heading() },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
+        if (onFolders != null) GlassIconButton(EzIcons.Folder, "Manage folders", onFolders)
         if (onVoice != null) FilyButton(onVoice)
         if (onSettings != null) GlassIconButton(EzIcons.Settings, "Settings", onSettings)
     }
@@ -133,7 +139,12 @@ internal fun Header(
 
 /** The search pill: a red search icon, one line of text, a clear button while there is text. */
 @Composable
-internal fun LibrarySearch(search: TextFieldState, compact: Boolean, modifier: Modifier = Modifier) {
+internal fun LibrarySearch(
+    search: TextFieldState,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+    onFocus: (Boolean) -> Unit = {},
+) {
     Row(
         modifier
             .fillMaxWidth()
@@ -146,7 +157,7 @@ internal fun LibrarySearch(search: TextFieldState, compact: Boolean, modifier: M
         Icon(EzIcons.Search, null, Modifier.size(EzSpacing.BarIcon), tint = EzColors.Primary)
         BasicTextField(
             state = search,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).onFocusChanged { onFocus(it.hasFocus) },
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = EzColors.Text),
             lineLimits = TextFieldLineLimits.SingleLine,
             cursorBrush = SolidColor(EzColors.Primary),
@@ -187,9 +198,9 @@ internal fun FilterRow(selected: LibraryCategory, onSelect: (LibraryCategory) ->
     }
 }
 
-/** The folders as glass chips, with Add folder, Search inside files and Refresh beside them. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-internal fun FolderRow(
+internal fun FolderManager(
     folders: List<LinkedFolder>,
     searchEnabled: Boolean,
     scanning: Boolean,
@@ -199,36 +210,39 @@ internal fun FolderRow(
     onRemove: (String) -> Unit,
     onReconnect: (android.net.Uri) -> Unit,
 ) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = EzSpacing.Gutter, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    FlowRow(
+        RowGutter.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        item(key = "add", contentType = "add") {
-            EzChip(label = "Add folder", selected = false, onClick = onAdd, icon = EzIcons.Plus, iconTint = EzColors.Primary)
-        }
+        EzChip("Add folder", selected = false, onClick = onAdd, icon = EzIcons.Plus)
         if (folders.isNotEmpty()) {
-            item(key = "search-inside", contentType = "toggle") {
-                EzChip(label = "Search inside files", selected = searchEnabled, onClick = { onSearchEnabled(!searchEnabled) })
-            }
-            item(key = "refresh", contentType = "toggle") {
-                EzChip(label = "Refresh", selected = false, onClick = onRefresh, icon = null)
-            }
+            EzChip("Search inside files", selected = searchEnabled, onClick = { onSearchEnabled(!searchEnabled) })
+            if (!scanning) EzChip("Refresh", selected = false, onClick = onRefresh)
         }
-        items(folders, key = { it.uri.toString() }, contentType = { "folder" }) { folder ->
+    }
+    if (scanning) {
+        LinearProgressIndicator(RowGutter.fillMaxWidth().padding(top = 8.dp), color = EzColors.Primary)
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
+        contentPadding = PaddingValues(horizontal = EzSpacing.Gutter, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(folders, key = { it.uri.toString() }) { folder ->
             Row(
-                Modifier.widthIn(max = 240.dp).glass(EzShapes.Pill, 0.5f).padding(start = 14.dp),
+                Modifier.fillMaxWidth().glassCard().padding(start = 14.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(EzIcons.Folder, null, tint = EzColors.Primary, modifier = Modifier.size(18.dp))
                 Text(
                     folder.name,
                     style = MaterialTheme.typography.labelLarge,
                     color = EzColors.Text,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.weight(1f),
                 )
                 when (folder.access) {
                     com.xfiles.core.documents.FolderAccess.Available -> Unit

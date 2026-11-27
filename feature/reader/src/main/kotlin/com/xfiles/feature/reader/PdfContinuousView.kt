@@ -265,14 +265,15 @@ private fun PdfPageSlot(
         PdfPageTransform(viewport.width.toFloat(), viewport.height.toFloat(), pageWidth, pageHeight, 0, 1f, Offset.Zero)
     }
     val paper = RoundedCornerShape(4.dp)
-    val image = bitmap?.asImageBitmap()
+    val image = remember(bitmap) { bitmap?.asImageBitmap() }
+    val palette = LocalReaderColors.current
     Box(
         Modifier
             .width(width)
             .aspectRatio(aspect)
             .shadow(6.dp, paper)
             .clip(paper)
-            .background(Color.White)
+            .background(palette.page)
             .onSizeChanged { viewport = it }
             .then(
                 if (image == null) Modifier else Modifier
@@ -320,7 +321,6 @@ private fun PdfPageSlot(
                 contentScale = ContentScale.FillBounds,
                 colorFilter = colorFilter,
             )
-            val palette = LocalPageStyle.current.readerColors(darkApp = false)
             val selectionColor = palette.selection.copy(alpha = 0.36f)
             Canvas(Modifier.fillMaxSize()) {
                 for (box in marks) {

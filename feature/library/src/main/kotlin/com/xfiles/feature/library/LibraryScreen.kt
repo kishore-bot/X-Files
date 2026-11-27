@@ -2,6 +2,13 @@ package com.xfiles.feature.library
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +56,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -55,8 +64,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScrollimport androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -79,6 +91,8 @@ import androidx.compose.ui.unit.sp
 import com.xfiles.core.documents.ArchiveHandoff
 import com.xfiles.core.documents.FileBookmark
 import com.xfiles.core.documents.FileEntry
+import com.xfiles.core.documents.FileProgress
+import com.xfiles.core.documents.PlaybackProgress
 import com.xfiles.core.documents.FolderLibrary
 import com.xfiles.core.documents.LibraryContentSearch
 import com.xfiles.core.documents.LibrarySearchHit
@@ -88,6 +102,7 @@ import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzBadgeColors
 import com.xfiles.design.EzChip
 import com.xfiles.design.EzColors
+import com.xfiles.design.EzControlSheet
 import com.xfiles.design.EzDialog
 import com.xfiles.design.EzEmptyCard
 import com.xfiles.design.EzFloatingAction
@@ -105,6 +120,7 @@ import com.xfiles.design.FilyMascotCallToAction
 import com.xfiles.design.GlassIconButton
 import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.LocalHapticsEnabled
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.PrimaryActionButton
 import com.xfiles.design.rememberFrostedBackdrop
 import com.xfiles.design.glass
@@ -114,6 +130,7 @@ import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.library.LibraryCategory
 import com.xfiles.documents.library.libraryCategories
+import kotlinx.coroutines.launch
 
 /** Most files one share sends: the system share sheet takes a bounded list. */
 internal const val MaxSharedFiles = 32
@@ -135,7 +152,9 @@ fun LibraryScreen(
     recentFiles: List<FileEntry>,
     listing: LibraryListing,
     category: LibraryCategory,
-    lastImage: String? = null,
+    lastViewed: Map<LibraryCategory, String>,
+    playbackRevision: Long,
+    playbackFor: (FileEntry) -> PlaybackProgress?,
     onCategory: (LibraryCategory) -> Unit,
     onQueryChange: (String) -> Unit,
     bookmarks: List<FileBookmark>,
@@ -195,10 +214,12 @@ fun LibraryScreen(
     val window = LocalWindowInfo.current.containerDpSize
     val landscape = window.width >= 480.dp && window.width > window.height
     var toolsOpen by rememberSaveable { mutableStateOf(false) }
+    var foldersOpen by rememberSaveable { mutableStateOf(false) }
     val filyOpen = LocalFilyOpen.current
     LaunchedEffect(filyOpen) {
         if (filyOpen) {
             toolsOpen = false
+            foldersOpen = false
             confirmClear = false
             removingFolder = null
         }
@@ -219,6 +240,25 @@ fun LibraryScreen(
             },
             onDismiss = { toolsOpen = false },
         )
+    }
+    if (foldersOpen && !filyOpen) {
+        EzControlSheet(onDismiss = { foldersOpen = false }) {
+            Text(
+                "Linked folders",
+                RowGutter.padding(bottom = 12.dp).semantics { heading() },
+                style = MaterialTheme.typography.titleLarge,
+            )
+            FolderManager(
+                folders = library.folders,
+                searchEnabled = searchEnabled,
+                scanning = library.scanning,
+                onAdd = onAddFolder,
+                onSearchEnabled = onSearchEnabled,
+                onRefresh = onRefresh,
+                onRemove = { foldersOpen = false; removingFolder = it },
+                onReconnect = onReconnectFolder,
+            )
+        }
     }
     val haptics = rememberHaptics()
     val hapticsOn = LocalHapticsEnabled.current
@@ -269,17 +309,76 @@ fun LibraryScreen(
     val showsAssistant = tab == HomeTab.Library && (query.isNotEmpty() || !noFolders)
 
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val imageIndex = remember(matching, lastImage) {
-        val id = lastImage?.let { com.xfiles.core.documents.FileProgress.identity(it) }
-        if (id == null) -1 else matching.indexOfFirst { com.xfiles.core.documents.FileProgress.identity(it.uri.toString()) == id }
+    val scope = rememberCoroutineScope()
+    val reducedMotion = LocalReducedMotion.current
+    val fileCategory = listing.category
+    val section = if (tab == HomeTab.Library) fileCategory.name else tab.name
+    var previousSection by rememberSaveable { mutableStateOf(section) }
+    var browseVisible by rememberSaveable { mutableStateOf(true) }
+    var searchFocused by remember { mutableStateOf(false) }
+    val searchRevealDistance = with(LocalDensity.current) { 24.dp.toPx() }
+    val revealOnScroll = remember(listState, searchRevealDistance) {
+        object : NestedScrollConnection {
+            private var travel = 0f
+
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput || available.y == 0f) return Offset.Zero
+                if ((travel < 0f) != (available.y < 0f)) travel = 0f
+                travel += available.y
+                if (travel >= searchRevealDistance) {
+                    browseVisible = true
+                    travel = 0f
+                } else if (travel <= -searchRevealDistance && listState.canScrollBackward && listState.canScrollForward) {
+                    browseVisible = false
+                    travel = 0f
+                }
+                return Offset.Zero
+            }
+        }
     }
-    val markedImage = matching.getOrNull(imageIndex)?.uri
-    val imageTab = tab == HomeTab.Library && category == LibraryCategory.Images
-    // Search, filters, folders, and the list title precede the file rows.
-    val imageStart = 4 + (if (landscape) 0 else 1) + (if (noFolders && !library.scanning) 1 else 0) +
-        (if (library.error != null) 1 else 0) + (if (library.reachedLimit) 1 else 0)
-    LaunchedEffect(imageTab, imageIndex, imageStart, lastImage, query) {
-        if (imageTab && query.isEmpty() && imageIndex >= 0) listState.scrollToItem(imageStart + imageIndex)
+    val deepScroll by remember(listState) { derivedStateOf { listState.firstVisibleItemIndex >= 8 } }
+    val atTop by remember(listState) { derivedStateOf { !listState.canScrollBackward } }
+    val topVisible = deepScroll && picked.isEmpty() && !searchFocused
+    val backToTop: () -> Unit = {
+        browseVisible = true
+        scope.launch {
+            if (reducedMotion) listState.scrollToItem(0) else listState.animateScrollToItem(0)
+        }
+    }
+    val lastViewedUri = when (tab) {
+        HomeTab.Library -> lastViewed[fileCategory] ?: recentFiles.firstOrNull { entry ->
+            fileCategory == LibraryCategory.All || fileCategory in libraryCategories(entry.name)
+        }?.uri?.toString()
+        HomeTab.Recent -> lastViewed[LibraryCategory.All] ?: recentFiles.firstOrNull()?.uri?.toString()
+        HomeTab.Bookmarks -> lastViewed[LibraryCategory.All]
+    }
+    val historyId = remember(lastViewedUri) { lastViewedUri?.let { FileProgress.identity(it) } }
+    val markedIndex = remember(historyId, matching) {
+        if (historyId == null) -1 else matching.indexOfFirst { FileProgress.identity(it.uri.toString()) == historyId }
+    }
+    val markedUri = matching.getOrNull(markedIndex)?.uri
+    val imageTab = tab == HomeTab.Library && fileCategory == LibraryCategory.Images
+    val showFolderEmpty = tab == HomeTab.Library && noFolders && !library.scanning && matching.isEmpty() && query.isEmpty()
+    val showError = tab == HomeTab.Library && library.error != null
+    val showLimit = tab == HomeTab.Library && library.reachedLimit
+    val imageStart = 1 + (if (showError) 1 else 0) + (if (showLimit) 1 else 0)
+    var restoredImage by remember { mutableStateOf<Uri?>(null) }
+    LaunchedEffect(section, imageTab, markedUri, query.isEmpty(), imageStart) {
+        if (previousSection != section) {
+            previousSection = section
+            browseVisible = true
+            if (tab == HomeTab.Bookmarks) searchFocused = false
+            restoredImage = null
+            if (!imageTab || query.isNotEmpty() || markedUri == null) listState.scrollToItem(0)
+        }
+        if (imageTab && query.isEmpty() && markedUri != null && restoredImage != markedUri) {
+            listState.scrollToItem(imageStart + markedIndex)
+            restoredImage = markedUri
+        }
+    }
+    val showingContentSearch = searchesInside && contentSearch.query == query
+    val visibleHits = remember(contentSearch.hits, fileCategory) {
+        contentSearch.hits.filter { fileCategory == LibraryCategory.All || fileCategory in libraryCategories(it.file.name) }
     }
     val backdrop = rememberFrostedBackdrop()
     Column(Modifier.fillMaxSize().imePadding()) {
@@ -295,47 +394,41 @@ fun LibraryScreen(
                 onSettings = onSettings.takeUnless { landscape },
                 onVoice = onFily,
                 compact = landscape,
+                onFolders = { foldersOpen = true }.takeIf { tab == HomeTab.Library },
             )
+        }
+        if (tab != HomeTab.Bookmarks) {
+            AnimatedVisibility(
+                visible = browseVisible || atTop || searchFocused,
+                modifier = Modifier.fillMaxWidth().padding(start = startClearance),
+                enter = if (reducedMotion) EnterTransition.None else expandVertically() + fadeIn(),
+                exit = if (reducedMotion) ExitTransition.None else shrinkVertically() + fadeOut(),
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    LibrarySearch(
+                        search, compact = landscape, modifier = RowGutter.padding(vertical = 4.dp),
+                        onFocus = { searchFocused = it },
+                    )
+                    if (tab == HomeTab.Library) FilterRow(category, onCategory, compact = landscape)
+                }
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
                 state = listState,
-                modifier = backdrop.source(Modifier.fillMaxSize().padding(start = startClearance)),
+                modifier = backdrop.source(
+                    Modifier.fillMaxSize().padding(start = startClearance).nestedScroll(revealOnScroll),
+                ),
                 contentPadding = PaddingValues(top = if (landscape) 4.dp else 12.dp, bottom = bottomClearance),
                 verticalArrangement = Arrangement.spacedBy(if (landscape) 4.dp else 8.dp),
             ) {
-                if (tab != HomeTab.Bookmarks) item(key = "search", contentType = "search") {
-                    LibrarySearch(search, compact = landscape, modifier = RowGutter.padding(vertical = 4.dp))
-                }
-                if (tab == HomeTab.Library) item(key = "chips", contentType = "chips") {
-                    FilterRow(category, onCategory, compact = landscape)
-                }
-                if (tab == HomeTab.Library) {
-                    if (!landscape) item(key = "folders-title", contentType = "section") {
-                        EzSectionPill("Your folders", RowGutter)
-                    }
-                    item(key = "folders", contentType = "strip") {
-                        FolderRow(
-                            folders = library.folders,
-                            searchEnabled = searchEnabled,
-                            scanning = library.scanning,
-                            onAdd = onAddFolder,
-                            onSearchEnabled = onSearchEnabled,
-                            onRefresh = onRefresh,
-                            onRemove = { removingFolder = it },
-                            onReconnect = onReconnectFolder,
-                        )
-                    }
-                    if (noFolders && !library.scanning) item(key = "no-folders", contentType = "card") {
-                        NoFoldersCard(onAddFolder, RowGutter)
-                    }
-                }
                 if (tab == HomeTab.Library || tab == HomeTab.Recent) {
                     item(key = "list-title", contentType = "section") {
                         val title = when {
                             tab == HomeTab.Recent -> "Recent files"
-                            category == LibraryCategory.All -> "In your folders"
-                            else -> category.label
+                            query.isNotEmpty() -> "File names"
+                            fileCategory == LibraryCategory.All -> "All files"
+                            else -> fileCategory.label
                         }
                         SectionTitle(
                             title = title,
@@ -349,10 +442,10 @@ fun LibraryScreen(
                 if (tab == HomeTab.Bookmarks) item(key = "bookmarks-title", contentType = "section") {
                     SectionTitle("Bookmarks", count = if (bookmarks.isEmpty()) null else bookmarks.size.toString(), compact = landscape)
                 }
-                if (tab == HomeTab.Library && library.error != null) item(key = "error", contentType = "note") {
+                if (showError) item(key = "error", contentType = "note") {
                     SearchNote(library.error.orEmpty(), warning = true)
                 }
-                if (tab == HomeTab.Library && library.reachedLimit) item(key = "limit", contentType = "note") {
+                if (showLimit) item(key = "limit", contentType = "note") {
                     SearchNote("Your folders are very large, so some files may not be listed. Open file still reaches them.")
                 }
                 if (tab == HomeTab.Bookmarks) {
@@ -372,14 +465,23 @@ fun LibraryScreen(
                                 onOpen = { onBookmark(bookmark) },
                                 onToggle = { toggle(bookmark.file) },
                                 onLongPress = { longPress(bookmark.file) },
+                                marked = historyId != null && FileProgress.identity(bookmark.file.uri.toString()) == historyId,
+                                playback = if (bookmark.file.kind == DocumentKind.Video) {
+                                    remember(bookmark.file.uri, playbackRevision) { playbackFor(bookmark.file) }
+                                } else null,
+                                modifier = if (reducedMotion) Modifier else Modifier.animateItem(),
                             )
                         }
                     }
+                } else if (showFolderEmpty) {
+                    item("no-folders", contentType = "card") { NoFoldersCard(onAddFolder, RowGutter) }
                 } else if (tab == HomeTab.Library && matching.isEmpty() && library.scanning) {
                     item("loading") {
                         SearchNote("Checking linked folders…")
                         LinearProgressIndicator(RowGutter.fillMaxWidth(), color = EzColors.Primary)
                     }
+                } else if (matching.isEmpty() && showingContentSearch && (visibleHits.isNotEmpty() || contentSearch.indexing)) {
+                    item("no-name-matches") { SearchNote("No matching file names.") }
                 } else if (matching.isEmpty()) {
                     item("empty") {
                         val title = when {
@@ -400,7 +502,7 @@ fun LibraryScreen(
                         }
                     }
                 } else {
-                    items(matching, key = { it.uri.toString() }, contentType = { "file" }) { file ->
+                    items(matching, key = { "$section|${it.uri}" }, contentType = { "file" }) { file ->
                         FileRow(
                             file = file,
                             isPicked = file in picked,
@@ -409,35 +511,41 @@ fun LibraryScreen(
                             onToggle = { toggle(file) },
                             onLongPress = { longPress(file) },
                             actions = actionsFor(file),
-                            marked = imageTab && file.uri == markedImage,
+                            marked = file.uri == markedUri,
+                            playback = if (file.kind == DocumentKind.Video) {
+                                remember(file.uri, playbackRevision) { playbackFor(file) }
+                            } else null,
+                            modifier = if (reducedMotion) Modifier else Modifier.animateItem(),
                         )
                     }
                 }
-                if (searchesInside && contentSearch.query == query) {
+                if (showingContentSearch) {
                     item("inside-files", contentType = "section") {
                         EzSectionPill(
                             "Inside files",
                             RowGutter,
-                            count = contentSearch.hits.size.takeIf { it > 0 }?.toString(),
+                            count = visibleHits.size.takeIf { it > 0 }?.toString(),
                             compact = landscape,
                         )
                     }
                     if (contentSearch.indexing) item("indexing", contentType = "note") {
                         SearchNote("Indexing ${contentSearch.indexed} of ${contentSearch.total}")
                         LinearProgressIndicator(RowGutter.fillMaxWidth(), color = EzColors.Primary)
-                    } else if (contentSearch.hits.isEmpty()) item("no-inside", contentType = "note") {
+                    } else if (visibleHits.isEmpty()) item("no-inside", contentType = "note") {
                         SearchNote("No matches inside these files.")
                     }
-                    val visibleHits = contentSearch.hits.filter {
-                        category == LibraryCategory.All || category in libraryCategories(it.file.name)
-                    }
                     items(visibleHits, key = { "inside|${it.file.uri}" }, contentType = { "snippet" }) { hit ->
-                        ContentMatchRow(hit, onClick = { onFile(hit.file) }, modifier = RowGutter)
+                        val motion = if (reducedMotion) Modifier else Modifier.animateItem()
+                        ContentMatchRow(hit, onClick = { onFile(hit.file) }, modifier = RowGutter.then(motion))
                     }
                 }
             }
             if (landscape) {
                 LandscapeLibraryRail(navItems, onOpen, onSettings, Modifier.align(Alignment.CenterStart))
+                if (topVisible) GlassIconButton(
+                    EzIcons.ArrowUp, "Go to top", backToTop,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                )
             } else {
                 Column(
                     Modifier
@@ -448,7 +556,17 @@ fun LibraryScreen(
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    if (tab != HomeTab.Bookmarks) EzFloatingAction("Open file", EzIcons.Folder, onOpen)
+                    if (tab != HomeTab.Bookmarks || topVisible) Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        AnimatedVisibility(
+                            visible = topVisible,
+                            enter = if (reducedMotion) EnterTransition.None else fadeIn(),
+                            exit = if (reducedMotion) ExitTransition.None else fadeOut(),
+                        ) { GlassIconButton(EzIcons.ArrowUp, "Go to top", backToTop) }
+                        if (tab != HomeTab.Bookmarks) EzFloatingAction("Open file", EzIcons.Folder, onOpen)
+                    }
                     EzNavigationBar(navItems, backdrop.blur(Modifier, EzShapes.Bar))
                 }
             }

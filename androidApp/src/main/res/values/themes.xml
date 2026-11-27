@@ -2,7 +2,8 @@
 <resources>
     <style name="Theme.Xfiles.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_xfiles_mark</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/xfiles_splash_mark</item>
+        <item name="windowSplashScreenAnimationDuration">240</item>
         <item name="postSplashScreenTheme">@style/Theme.Xfiles</item>
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>

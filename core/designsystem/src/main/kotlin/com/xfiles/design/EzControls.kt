@@ -1,11 +1,13 @@
 package com.xfiles.design
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -45,6 +47,26 @@ fun EzControlBar(modifier: Modifier = Modifier, content: @Composable RowScope.()
 
 class EzControlAction(val label: String, val icon: ImageVector, val onClick: () -> Unit)
 
+@Composable
+fun EzGlassDropdown(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    properties: PopupProperties = PopupProperties(focusable = true),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shape = MaterialTheme.shapes.large
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = Modifier.glassPanel(shape, 0.dp),
+        properties = properties,
+        shape = shape,
+        containerColor = Color.Transparent,
+        tonalElevation = 0.dp,
+        content = content,
+    )
+}
+
 /** An anchored, icon-only menu. Short rows fit narrow windows, with accessible names and long-press labels. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,12 +82,10 @@ fun EzControlMenu(actions: List<EzControlAction>, open: Boolean, onOpen: (Boolea
                 checkedContentColor = colors.onPrimaryContainer,
             ),
         ) { Icon(EzIcons.Settings, "Viewer settings") }
-        DropdownMenu(
+        EzGlassDropdown(
             expanded = open,
             onDismissRequest = { onOpen(false) },
             properties = PopupProperties(focusable = false),
-            shape = MaterialTheme.shapes.large,
-            containerColor = colors.surfaceContainerHigh,
         ) {
             actions.chunked(3).forEach { row ->
                 Row(Modifier.padding(horizontal = 4.dp)) {
@@ -99,9 +119,16 @@ fun EzControlSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded),
         shape = EzShapes.Sheet,
-        containerColor = colors.surfaceContainerHigh.copy(alpha = 0.97f),
+        containerColor = Color.Transparent,
         contentColor = colors.onSurface,
         scrimColor = Color.Black.copy(alpha = 0.32f),
-        content = content,
-    )
+        dragHandle = null,
+    ) {
+        Column(Modifier.fillMaxWidth().glassPanel(EzShapes.Sheet, 0.dp)) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                BottomSheetDefaults.DragHandle()
+            }
+            content()
+        }
+    }
 }

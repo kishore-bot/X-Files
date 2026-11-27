@@ -4,6 +4,10 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -33,7 +37,6 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
@@ -67,6 +70,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -78,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import com.xfiles.core.documents.ArchiveHandoff
 import com.xfiles.core.documents.FileBookmark
 import com.xfiles.core.documents.FileEntry
+import com.xfiles.core.documents.PlaybackProgress
 import com.xfiles.core.documents.FolderLibrary
 import com.xfiles.core.documents.LibraryContentSearch
 import com.xfiles.core.documents.LibrarySearchHit
@@ -95,6 +100,8 @@ import com.xfiles.design.EzNavItem
 import com.xfiles.design.EzNavigationBar
 import com.xfiles.design.EzSectionPill
 import com.xfiles.design.EzShapes
+import com.xfiles.design.LocalReducedMotion
+import com.xfiles.design.EzGlassDropdown
 import com.xfiles.design.EzSpacing
 import com.xfiles.design.EzTextButton
 import com.xfiles.design.FileNameStyle
@@ -110,6 +117,7 @@ import com.xfiles.design.glassCard
 import com.xfiles.design.pressScale
 import com.xfiles.design.rememberHaptics
 import com.xfiles.documents.DocumentKind
+import com.xfiles.documents.formatPlaybackTime
 import com.xfiles.documents.library.LibraryCategory
 import com.xfiles.documents.library.libraryCategories
 
@@ -124,15 +132,30 @@ internal fun FileRow(
     onLongPress: () -> Unit,
     actions: FileRowActions? = null,
     marked: Boolean = false,
+    playback: PlaybackProgress? = null,
+    modifier: Modifier = Modifier,
 ) {
+    val reducedMotion = LocalReducedMotion.current
+    val historyTint by animateColorAsState(
+        if (marked) EzColors.Selected else Color.Transparent,
+        if (reducedMotion) snap() else tween(180),
+        label = "file history tint",
+    )
+    val historyOutline by animateColorAsState(
+        if (marked) EzColors.Accent.copy(alpha = 0.58f) else Color.Transparent,
+        if (reducedMotion) snap() else tween(180),
+        label = "file history outline",
+    )
     val interaction = remember { MutableInteractionSource() }
     var menuOpen by remember { mutableStateOf(false) }
     Row(
-        RowGutter
+        RowGutter.then(modifier)
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .pressScale(interaction, 0.985f)
             .glassCard(EzShapes.Card, 0.5f)
+            .background(historyTint, EzShapes.Card)
+            .border(1.dp, historyOutline, EzShapes.Card)
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
@@ -140,7 +163,10 @@ internal fun FileRow(
                 onLongClick = onLongPress,
                 onLongClickLabel = "Select",
             )
-            .semantics { this.selected = isPicked }
+            .semantics {
+                this.selected = isPicked
+                if (marked) stateDescription = "Last viewed"
+            }
             .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -150,12 +176,28 @@ internal fun FileRow(
         Column(Modifier.weight(1f)) {
             Text(file.name, style = FileNameStyle, color = EzColors.Text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             detail?.let { Text(it, fontSize = 12.sp, color = EzColors.TextSecondary, modifier = Modifier.padding(top = 3.dp)) }
+            if (playback != null) {
+                val position = formatPlaybackTime(playback.positionMs)
+                val duration = playback.durationMs
+                Text(
+                    if (duration == null) "Resume at $position" else "$position / ${formatPlaybackTime(duration)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = EzColors.TextSecondary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                if (duration != null) {
+                    LinearProgressIndicator(
+                        progress = { (playback.positionMs.toDouble() / duration).toFloat().coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        color = EzColors.Accent,
+                    )
+                }
+            }
         }
         if (marked) {
             Box(
                 Modifier.size(8.dp)
-                    .background(EzColors.Primary, androidx.compose.foundation.shape.CircleShape)
-                    .semantics { contentDescription = "Last viewed image" },
+                    .background(EzColors.Primary, androidx.compose.foundation.shape.CircleShape),
             )
         }
         if (!selecting) {
@@ -167,7 +209,7 @@ internal fun FileRow(
                         onClick = { menuOpen = true },
                         size = 40.dp,
                     )
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    EzGlassDropdown(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         FileMenuItem("Open", EzIcons.Document) {
                             menuOpen = false
                             onOpen()

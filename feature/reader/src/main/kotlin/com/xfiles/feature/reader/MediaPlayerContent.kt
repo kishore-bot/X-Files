@@ -258,7 +258,7 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
         ) {
             Box(Modifier.fillMaxSize()) {
                 val actions = buildList {
-                    if (state.audioTracks.isNotEmpty()) add(ReaderAction("Audio tracks", EzIcons.Audio) {
+                    if (state.audioTracks.size > 1) add(ReaderAction("Audio tracks", EzIcons.Audio) {
                         viewModel.onEvent(MediaPlayerEvent.OpenSheet(MediaSheet.Audio))
                     })
                     add(ReaderAction("Playback speed", EzIcons.Music) {
@@ -276,8 +276,11 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
                             transform = VideoTransform()
                             viewModel.onEvent(MediaPlayerEvent.SetVideoScale(VideoScale.Fit))
                         })
-                        add(ReaderAction("Picture-in-picture", EzIcons.PictureInPicture) {
-                            if (activity != null) pip.enter(activity, playerPipSpec(context, state.aspect, videoBounds, state.playing))
+                        if (activity != null && context.packageManager.hasSystemFeature(
+                                android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE,
+                            )
+                        ) add(ReaderAction("Picture-in-picture", EzIcons.PictureInPicture) {
+                            pip.enter(activity, playerPipSpec(context, state.aspect, videoBounds, state.playing))
                         })
                         add(ReaderAction(
                             if (state.rotationLocked) "Unlock rotation" else "Lock rotation",

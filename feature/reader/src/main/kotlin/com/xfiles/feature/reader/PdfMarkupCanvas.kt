@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -91,6 +92,7 @@ internal fun PdfMarkupCanvas(
     marks: List<PdfMarkup>,
     enabled: Boolean,
     onAdd: (PdfMarkup) -> Unit,
+    colorFilter: ColorFilter?,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val pending = remember(page, mode) { mutableStateListOf<PdfPoint>() }
@@ -133,7 +135,7 @@ internal fun PdfMarkupCanvas(
         }
     }
     Box(Modifier.fillMaxSize().clipToBounds().then(gesturing)) {
-        Image(image, "Annotating page ${page + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        Image(image, "Annotating page ${page + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit, colorFilter = colorFilter)
         Canvas(Modifier.fillMaxSize()) {
             val bounds = fitPdfPage(size.width, size.height, bitmap)
             marks.forEach { mark -> drawMarkup(bounds, mark) }

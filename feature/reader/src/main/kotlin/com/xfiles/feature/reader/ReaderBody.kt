@@ -67,13 +67,16 @@ internal fun ReaderBody(
 ) {
     val ready = state as? ReaderState.Ready
     val gridPdf = ready?.preview as? FilePreview.Pdf
-    val colors = pageStyle.readerColors(LocalEzDarkTheme.current)
+    val darkApp = LocalEzDarkTheme.current
+    val colors = pageStyle.readerColors(darkApp)
     Box(modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
         if (ui.showGrid && gridPdf != null) {
             PdfPageGrid(
                 pageCount = gridPdf.pageCount,
                 current = ui.visiblePdfPage ?: gridPdf.page,
                 load = pdfThumbnail,
+                paperColor = colors.page,
+                colorFilter = pageStyle.pdfFilter(darkApp),
                 onOpen = { index ->
                     onEvent(ReaderUiEvent.SetGrid(false))
                     onPage(index)

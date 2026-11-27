@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -42,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xfiles.design.EzGlassDropdown
 import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
@@ -286,7 +286,7 @@ private fun FileRow(file: TidyFile, meta: String, onOpen: (TidyFile) -> Unit, on
         run {
             Box {
                 IconButton(onClick = { menu = true }) { Icon(EzIcons.More, "More options for ${file.name}", tint = EzColors.TextSecondary) }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                EzGlassDropdown(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(
                         text = { Text("Share") },
                         leadingIcon = { Icon(EzIcons.Share, null) },

@@ -2,6 +2,7 @@
 
 package com.xfiles.feature.reader
 
+import com.xfiles.documents.formatPlaybackTime
 import android.net.Uri
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Arrangement
@@ -37,7 +38,7 @@ internal fun MediaDetailsSheet(file: FileEntry, player: Player, onDismiss: () ->
         file.sizeBytes?.let { add("Size" to Formatter.formatFileSize(context, it)) }
         file.modifiedAt?.let { add("Modified" to DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(it))) }
         add("Location" to locationOf(file.uri))
-        add("Duration" to formatTime(player.duration.coerceAtLeast(0L)))
+        add("Duration" to formatPlaybackTime(player.duration.coerceAtLeast(0L)))
         val size = player.videoSize
         if (size.width > 0 && size.height > 0) add("Resolution" to "${size.width} × ${size.height}")
         codecsOf(player).takeIf { it.isNotEmpty() }?.let { add("Codecs" to it.joinToString(", ")) }

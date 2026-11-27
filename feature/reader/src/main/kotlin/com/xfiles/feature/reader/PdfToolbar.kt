@@ -35,6 +35,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -53,6 +54,7 @@ internal fun PdfToolbar(
     pageCount: Int,
     zoom: Int,
     grid: Boolean,
+    colorFilter: ColorFilter?,
     thumbnail: suspend (Int) -> Bitmap?,
     onPage: (Int) -> Unit,
     onJump: () -> Unit,
@@ -111,7 +113,7 @@ internal fun PdfToolbar(
         }
     }
     if (showPages && !grid && !filyOpen && !settingsOpen) {
-        PdfPageSheet(page, pageCount, thumbnail, enabled = true, onPage = { target ->
+        PdfPageSheet(page, pageCount, thumbnail, colorFilter, enabled = true, onPage = { target ->
             showPages = false
             onPage(target)
         }, onDismiss = { showPages = false })
@@ -124,6 +126,7 @@ private fun PdfPageSheet(
     page: Int,
     pageCount: Int,
     thumbnail: suspend (Int) -> Bitmap?,
+    colorFilter: ColorFilter?,
     enabled: Boolean,
     onPage: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -132,7 +135,7 @@ private fun PdfPageSheet(
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text("Pages", style = MaterialTheme.typography.titleMedium)
             PdfPageSlider(page, pageCount, enabled, onPage)
-            PdfThumbnailStrip(pageCount, page, thumbnail, enabled, onPage)
+            PdfThumbnailStrip(pageCount, page, thumbnail, colorFilter, enabled, onPage)
         }
     }
 }
@@ -143,6 +146,7 @@ private fun PdfThumbnailStrip(
     pageCount: Int,
     page: Int,
     thumbnail: suspend (Int) -> Bitmap?,
+    colorFilter: ColorFilter?,
     enabled: Boolean,
     onPage: (Int) -> Unit,
 ) {
@@ -165,7 +169,7 @@ private fun PdfThumbnailStrip(
                     .clickable(enabled = enabled) { onPage(index) },
             ) {
                 bitmap?.let {
-                    Image(it.asImageBitmap(), "Page ${index + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    Image(it.asImageBitmap(), "Page ${index + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit, colorFilter = colorFilter)
                 }
             }
         }

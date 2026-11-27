@@ -18,7 +18,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.xfiles.design.EzControlSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,7 +58,7 @@ import com.xfiles.feedback.FeedbackRules
 @Composable
 internal fun FeedbackSheet(onDismiss: () -> Unit, viewModel: FeedbackViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    EzControlSheet(onDismiss) {
         LazyColumn(
             Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
