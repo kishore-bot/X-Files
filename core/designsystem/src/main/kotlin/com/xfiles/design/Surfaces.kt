@@ -197,12 +197,14 @@ fun Modifier.selectionPop(selected: Boolean, dip: Float = 0.9f): Modifier {
     val scale = remember { Animatable(1f) }
     var previous by remember { mutableStateOf(selected) }
     LaunchedEffect(selected, reduced) {
-        if (reduced) scale.snapTo(1f)
-        else if (selected && !previous) {
-            scale.snapTo(dip)
-            scale.animateTo(1f, EzMotion.fastSpatial())
-        }
+        val justSelected = selected && !previous
         previous = selected
+        if (reduced) {
+            scale.snapTo(1f)
+        } else {
+            if (justSelected) scale.snapTo(dip)
+            if (scale.value != 1f) scale.animateTo(1f, EzMotion.emphasis())
+        }
     }
     return graphicsLayer {
         scaleX = scale.value

@@ -4,8 +4,7 @@ import android.content.pm.ActivityInfo
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -28,6 +27,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzMotion
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.LocalFilyOpen
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect as ComposeRect
@@ -58,6 +59,7 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEntry, onClose: () -> Unit, onFily: (() -> Unit)?) {
     val context = LocalContext.current
+    val reduced = LocalReducedMotion.current
     val activity = LocalActivity.current
     val pip = LocalMediaPip.current
     val inPip by pip.isInPictureInPicture.collectAsStateWithLifecycle()
@@ -229,7 +231,11 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
         }
         if (video && !inPip) {
             // Subtitles lift above the controls while they show, or sit where the style's position puts them.
-            val lift by animateDpAsState(state.subtitleStyle.position.lift(state.controlsVisible), label = "subtitleLift")
+            val lift by animateDpAsState(
+                state.subtitleStyle.position.lift(state.controlsVisible),
+                animationSpec = if (reduced) snap() else EzMotion.fastSpatial(),
+                label = "subtitleLift",
+            )
             SubtitleText(
                 state.cues,
                 state.subtitleStyle,
@@ -252,8 +258,8 @@ internal fun MediaPlayerContent(player: ExoPlayer, video: Boolean, file: FileEnt
         }
         AnimatedVisibility(
             visible = (state.controlsVisible || menuOpen || !video) && !inPip,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = EzMotion.fadeEnter(reduced),
+            exit = EzMotion.fadeExit(reduced || inPip),
             modifier = Modifier.fillMaxSize(),
         ) {
             Box(Modifier.fillMaxSize()) {

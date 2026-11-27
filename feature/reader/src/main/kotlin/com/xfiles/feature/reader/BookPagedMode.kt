@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -25,7 +26,9 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.EzMotion
 import com.xfiles.design.Haptics
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.documents.book.MarkRange
 import com.xfiles.documents.book.TextMark
 import com.xfiles.documents.structure.ContentBlock
@@ -74,13 +77,14 @@ internal fun PagedBook(
     }
     RegisterViewerScroll(pagerState) { PagerScroll(pagerState) }
     val scope = rememberCoroutineScope()
+    val reduced = LocalReducedMotion.current
 
-    DisposableEffect(pagerState) {
+    DisposableEffect(pagerState, reduced) {
         nav.turn = { delta ->
             val target = pagerState.currentPage + delta
             if (target >= 0 && target < pagerState.pageCount) {
                 haptics.segment()
-                scope.launch { pagerState.animateScrollToPage(target) }
+                scope.launch { pagerState.turnTo(target, reduced) }
             }
         }
         onDispose { nav.turn = null }
@@ -122,7 +126,8 @@ internal fun PagedBook(
         // The page leaving or arriving is a little fainter and smaller, so the slide has depth.
         Box(
             Modifier.fillMaxSize().graphicsLayer {
-                val away = abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                val away = if (reduced) 0f
+                    else abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
                 alpha = 1f - PAGE_FADE * away
                 scaleX = 1f - PAGE_SHRINK * away
                 scaleY = 1f - PAGE_SHRINK * away
@@ -150,10 +155,11 @@ internal fun PagedBook(
  * carries on onto it. Leaving the zone re-arms the dwell, so one hold turns one page.
  */
 @Composable
-private fun EdgeTurns(pagerState: androidx.compose.foundation.pager.PagerState, selection: BookSelectionController, haptics: Haptics) {
+private fun EdgeTurns(pagerState: PagerState, selection: BookSelectionController, haptics: Haptics) {
     val zonePx = with(LocalDensity.current) { EdgeZone.toPx() }
     val dragging = selection.dragging
-    LaunchedEffect(dragging) {
+    val reduced = LocalReducedMotion.current
+    LaunchedEffect(dragging, reduced) {
         if (!dragging) return@LaunchedEffect
         var side = 0
         var since = 0L
@@ -170,7 +176,7 @@ private fun EdgeTurns(pagerState: androidx.compose.foundation.pager.PagerState, 
                 val target = pagerState.currentPage + side
                 if (target in 0 until pagerState.pageCount) {
                     haptics.segment()
-                    pagerState.animateScrollToPage(target)
+                    pagerState.turnTo(target, reduced)
                     selection.refresh()
                 }
             }
@@ -223,6 +229,11 @@ private fun BookBlockContent(
         marks = marksOf(marks, index),
         actions = actions,
     )
+}
+
+private suspend fun PagerState.turnTo(target: Int, reduced: Boolean) {
+    if (reduced) scrollToPage(target)
+    else animateScrollToPage(target, animationSpec = EzMotion.defaultSpatial())
 }
 
 private const val AHEAD = 2

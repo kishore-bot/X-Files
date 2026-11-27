@@ -1,8 +1,6 @@
 package com.xfiles.feature.reader
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,7 +19,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import com.xfiles.design.EzMotion
 import com.xfiles.design.Haptics
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.documents.book.BookManifest
 import com.xfiles.documents.book.MarkRange
 import com.xfiles.documents.book.TextMark
@@ -69,6 +69,7 @@ internal fun BookReaderBody(
     chrome: BookChromeActions,
 ) {
     val density = LocalDensity.current
+    val reduced = LocalReducedMotion.current
     val progress = remember { BookProgressUseCase() }
     val paged = state.mode == BookReadingMode.Paged
     val pagedNow by rememberUpdatedState(paged)
@@ -170,8 +171,8 @@ internal fun BookReaderBody(
         AnimatedVisibility(
             visible = state.chromeVisible,
             modifier = Modifier.align(Alignment.TopCenter),
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = EzMotion.edgeEnter(reduced, fromTop = true),
+            exit = EzMotion.edgeExit(reduced, toTop = true),
         ) {
             BookTopBar(
                 title = title,
@@ -189,8 +190,8 @@ internal fun BookReaderBody(
         AnimatedVisibility(
             visible = state.chromeVisible,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = EzMotion.edgeEnter(reduced),
+            exit = EzMotion.edgeExit(reduced),
         ) {
             BookBottomBar(
                 chapterTitle = chapterTitle,
@@ -211,8 +212,8 @@ internal fun BookReaderBody(
         AnimatedVisibility(
             visible = state.backStack.isNotEmpty(),
             modifier = Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = BookInsetTop),
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = EzMotion.fadeEnter(reduced),
+            exit = EzMotion.fadeExit(reduced),
         ) {
             BookBackPill(onBack = chrome.onBack)
         }

@@ -1,8 +1,6 @@
 package com.xfiles.feature.tools
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,7 +30,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzMotion
 import com.xfiles.design.EzSpacing
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.EzTextButton
 import com.xfiles.design.PrimaryActionButton
 import com.xfiles.design.rememberHaptics
@@ -54,10 +54,12 @@ internal fun ToolResult(
     onSaveTo: (() -> Unit)? = null,
 ) {
     val haptics = rememberHaptics()
-    val pop = remember { Animatable(0.3f) }
-    LaunchedEffect(Unit) {
-        haptics.confirm()
-        pop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow))
+    val reduced = LocalReducedMotion.current
+    val pop = remember { Animatable(if (reduced) 1f else 0.88f) }
+    LaunchedEffect(Unit) { haptics.confirm() }
+    LaunchedEffect(reduced) {
+        if (reduced) pop.snapTo(1f)
+        else pop.animateTo(1f, EzMotion.emphasis())
     }
     Column(
         modifier.fillMaxWidth().padding(horizontal = EzSpacing.Gutter, vertical = 24.dp),

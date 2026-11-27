@@ -2,8 +2,6 @@ package com.xfiles.feature.reader
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +31,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzMotion
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.EzShapes
 import com.xfiles.design.glass
 import com.xfiles.design.glassCard
@@ -73,7 +73,13 @@ internal fun PdfSignatureBadge(uri: Uri, modifier: Modifier = Modifier) {
     }
     val signatures by produceState(emptyList<PdfSignatureInfo>(), uri) { value = useCase(uri) }
     var open by remember { mutableStateOf(false) }
-    AnimatedVisibility(signatures.isNotEmpty(), modifier, enter = fadeIn() + slideInVertically { -it }) {
+    val reduced = LocalReducedMotion.current
+    AnimatedVisibility(
+        signatures.isNotEmpty(),
+        modifier,
+        enter = EzMotion.edgeEnter(reduced, fromTop = true),
+        exit = EzMotion.edgeExit(reduced, toTop = true),
+    ) {
         val tone = toneOf(signatures)
         Row(
             Modifier

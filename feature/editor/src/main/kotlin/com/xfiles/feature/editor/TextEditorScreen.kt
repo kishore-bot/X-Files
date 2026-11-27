@@ -5,6 +5,7 @@ package com.xfiles.feature.editor
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +48,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzMotion
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.HapticOnChange
 import com.xfiles.design.EzControlBar
 import com.xfiles.design.EzOptionMenu
@@ -81,6 +84,9 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
         if (uri != null) viewModel.save(uri)
     }
     val haptics = rememberHaptics()
+    val reduced = LocalReducedMotion.current
+    val panelEnter = EzMotion.expandFromTop(reduced)
+    val panelExit = EzMotion.collapseToTop(reduced)
     HapticOnChange(state.saved) { if (it) confirm() }
     HapticOnChange(state.error) { if (it != null) reject() }
     Column(Modifier.fillMaxSize().imePadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -135,7 +141,7 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
                 colors = toggleColors,
             ) { Icon(EzIcons.Settings, "Text file format") }
         }
-        if (finding) {
+        AnimatedVisibility(finding, enter = panelEnter, exit = panelExit) {
             Column(Modifier.fillMaxWidth().glassCard().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(state = find, modifier = Modifier.weight(1f), lineLimits = TextFieldLineLimits.SingleLine, label = { Text("Find") })
@@ -154,7 +160,7 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
                 status?.let { Text(it, color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall) }
             }
         }
-        if (formatting) {
+        AnimatedVisibility(formatting, enter = panelEnter, exit = panelExit) {
             androidx.compose.foundation.layout.FlowRow(
                 Modifier.fillMaxWidth().glassCard().padding(horizontal = 12.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -111,13 +111,14 @@ fun FilyMascotCallToAction(onAsk: () -> Unit, modifier: Modifier = Modifier) {
 /** The dark glass status pill from the HTML overlay, with a pulsing red dot. */
 @Composable
 fun FilyStatusPill(text: String, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "fily-pill")
-    val dot = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pill-dot",
-    )
+    val dot = if (LocalReducedMotion.current) null else {
+        rememberInfiniteTransition(label = "fily-pill").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "pill-dot",
+        )
+    }
     Row(
         modifier
             .clip(CircleShape)
@@ -127,7 +128,7 @@ fun FilyStatusPill(text: String, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Spacer(Modifier.size(8.dp).drawBehind { drawCircle(PinkRed, alpha = 0.4f + 0.6f * dot.value) })
+        Spacer(Modifier.size(8.dp).drawBehind { drawCircle(PinkRed, alpha = 0.55f + 0.45f * (dot?.value ?: 1f)) })
         Text(text, style = MaterialTheme.typography.labelLarge, color = Color.White)
     }
 }

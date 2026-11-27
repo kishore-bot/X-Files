@@ -71,7 +71,7 @@ fun EzNavigationBar(items: List<EzNavItem>, modifier: Modifier = Modifier) {
                     label = "navTint",
                 )
                 Column(
-                    Modifier.weight(1f).heightIn(min = 56.dp).pressScale(interaction, 0.92f)
+                    Modifier.weight(1f).heightIn(min = 56.dp).pressScale(interaction)
                         .clip(EzShapes.Large)
                         .clickable(interaction, indication = null, role = Role.Tab) {
                             if (!item.selected) haptics.segment()
@@ -82,7 +82,7 @@ fun EzNavigationBar(items: List<EzNavItem>, modifier: Modifier = Modifier) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
                 ) {
-                    Icon(item.icon, null, Modifier.size(EzSpacing.BarIcon).selectionPop(item.selected, 0.8f), tint)
+                    Icon(item.icon, null, Modifier.size(EzSpacing.BarIcon).selectionPop(item.selected), tint)
                     Text(
                         item.label,
                         color = tint,

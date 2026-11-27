@@ -1,11 +1,6 @@
 package com.xfiles.feature.reader
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,10 +22,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzControlSheet
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzMotion
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.glassCard
 import com.xfiles.feature.reader.domain.MediaSubtitleFile
 import com.xfiles.feature.reader.domain.MediaTextTrack
@@ -47,15 +47,15 @@ internal fun MediaSubtitleSheet(
     onPickFile: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val reduced = LocalReducedMotion.current
+    val forward = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+    val travel = with(LocalDensity.current) { 24.dp.roundToPx() }
     EzControlSheet(onDismiss) {
         AnimatedContent(
             targetState = state.subtitleLevel,
             transitionSpec = {
-                if (targetState == SubtitleLevel.Style) {
-                    (slideInHorizontally { it / 4 } + fadeIn()) togetherWith (slideOutHorizontally { -it / 4 } + fadeOut())
-                } else {
-                    (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith (slideOutHorizontally { it / 4 } + fadeOut())
-                }
+                val direction = if (targetState == SubtitleLevel.Style) forward else -forward
+                EzMotion.horizontal(direction, travel, reduced)
             },
             label = "subtitleLevel",
         ) { level ->

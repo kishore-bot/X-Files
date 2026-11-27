@@ -108,6 +108,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.design.BarIconButton
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzMotion
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.EzShapes
 import com.xfiles.design.PrimaryGradient
 import com.xfiles.design.glass
@@ -145,6 +147,7 @@ interface SlideEditor {
 @Composable
 internal fun PresentationPreview(document: StructuredDocument, slideEditor: SlideEditor? = null, onEdited: () -> Unit = {}) {
     val haptics = rememberHaptics()
+    val reduced = LocalReducedMotion.current
     val uriHandler = LocalUriHandler.current
     val vm: SlidePresentationViewModel = hiltViewModel()
     val ui by vm.state.collectAsStateWithLifecycle()
@@ -257,7 +260,7 @@ internal fun PresentationPreview(document: StructuredDocument, slideEditor: Slid
                 Column(
                     Modifier
                         .fillMaxSize()
-                        .deckTransform(pager, page)
+                        .deckTransform(pager, page, reduced)
                         .verticalScroll(rememberScrollState()),
                 ) {
                     Column(
@@ -284,21 +287,16 @@ internal fun PresentationPreview(document: StructuredDocument, slideEditor: Slid
     }
 }
 
-/**
- * Slides away like cards in a deck while swiping: the outgoing slide shrinks,
- * tilts and dims, the incoming one rises to full size. Runs in the graphics
- * layer only, so scrolling never recomposes the slide.
- */
-private fun Modifier.deckTransform(pager: PagerState, page: Int) = graphicsLayer {
-    val offset = ((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(-1f, 1f)
-    val distance = offset.absoluteValue
-    val scale = lerp(1f, 0.86f, distance)
-    scaleX = scale
-    scaleY = scale
-    alpha = lerp(1f, 0.55f, distance)
-    rotationY = offset * 18f
-    cameraDistance = 12f * density
-}
+/** A small depth cue tied to the swipe, drawn without relaying out the slide. */
+private fun Modifier.deckTransform(pager: PagerState, page: Int, reduced: Boolean): Modifier =
+    if (reduced) this else graphicsLayer {
+        val offset = (pager.currentPage - page) + pager.currentPageOffsetFraction
+        val distance = offset.absoluteValue.coerceAtMost(1f)
+        val scale = lerp(1f, 0.96f, distance)
+        scaleX = scale
+        scaleY = scale
+        alpha = lerp(1f, 0.78f, distance)
+    }
 
 /** A slide as a raised card, or flat in the presenter; its linked text, media and pictures use [actions]. */
 @Composable
@@ -428,6 +426,7 @@ private fun Presenter(
     onClose: () -> Unit,
 ) {
     val haptics = rememberHaptics()
+    val reduced = LocalReducedMotion.current
     val position = Position(index.coerceIn(0, slides.lastIndex), step)
     val slide = slides[position.index]
 
@@ -513,7 +512,10 @@ private fun Presenter(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
                 contentKey = { it.index },
-                transitionSpec = { slideTransition(slides) },
+                transitionSpec = {
+                    if (reduced) EnterTransition.None togetherWith ExitTransition.None
+                    else slideTransition(slides)
+                },
                 label = "slide",
             ) { shown ->
                 BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -527,7 +529,7 @@ private fun Presenter(
                         Modifier.width(width),
                         actions = actionsFor(shown.index),
                         step = if (shown.index == position.index) position.step else Int.MAX_VALUE,
-                        animate = true,
+                        animate = !reduced,
                         elevated = false,
                     )
                 }
@@ -606,7 +608,7 @@ private fun AnimatedContentTransitionScope<Position>.slideTransition(slides: Lis
     fun <T> t() = tween<T>(time, easing = FastOutSlowInEasing)
     val fade = fadeIn(ease) togetherWith fadeOut(ease)
     return when (target?.canvas?.transition) {
-        null -> fadeIn(tween(300)) togetherWith fadeOut(tween(300))
+        null -> EzMotion.fadeEnter(false) togetherWith EzMotion.fadeExit(false)
         "cut" -> EnterTransition.None togetherWith ExitTransition.None
         "fade", "dissolve", "morph", "random", "randomBar" -> fade
         "push", "pan", "conveyor", "ferris", "flythrough", "gallery", "switch", "flip" ->

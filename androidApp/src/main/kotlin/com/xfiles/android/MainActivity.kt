@@ -5,15 +5,6 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -55,7 +46,12 @@ import com.xfiles.core.documents.PrintRequest
 import com.xfiles.core.documents.launchSystemPrint
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzTheme
+import com.xfiles.design.EzMotion
 import com.xfiles.design.LocalEzPalette
 import com.xfiles.design.LocalHapticsEnabled
 import android.graphics.drawable.ColorDrawable
@@ -139,8 +135,9 @@ class MainActivity : ComponentActivity() {
                 splash.remove()
             } else {
                 // Animate the existing system logo across the first frame of the app.
-                splash.iconView.animate().scaleX(0.92f).scaleY(0.92f).setDuration(180L).start()
-                splash.view.animate().alpha(0f).setDuration(180L).withEndAction(splash::remove).start()
+                val easeOut = android.view.animation.DecelerateInterpolator()
+                splash.iconView.animate().scaleX(0.96f).scaleY(0.96f).setDuration(150L).setInterpolator(easeOut).start()
+                splash.view.animate().alpha(0f).setDuration(150L).setInterpolator(easeOut).withEndAction(splash::remove).start()
             }
         }
         enableEdgeToEdge()
@@ -254,12 +251,15 @@ class MainActivity : ComponentActivity() {
                     val chrome = if (inPip || mediaOnTop) Modifier.background(Color.Black) else Modifier.then(background).glassScreen().safeDrawingPadding()
                     // Vote for the display's top refresh rate while Xfiles is on screen (120/144 Hz panels).
                     Box(Modifier.fillMaxSize().preferredFrameRate(FrameRateCategory.High).then(chrome)) {
+                        val forward = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+                        val travel = with(LocalDensity.current) { 32.dp.roundToPx() }
+                        val skipMotion = reducedMotion || inPip
                         NavDisplay(
                             backStack = stack,
                             onBack = navigator::back,
-                            transitionSpec = { routeTransition(forward = true, animate = !reducedMotion && !inPip && !mediaOnTop) },
-                            popTransitionSpec = { routeTransition(forward = false, animate = !reducedMotion && !inPip) },
-                            predictivePopTransitionSpec = { routeTransition(forward = false, animate = !reducedMotion && !inPip) },
+                            transitionSpec = { EzMotion.horizontal(forward, travel, skipMotion || mediaOnTop) },
+                            popTransitionSpec = { EzMotion.horizontal(-forward, travel, skipMotion) },
+                            predictivePopTransitionSpec = { EzMotion.horizontal(-forward, travel, skipMotion) },
                             entryProvider = entryProvider {
                                 entry<Route.Library> {
                                     LibraryRoute(
@@ -675,13 +675,4 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val MAX_NOTE_NAME = 60
     }
-}
-
-
-private fun routeTransition(forward: Boolean, animate: Boolean): ContentTransform {
-    if (!animate) return EnterTransition.None togetherWith ExitTransition.None
-    val direction = if (forward) 1 else -1
-    val enter = fadeIn(tween(180)) + slideInHorizontally(tween(240)) { width -> direction * width / 10 }
-    val exit = fadeOut(tween(140)) + slideOutHorizontally(tween(200)) { width -> -direction * width / 14 }
-    return enter togetherWith exit
 }

@@ -1,5 +1,6 @@
 package com.xfiles.design
 
+import android.animation.ValueAnimator
 import android.content.ContentResolver
 import android.database.ContentObserver
 import android.net.Uri
@@ -21,7 +22,7 @@ import kotlinx.coroutines.launch
  * every change, off the main thread; the ContentObserver only announces the change.
  */
 class ReducedMotionMonitor(private val resolver: ContentResolver) {
-    private val mutable = MutableStateFlow(false)
+    private val mutable = MutableStateFlow(!ValueAnimator.areAnimatorsEnabled())
     val reduced: StateFlow<Boolean> = mutable.asStateFlow()
 
     private var scope: CoroutineScope? = null

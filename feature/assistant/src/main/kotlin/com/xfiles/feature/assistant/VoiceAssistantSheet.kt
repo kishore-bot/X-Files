@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +46,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
+import com.xfiles.design.EzMotion
+import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.EzOptionMenu
 import com.xfiles.design.EzTextButton
 import com.xfiles.design.FilyMascot
@@ -214,6 +218,12 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
         else -> "Listening paused" to EzColors.TextSecondary
     }
 
+    val statusColor by animateColorAsState(
+        targetValue = dot,
+        animationSpec = if (LocalReducedMotion.current) snap() else EzMotion.fastEffects(),
+        label = "filyStatus",
+    )
+
     Dialog(onDismissRequest = { if (settingsOpen) settingsOpen = false else close() }) {
         val colors = MaterialTheme.colorScheme
         val question = if (needsLanguage) "" else partial.ifBlank { ui.request.orEmpty() }
@@ -244,7 +254,7 @@ fun VoiceAssistantSheet(viewModel: FilyViewModel, session: FilySession, onDismis
                     IconButton(onClick = close) { Icon(EzIcons.Close, "Close Fily") }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(8.dp).background(dot, CircleShape))
+                    Box(Modifier.size(8.dp).background(statusColor, CircleShape))
                     Text(status, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
                 Column(

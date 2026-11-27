@@ -2,6 +2,7 @@ package com.xfiles.design
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -361,6 +362,7 @@ private fun EzPalette.colorScheme(): ColorScheme {
 val LocalEzDarkTheme = staticCompositionLocalOf { false }
 
 /** Switch related foreground and surface colors together without recreating the activity. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun EzTheme(darkTheme: Boolean = false, content: @Composable () -> Unit) {
     val palette = if (darkTheme) DarkPalette else LightPalette
@@ -370,6 +372,7 @@ fun EzTheme(darkTheme: Boolean = false, content: @Composable () -> Unit) {
             // Text fields and menus take extraSmall; dialogs and sheets extraLarge.
             shapes = Shapes(extraSmall = EzShapes.Field, extraLarge = EzShapes.Dialog),
             typography = Typography,
+            motionScheme = EzMotion.standard,
         ) {
             // Text without its own colour reads on the theme's glass.
             CompositionLocalProvider(LocalContentColor provides palette.text, content = content)

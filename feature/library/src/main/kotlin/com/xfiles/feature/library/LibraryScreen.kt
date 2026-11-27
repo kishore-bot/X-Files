@@ -3,12 +3,6 @@ package com.xfiles.feature.library
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -121,6 +115,7 @@ import com.xfiles.design.FilyMascotCallToAction
 import com.xfiles.design.GlassIconButton
 import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.LocalHapticsEnabled
+import com.xfiles.design.EzMotion
 import com.xfiles.design.LocalReducedMotion
 import com.xfiles.design.PrimaryActionButton
 import com.xfiles.design.rememberFrostedBackdrop
@@ -402,8 +397,8 @@ fun LibraryScreen(
             AnimatedVisibility(
                 visible = browseVisible || atTop || searchFocused,
                 modifier = Modifier.fillMaxWidth().padding(start = startClearance),
-                enter = if (reducedMotion) EnterTransition.None else expandVertically() + fadeIn(),
-                exit = if (reducedMotion) ExitTransition.None else shrinkVertically() + fadeOut(),
+                enter = EzMotion.expandFromTop(reducedMotion),
+                exit = EzMotion.collapseToTop(reducedMotion),
             ) {
                 Column(Modifier.fillMaxWidth()) {
                     LibrarySearch(
@@ -470,7 +465,7 @@ fun LibraryScreen(
                                 playback = if (bookmark.file.kind == DocumentKind.Video) {
                                     remember(bookmark.file.uri, playbackRevision) { playbackFor(bookmark.file) }
                                 } else null,
-                                modifier = if (reducedMotion) Modifier else Modifier.animateItem(),
+                                modifier = if (reducedMotion) Modifier else Modifier.animateItem(placementSpec = EzMotion.defaultSpatial()),
                             )
                         }
                     }
@@ -516,7 +511,7 @@ fun LibraryScreen(
                             playback = if (file.kind == DocumentKind.Video) {
                                 remember(file.uri, playbackRevision) { playbackFor(file) }
                             } else null,
-                            modifier = if (reducedMotion) Modifier else Modifier.animateItem(),
+                            modifier = if (reducedMotion) Modifier else Modifier.animateItem(placementSpec = EzMotion.defaultSpatial()),
                         )
                     }
                 }
@@ -536,7 +531,7 @@ fun LibraryScreen(
                         SearchNote("No matches inside these files.")
                     }
                     items(visibleHits, key = { "inside|${it.file.uri}" }, contentType = { "snippet" }) { hit ->
-                        val motion = if (reducedMotion) Modifier else Modifier.animateItem()
+                        val motion = if (reducedMotion) Modifier else Modifier.animateItem(placementSpec = EzMotion.defaultSpatial())
                         ContentMatchRow(hit, onClick = { onFile(hit.file) }, modifier = RowGutter.then(motion))
                     }
                 }
@@ -563,8 +558,8 @@ fun LibraryScreen(
                     ) {
                         AnimatedVisibility(
                             visible = topVisible,
-                            enter = if (reducedMotion) EnterTransition.None else fadeIn(),
-                            exit = if (reducedMotion) ExitTransition.None else fadeOut(),
+                            enter = EzMotion.edgeEnter(reducedMotion),
+                            exit = EzMotion.edgeExit(reducedMotion),
                         ) { GlassIconButton(EzIcons.ArrowUp, "Go to top", backToTop) }
                         if (tab != HomeTab.Bookmarks) EzFloatingAction("Open file", EzIcons.Folder, onOpen)
                     }

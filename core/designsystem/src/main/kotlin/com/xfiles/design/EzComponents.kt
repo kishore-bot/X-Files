@@ -92,7 +92,7 @@ fun BarIconButton(
     Box(
         modifier = Modifier
             .size(48.dp)
-            .pressScale(interaction, 0.85f)
+            .pressScale(interaction)
             .clip(CircleShape)
             .clickable(interaction, indication = null, enabled = enabled, role = Role.Button) {
                 haptics.tick()
