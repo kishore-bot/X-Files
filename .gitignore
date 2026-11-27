@@ -85,3 +85,7 @@ private.app.gradle.kts
 /training/data/**/*.jsonl
 /training/data/**/*.txt
 /training/*.log
+
+# Xcode local settings and build output
+iosApp/**/xcuserdata/
+iosApp/DerivedData/
