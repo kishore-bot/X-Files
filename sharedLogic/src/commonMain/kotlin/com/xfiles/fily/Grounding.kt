@@ -11,11 +11,15 @@ internal object Grounding {
     private const val MIN_WORDS_TO_JUDGE = 2
     private val NUMBER = Regex("""\d+(?:[.,:/-]\d+)*""")
     private val WORD = Regex("""[\p{L}\p{N}]+""")
+    private const val PAGE_NUMBER = """(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)"""
     private val PAGE_MENTION = Regex(
-        """\b(?:pages?|pp?\.)\s*(\d+(?:\s*(?:[,–-]|\band\b|\bto\b|\bor\b)\s*\d+)*)\b""",
+        """\b(?:pages?|pp?\.)\s*($PAGE_NUMBER(?:\s*(?:[,–-]|\band\b|\bto\b|\bor\b)\s*$PAGE_NUMBER)*)\b""",
         RegexOption.IGNORE_CASE,
     )
-    private val PAGE_RANGE = Regex("""(\d+)\s*(?:[–-]|\bto\b)\s*(\d+)""", RegexOption.IGNORE_CASE)
+    private val PAGE_RANGE = Regex("""($PAGE_NUMBER)\s*(?:[–-]|\bto\b)\s*($PAGE_NUMBER)""", RegexOption.IGNORE_CASE)
+    private val PAGE_TOKEN = Regex("""\b$PAGE_NUMBER\b""", RegexOption.IGNORE_CASE)
+
+    fun hasPageCitation(reply: String): Boolean = PAGE_MENTION.containsMatchIn(reply)
 
     /** Checks lexical support, with exact page metadata for citations. */
     fun check(reply: String, evidence: List<DocumentEvidence>): String {
@@ -51,13 +55,13 @@ internal object Grounding {
     private fun mentionedPages(text: String): List<Int>? {
         val pages = mutableListOf<Int>()
         for (range in PAGE_RANGE.findAll(text)) {
-            val first = range.groupValues[1].toIntOrNull() ?: return null
-            val last = range.groupValues[2].toIntOrNull() ?: return null
+            val first = spokenNumber(range.groupValues[1]) ?: return null
+            val last = spokenNumber(range.groupValues[2]) ?: return null
             if (first < 1 || last < first || last - first > 20) return null
             pages += first..last
         }
-        for (token in NUMBER.findAll(PAGE_RANGE.replace(text, ""))) {
-            val page = token.value.toIntOrNull()?.takeIf { it > 0 } ?: return null
+        for (token in PAGE_TOKEN.findAll(PAGE_RANGE.replace(text, ""))) {
+            val page = spokenNumber(token.value)?.takeIf { it > 0 } ?: return null
             pages.add(page)
         }
         return pages.takeIf { it.isNotEmpty() }

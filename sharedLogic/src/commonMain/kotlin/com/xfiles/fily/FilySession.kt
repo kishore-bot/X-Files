@@ -133,13 +133,14 @@ class FilySession(
             exchange += FilyTurn(FilyRole.Assistant, raw)
             val toolName = response.toolName
             if (response.kind != "tool" || toolName == null || step == MAX_TOOL_STEPS) {
-                if (response.kind == "reply" && requestedEvidence) {
+                val spoken = spokenTextFor(response)
+                if (response.kind == "reply" && (requestedEvidence || Grounding.hasPageCitation(spoken))) {
                     exchange.removeAt(exchange.lastIndex)
-                    return finish(exchange, AfterTool.Say(Grounding.check(spokenTextFor(response), evidence)))
+                    return finish(exchange, AfterTool.Say(Grounding.check(spoken, evidence)))
                 }
                 remember(exchange)
                 if (response.kind == "tool") return "I couldn't finish that. Try asking another way."
-                return spokenTextFor(response)
+                return spoken
             }
             if (toolName in Grounding.CONTENT_TOOLS) requestedEvidence = true
             val stepEvidence = mutableListOf<DocumentEvidence>()
