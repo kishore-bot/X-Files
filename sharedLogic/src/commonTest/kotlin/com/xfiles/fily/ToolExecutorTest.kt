@@ -31,7 +31,7 @@ class ToolExecutorTest {
             override fun resolve(id: String) = files.firstOrNull { it.id == id }
             override suspend fun text(id: String, limit: Int): FilyExcerpt? = null
         }
-        return ToolExecutor(access, documents, ReaderControl(), { opened += it; true })
+        return ToolExecutor(access, documents, ReaderControl(), { opened += it; FilyHandoff.Accepted })
     }
 
     private fun names(result: String) =

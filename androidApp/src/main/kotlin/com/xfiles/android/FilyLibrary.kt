@@ -6,6 +6,7 @@ import com.xfiles.core.documents.FilePreview
 import com.xfiles.feature.reader.DocumentAnalysisViewModel
 import com.xfiles.feature.reader.ReaderState
 import com.xfiles.fily.FilyDocuments
+import com.xfiles.fily.FilyHandoff
 import com.xfiles.fily.ReaderPosition
 import com.xfiles.fily.ReaderTarget
 import kotlinx.coroutines.flow.first
@@ -23,13 +24,15 @@ internal class FilyLibrary private constructor(
 
     fun file(id: String): FileEntry? = view.file(id)
 
-    /** Opens [id] at [page] (0-based); false while unsaved annotations would be lost. */
-    suspend fun open(id: String, page: Int = 0): Boolean {
-        val file = file(id) ?: return false
-        if (reader.markup.value.marks.isNotEmpty() || reader.markup.value.saving) return false
+    /** Opens [id] at an explicit zero-based [page], or at its saved position. */
+    suspend fun open(id: String, page: Int? = null): FilyHandoff {
+        val file = file(id) ?: return FilyHandoff.Unavailable
+        if (reader.markup.value.saving) return FilyHandoff.Busy
+        if (reader.markup.value.marks.isNotEmpty()) return FilyHandoff.UnsavedAnnotations
         reader.open(file.uri, page)
-        val opened = reader.state.first { it != ReaderState.Loading } as? ReaderState.Ready ?: return false
-        return opened.file.uri == file.uri && opened.preview != FilePreview.Unsupported
+        val opened = reader.state.first { it != ReaderState.Loading } as? ReaderState.Ready
+        return if (opened != null && opened.file.uri == file.uri && opened.preview != FilePreview.Unsupported) FilyHandoff.Accepted
+        else FilyHandoff.Unavailable
     }
 
     companion object {

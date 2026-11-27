@@ -740,10 +740,10 @@ const LOCKED: [(&str, &[u8]); 6] = [
 #[test]
 fn every_outside_handler_opens_with_either_password_and_decrypts() {
     for (name, bytes) in LOCKED {
-        for password in [USER, OWNER] {
+        for (role, password) in [("user", USER), ("owner", OWNER)] {
             let mut file = open(bytes, Some(password));
             assert_eq!(file.pages().unwrap().len(), 2, "{name}");
-            assert!(page_text(&mut file, 1).contains("Fixture page 2"), "{name} with {password}");
+            assert!(page_text(&mut file, 1).contains("Fixture page 2"), "{name} with {role} password");
             assert_eq!(font_name(&mut file, 0), b"Helvetica", "{name}");
             let info = file.trailer.get("Info").cloned().unwrap();
             let Obj::Dict(info) = file.resolve(&info).unwrap() else { panic!("{name}: no info") };

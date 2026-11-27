@@ -20,7 +20,6 @@ import com.xfiles.feature.reader.domain.DocumentSummaryUseCase
 import com.xfiles.feature.reader.domain.OpenDocumentUseCase
 import com.xfiles.feature.reader.domain.PdfPagesUseCase
 import com.xfiles.feature.reader.domain.SensitiveScanUseCase
-import com.xfiles.feature.reader.domain.pdfPartner
 import com.xfiles.tidy.SensitiveFindings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -28,6 +27,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -128,8 +128,10 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     private val unregisterPdfCache = com.xfiles.core.documents.MemoryPressure.register(pdfPages::trim)
     private var readerJob: Job? = null
-    private var pdfJumpId = android.os.SystemClock.elapsedRealtimeNanos()
-    private var spreadJob: Job? = null
+    private val pdfNavigation = PdfNavigationController(pdfPages, mutableState, viewModelScope) { file, page ->
+        saved[OPEN_PAGE] = page
+        progress.write(file.uri.toString(), "pdf-page", page.toString())
+    }
     private val summary = ReaderSummaryController(summarize, mutableState, viewModelScope)
     private var pdfPassword: String? = null
     /** Archives left by [openNested], innermost last; [popNested] returns to them. */
@@ -153,7 +155,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         summary.cancel()
         discardMarkup()
         clearPdfSearch()
-        spreadJob?.cancel()
+        pdfNavigation.reset()
         pdfPages.clear()
         pdfPassword = null
         saved[OPEN_URI] = uri.toString()
@@ -163,6 +165,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         saved[OPEN_PAGE] = initialPage
         startReader(ReaderState.Loading) {
             val opened = openDocument(uri, initialPage, password)
+            ensureActive()
             if (opened is ReaderState.Ready) {
                 val preview = opened.preview
                 if (preview is FilePreview.Pdf) {
@@ -214,7 +217,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         discardMarkup()
         pdfPassword = null
         clearPdfSearch()
-        spreadJob?.cancel()
+        pdfNavigation.reset()
         pdfPages.clear()
         readerJob?.cancel()
         summary.cancel()
@@ -224,70 +227,11 @@ class DocumentAnalysisViewModel @Inject constructor(
         mutableState.value = null
     }
 
-    fun changePage(index: Int) = selectPdfPage(index, explicit = true)
+    fun changePage(index: Int) = pdfNavigation.select(index, explicit = true, password = pdfPassword)
 
-    fun reportPdfPage(index: Int) = selectPdfPage(index, explicit = false)
+    fun reportPdfPage(index: Int) = pdfNavigation.select(index, explicit = false, password = pdfPassword)
 
-    private fun selectPdfPage(index: Int, explicit: Boolean) {
-        val ready = state.value as? ReaderState.Ready ?: return
-        val pdf = ready.preview as? FilePreview.Pdf ?: return
-        if (index !in 0 until pdf.pageCount || (!explicit && ready.turningPage)) return
-        val selection = if (explicit) ready.copy(pdfJump = PdfPageJump(++pdfJumpId, index)) else ready
-        if (index == pdf.page) {
-            if (explicit) {
-                if (ready.turningPage) readerJob?.cancel()
-                mutableState.value = selection.copy(turningPage = false, pageError = false)
-            }
-            return
-        }
-        startReader(
-            selection.copy(turningPage = true, pageError = false),
-            onError = {
-                val current = state.value as? ReaderState.Ready ?: selection
-                current.copy(turningPage = false, pageError = true)
-            },
-        ) {
-            val page = pdfPages.page(ready.file, index, pdfPassword)
-            // The spread partner is read before the turn lands, so both pages appear together.
-            val facing = if (ready.twoPage) pdfPartner(index, pdf.pageCount)?.let { pdfPages.page(ready.file, it, pdfPassword) } else null
-            val active = mutableState.value as? ReaderState.Ready ?: return@startReader
-            mutableState.value = active.copy(preview = page, facing = facing, turningPage = false, pageError = false)
-            saved[OPEN_PAGE] = index
-            progress.write(ready.file.uri.toString(), "pdf-page", index.toString())
-            pdfPages.prefetch(viewModelScope, ready.file, index, pdf.pageCount, ready.twoPage, pdfPassword)
-        }
-    }
-
-    /** Two pages side by side, as pairs (0,1), (2,3)...: turns move by a pair. */
-    fun setTwoPage(enabled: Boolean) {
-        val ready = state.value as? ReaderState.Ready ?: return
-        val pdf = ready.preview as? FilePreview.Pdf ?: return
-        if (ready.turningPage || ready.twoPage == enabled) return
-        spreadJob?.cancel()
-        val partner = if (enabled) pdfPartner(pdf.page, pdf.pageCount) else null
-        mutableState.value = ready.copy(twoPage = enabled, facing = null)
-        if (!enabled) {
-            pdfPages.prefetch(viewModelScope, ready.file, pdf.page, pdf.pageCount, false, pdfPassword)
-            return
-        }
-        spreadJob = viewModelScope.launch {
-            val facing = partner?.let {
-                try {
-                    pdfPages.page(ready.file, it, pdfPassword)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    Log.w("XfilesReader", "Spread page could not be read", error)
-                    null
-                }
-            }
-            val current = mutableState.value as? ReaderState.Ready ?: return@launch
-            if (current.file.uri == ready.file.uri && current.twoPage && (current.preview as? FilePreview.Pdf)?.page == pdf.page) {
-                mutableState.value = current.copy(facing = facing)
-            }
-        }
-        pdfPages.prefetch(viewModelScope, ready.file, pdf.page, pdf.pageCount, true, pdfPassword)
-    }
+    fun setTwoPage(enabled: Boolean) = pdfNavigation.setSpread(enabled, pdfPassword)
 
     /**
      * One page of the open PDF at reading size, through the bitmap cache, for the continuous view. Null when the
@@ -394,7 +338,6 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     private fun startReader(
         initial: ReaderState,
-        onError: (() -> ReaderState)? = null,
         operation: suspend () -> Unit,
     ) {
         readerJob?.cancel()
@@ -405,9 +348,11 @@ class DocumentAnalysisViewModel @Inject constructor(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                ensureActive()
                 Log.w("XfilesReader", "Document could not be read", error)
-                mutableState.value = onError?.invoke() ?: ReaderState.ReadError
+                mutableState.value = ReaderState.ReadError
             } catch (error: LinkageError) {
+                ensureActive()
                 Log.e("XfilesReader", "Rust document library unavailable", error)
                 mutableState.value = ReaderState.EngineUnavailable
             }
@@ -433,7 +378,8 @@ class DocumentAnalysisViewModel @Inject constructor(
             open(ready.file.uri)
         } else {
             summary.cancel()
-            mutableState.value = ready.copy(preview = preview, summary = null)
+            pdfNavigation.reset()
+            mutableState.value = ready.copy(preview = preview, summary = null, turningPage = false)
         }
     }
 

@@ -1,86 +1,85 @@
 package com.xfiles.fily
 
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
+/** Trusted passage metadata is supplied by the document source, independently of the file's text. */
+internal data class DocumentEvidence(val documentId: String, val page: Int?, val text: String)
 
-/**
- * Checks a content answer against the text the tools actually returned, before Fily speaks it.
- * A small model can invent amounts, dates or facts; an answer whose numbers or key words are not
- * in the evidence is replaced by an honest "couldn't find it". Grounded answers get the page
- * they came from, when the evidence is labelled "[page N]".
- */
-object Grounding {
-    /** Tools whose results are document text, so a following reply must be grounded in them. */
+internal object Grounding {
     val CONTENT_TOOLS = setOf("getDocumentExcerpt", "findTextInDocument")
-
     const val NOT_FOUND = "I couldn't find that in the file."
 
     private const val MIN_SUPPORT = 0.5
     private const val MIN_WORDS_TO_JUDGE = 2
-    private val NUMBER = Regex("""\d[\d,.:/-]*\d|\d""")
+    private val NUMBER = Regex("""\d+(?:[.,:/-]\d+)*""")
     private val WORD = Regex("""[\p{L}\p{N}]+""")
-    private val PAGE_LABEL = Regex("""\[page (\d+)]""")
-    private val PAGE_MENTION = Regex("""\bpages?\s+\d+""", RegexOption.IGNORE_CASE)
-    private val ALREADY_NEGATIVE = Regex(
-        """couldn'?t find|could not find|can'?t find|not (in|mentioned)|no mention|doesn'?t (say|mention)|isn'?t (in|there)|not sure""",
+    private val PAGE_MENTION = Regex(
+        """\b(?:pages?|pp?\.)\s*(\d+(?:\s*(?:[,–-]|\band\b|\bto\b|\bor\b)\s*\d+)*)\b""",
         RegexOption.IGNORE_CASE,
     )
+    private val PAGE_RANGE = Regex("""(\d+)\s*(?:[–-]|\bto\b)\s*(\d+)""", RegexOption.IGNORE_CASE)
 
-    /** Every string inside a tool result, so JSON keys and escapes don't count as evidence. */
-    fun evidenceOf(toolResult: String): String = runCatching {
-        buildString { collect(Json.parseToJsonElement(toolResult), this) }
-    }.getOrDefault(toolResult)
+    /** Checks lexical support, with exact page metadata for citations. */
+    fun check(reply: String, evidence: List<DocumentEvidence>): String {
+        val excerpts = evidence.filter { it.text.isNotBlank() }
+        if (excerpts.isEmpty()) return NOT_FOUND
+        if (reply == NOT_FOUND) return reply
 
-    private fun collect(element: JsonElement, out: StringBuilder) {
-        when (element) {
-            is JsonPrimitive -> if (element.isString) out.append(element.content).append('\n')
-            is JsonArray -> element.forEach { collect(it, out) }
-            is JsonObject -> element.values.forEach { collect(it, out) }
+        val mentions = PAGE_MENTION.findAll(reply).toList()
+        val content = PAGE_MENTION.replace(reply, "")
+        val words = keyWords(content)
+        val numbers = numbers(content)
+        val documents = excerpts.groupBy { it.documentId }
+        val supportedDocuments = documents.values.filter { supports(it, words, numbers) }
+        if (supportedDocuments.isEmpty()) return NOT_FOUND
+
+        val pages = mentions.flatMap { mentionedPages(it.groupValues[1]) ?: return NOT_FOUND }.toSet()
+        if (pages.isNotEmpty()) {
+            val matchingDocuments = supportedDocuments.filter { document ->
+                pages.all { page ->
+                    val rows = document.filter { it.page == page }
+                    rows.isNotEmpty() && supports(rows, words, numbers)
+                }
+            }
+            return if (matchingDocuments.size == 1) reply else NOT_FOUND
         }
-    }
-
-    /** The reply to speak: [reply] itself (plus a page) when grounded in [evidence], else [NOT_FOUND]. */
-    fun check(reply: String, evidence: String): String {
-        if (evidence.isBlank() || ALREADY_NEGATIVE.containsMatchIn(reply)) return reply
-        val haystack = evidence.lowercase()
-        val digits = haystack.filter(Char::isLetterOrDigit)
-        // Numbers are where a small model hallucinates most: each one must be in the evidence.
-        val numbers = NUMBER.findAll(reply.replace(PAGE_MENTION, "")).map { it.value.filter(Char::isDigit) }.toList()
-        if (numbers.any { it !in digits }) return NOT_FOUND
-        val words = keyWords(reply)
-        if (words.size >= MIN_WORDS_TO_JUDGE) {
-            val known = keyWords(evidence).mapTo(HashSet(), ::stem)
-            val supported = words.count { stem(it) in known }
-            if (supported.toDouble() / words.size < MIN_SUPPORT) return NOT_FOUND
-        }
-        if (PAGE_MENTION.containsMatchIn(reply)) return reply
-        val page = bestPage(words, evidence) ?: return reply
+        val document = supportedDocuments.singleOrNull() ?: return reply
+        val supportingPages = document.filter { it.page != null }.groupBy { it.page }
+            .filterValues { supports(it, words, numbers) }
+        val page = supportingPages.keys.singleOrNull() ?: return reply
         return reply.trimEnd().trimEnd('.') + " (page $page)."
     }
 
-    /** The labelled page whose text shares the most key words with the answer. */
-    private fun bestPage(words: List<String>, evidence: String): Int? {
-        val labels = PAGE_LABEL.findAll(evidence).toList()
-        if (labels.isEmpty()) return null
-        val stems = words.mapTo(HashSet(), ::stem)
-        return labels.mapIndexed { i, label ->
-            val end = labels.getOrNull(i + 1)?.range?.first ?: evidence.length
-            val text = evidence.substring(label.range.last + 1, end)
-            label.groupValues[1].toInt() to keyWords(text).count { stem(it) in stems }
-        }.maxByOrNull { it.second }?.takeIf { it.second > 0 || labels.size == 1 }?.first
+    private fun mentionedPages(text: String): List<Int>? {
+        val pages = mutableListOf<Int>()
+        for (range in PAGE_RANGE.findAll(text)) {
+            val first = range.groupValues[1].toIntOrNull() ?: return null
+            val last = range.groupValues[2].toIntOrNull() ?: return null
+            if (first < 1 || last < first || last - first > 20) return null
+            pages += first..last
+        }
+        for (token in NUMBER.findAll(PAGE_RANGE.replace(text, ""))) {
+            val page = token.value.toIntOrNull()?.takeIf { it > 0 } ?: return null
+            pages.add(page)
+        }
+        return pages.takeIf { it.isNotEmpty() }
     }
+
+    private fun supports(excerpts: List<DocumentEvidence>, words: List<String>, requiredNumbers: Set<String>): Boolean {
+        val text = excerpts.joinToString("\n") { it.text }
+        if (!numbers(text).containsAll(requiredNumbers)) return false
+        if (words.size < MIN_WORDS_TO_JUDGE) return true
+        val known = keyWords(text).toHashSet()
+        return words.count { it in known }.toDouble() / words.size >= MIN_SUPPORT
+    }
+
+    private fun numbers(text: String): Set<String> =
+        NUMBER.findAll(text).map { it.value.replace(",", "") }.toSet()
 
     private fun keyWords(text: String): List<String> = WORD.findAll(text.lowercase())
         .map { it.value }
         .filter { it.length >= 4 && it !in STOP && !it.all(Char::isDigit) }
+        .map { it.take(6) }
         .distinct()
         .toList()
-
-    /** A crude stem: enough to match "invoices" with "invoice" and "payment" with "payments". */
-    private fun stem(word: String): String = word.take(6)
 
     private val STOP = setOf(
         "this", "that", "with", "from", "have", "your", "file", "document", "there", "their", "which",

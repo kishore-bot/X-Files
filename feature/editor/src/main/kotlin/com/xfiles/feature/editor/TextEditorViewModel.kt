@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,6 +18,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+sealed interface EditorOpenRequest {
+    data class Draft(val name: String, val text: String) : EditorOpenRequest
+    data class File(val uri: Uri, val name: String) : EditorOpenRequest
+}
 
 /**
  * Plain-text editor session. The text is LF-only in [text]; [EditorState] carries the file's encoding
@@ -31,6 +37,17 @@ class TextEditorViewModel @Inject constructor(private val documents: DocumentRep
     private var baseline = ""
     private var baselineFormat = TextEncoding.Utf8 to LineEnding.Lf
     private var loadJob: Job? = null
+    private val incoming = mutableStateListOf<EditorOpenRequest>()
+    val incomingCount get() = incoming.size
+
+    fun queueOpen(request: EditorOpenRequest) {
+        incoming.add(request)
+    }
+
+    fun nextOpen(): EditorOpenRequest? {
+        if (incoming.isEmpty()) return null
+        return incoming.removeAt(0)
+    }
 
     /** Opens text that the caller already decoded (UTF-8, LF). */
     fun open(name: String, source: String) {

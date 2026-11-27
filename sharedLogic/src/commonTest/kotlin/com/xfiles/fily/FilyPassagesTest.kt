@@ -31,7 +31,7 @@ class FilyPassagesTest {
             override suspend fun text(id: String, limit: Int) = FilyExcerpt(text.take(limit), text.length > limit, listOf(0))
             override suspend fun retrieve(id: String, question: String, budget: Int) = retrieval
         }
-        return ToolExecutor(access, documents, ReaderControl(), { true }).apply { this.question = question }
+        return ToolExecutor(access, documents, ReaderControl(), { FilyHandoff.Accepted }).apply { this.question = question }
     }
 
     private suspend fun excerpt(executor: ToolExecutor): JsonObject =

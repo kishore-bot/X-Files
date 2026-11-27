@@ -182,16 +182,18 @@ class MainActivity : ComponentActivity() {
             val note by pendingNote.collectAsStateWithLifecycle()
             LaunchedEffect(note) {
                 val (title, text) = note ?: return@LaunchedEffect
-                pendingNote.compareAndSet(note, null)
-                navigator.openEditor("${title.ifBlank { "Note" }.take(MAX_NOTE_NAME)}.txt", text)
+                if (pendingNote.compareAndSet(note, null)) {
+                    navigator.openEditor("${title.ifBlank { "Note" }.take(MAX_NOTE_NAME)}.txt", text)
+                }
             }
             // Shared text: a link is offered in a sheet; any other text opens in the editor, prefilled, to save.
             val sharedText by pendingSharedText.collectAsStateWithLifecycle()
             var sharedLink by rememberSaveable { mutableStateOf<String?>(null) }
             LaunchedEffect(sharedText) {
                 val text = sharedText ?: return@LaunchedEffect
-                pendingSharedText.compareAndSet(text, null)
-                if (isWebLink(text)) sharedLink = text.trim() else navigator.openEditor("Shared text.txt", text)
+                if (pendingSharedText.compareAndSet(text, null)) {
+                    if (isWebLink(text)) sharedLink = text.trim() else navigator.openEditor("Shared text.txt", text)
+                }
             }
             val reducedMotion by motion.reduced.collectAsStateWithLifecycle()
 
@@ -200,7 +202,26 @@ class MainActivity : ComponentActivity() {
                     // The window behind the Compose tree follows the active palette, including any app theme override.
                     val windowColor = LocalEzPalette.current.background.toArgb()
                     SideEffect { window.setBackgroundDrawable(ColorDrawable(windowColor)) }
-                    sharedLink?.takeUnless { showFily }?.let { link ->
+                    val editorRequestCount = navigator.editorRequestCount
+                    val editorSaving = draft?.saving == true
+                    val editorDirty = editorRequestCount > 0 && editor.hasChanges()
+                    LaunchedEffect(editorRequestCount, editorSaving, editorDirty, showFily) {
+                        if (editorRequestCount > 0 && !editorSaving && !editorDirty && !showFily) {
+                            navigator.resolveEditorRequest(replace = true)
+                        }
+                    }
+                    if (editorDirty && !editorSaving && !showFily) {
+                        com.xfiles.design.EzDialog(
+                            onDismissRequest = { navigator.resolveEditorRequest(replace = false) },
+                            title = "Open another draft?",
+                            text = "The current draft has unsaved changes.",
+                            confirmText = "Discard and open",
+                            onConfirm = { navigator.resolveEditorRequest(replace = true) },
+                            dismissText = "Keep editing",
+                            onDismiss = { navigator.resolveEditorRequest(replace = false) },
+                        )
+                    }
+                    sharedLink?.takeUnless { showFily || editorRequestCount > 0 }?.let { link ->
                         SharedLinkSheet(
                             link = link,
                             onSaveNote = { navigator.openEditor("Shared link.txt", link); sharedLink = null },

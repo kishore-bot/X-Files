@@ -30,6 +30,10 @@ internal object FilyReplies {
     fun afterTool(tool: String, args: JsonObject?, result: JsonObject, request: String, nameOf: (String) -> String?): AfterTool? {
         val status = result["status"]?.jsonPrimitive?.contentOrNull
         if (status == "failed") return failure(tool, args, result["reason"]?.jsonPrimitive?.contentOrNull)?.let { AfterTool.Say(it) }
+        if (status == "review_pending") return AfterTool.Say(
+            if (tool == "addBookmark") "I opened the page. Tap Bookmark to keep it."
+            else "Review the PDF tool and its inputs on screen.",
+        )
         return when (tool) {
             "openDocument" -> result["documentId"]?.jsonPrimitive?.contentOrNull?.takeIf { status == "opened" }?.let { id ->
                 AfterTool.Say("Opening ${nameOf(id)?.let(::spoken) ?: "it"}.", listOf(id))
@@ -107,6 +111,9 @@ internal object FilyReplies {
         "access_off" -> "Fily's file access is off. You can turn it on in Xfiles Info."
         "content_restricted" -> "I'm not allowed to read inside files. You can allow it in Xfiles Info."
         "not_available" -> "I couldn't find that file."
+        "busy" -> "That tool is busy. Wait for it to finish, then try again."
+        "editor_confirmation_needed" -> "Your current draft is still open. Choose whether to replace it when you close Fily."
+        "unsaved_annotations" -> "Save or discard your PDF annotations first."
         "no_document" -> "Open a file first."
         "unsupported_here" -> when (args.string("operation")) {
             "go_to_page", "next_page", "previous_page" -> "This file has no pages. Say scroll down instead."

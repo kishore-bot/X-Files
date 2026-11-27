@@ -60,9 +60,16 @@ sealed interface FilyDestination {
     ) : FilyDestination
 }
 
+enum class FilyHandoff(val failure: String? = null) {
+    Accepted,
+    Busy("busy"),
+    AwaitingEditorDecision("editor_confirmation_needed"),
+    UnsavedAnnotations("unsaved_annotations"),
+    Unavailable("not_available"),
+}
+
 fun interface FilyNavigator {
-    /** Shows [destination]; false when it can't be shown now (unsaved work, unreadable file). */
-    suspend fun go(destination: FilyDestination): Boolean
+    suspend fun go(destination: FilyDestination): FilyHandoff
 }
 
 data class FilyTidySummary(
@@ -113,7 +120,11 @@ class ToolExecutor(
 
     fun nameOf(alias: String): String? = names[alias] ?: resolve(alias)?.name
 
-    suspend fun execute(name: String, args: JsonObject?): String {
+    suspend fun execute(name: String, args: JsonObject?): String = execute(name, args) {}
+
+    internal suspend fun execute(
+        name: String, args: JsonObject?, evidence: (List<DocumentEvidence>) -> Unit,
+    ): String {
         if (name !in supported) return failed("unsupported_tool")
         val arguments = args ?: JsonObject(emptyMap())
         val needsContent = name in CONTENT_TOOLS
@@ -124,8 +135,8 @@ class ToolExecutor(
                     "searchDocuments" -> arguments.string("query").orEmpty().let { query -> listed(withContentFallback(query, search(LibraryQuery(query)))) }
                     "listRecentDocuments" -> listed(documents.recent())
                     "getDocumentInfo" -> info(document(arguments.required("documentId"))).toString()
-                    "getDocumentExcerpt" -> excerpt(document(arguments.required("documentId")), arguments.int("maxChars"))
-                    "findTextInDocument" -> findText(document(arguments.required("documentId")), arguments.required("query"))
+                    "getDocumentExcerpt" -> excerpt(document(arguments.required("documentId")), arguments.int("maxChars"), evidence)
+                    "findTextInDocument" -> findText(document(arguments.required("documentId")), arguments.required("query"), evidence)
                     "openDocument" -> openDocument(arguments.required("documentId"))
                     "listBookmarks" -> bookmarks(arguments.string("documentId"))
                     "openBookmark" -> openBookmark(arguments.required("bookmarkId"))
@@ -206,53 +217,69 @@ class ToolExecutor(
         if (byName.isNotEmpty() || query.isBlank() || !access.contentAccess.value) byName
         else documents.searchContent(query, RESULT_LIMIT + 1).ifEmpty { byName }
 
-    private suspend fun excerpt(doc: FilyDocument, maxChars: Int?): String {
-        // Short enough to leave room for the reply in the model's 4,096-token context.
+    private suspend fun excerpt(
+        doc: FilyDocument, maxChars: Int?, evidence: (List<DocumentEvidence>) -> Unit,
+    ): String {
         val budget = (maxChars ?: MAX_EXCERPT_CHARS).coerceIn(1, MAX_EXCERPT_CHARS)
-        // A question about a long document: the passages that answer it, from the retrieval index. A question
-        // that names a page, or a document that fits whole, keeps the direct path below.
+        val id = alias(doc.id)
         var fitsWhole = false
         if (question.isNotBlank() && !Passages.namesPage(question)) {
             val retrieved = documents.retrieve(doc.id, question, budget)
             fitsWhole = retrieved is FilyRetrieval.Whole
             if (retrieved is FilyRetrieval.Passages && retrieved.passages.isNotEmpty()) {
-                val text = FilyPassages.render(retrieved.passages, budget)
-                return excerptJson(doc, text, available = true, truncated = retrieved.omitted)
+                val packed = FilyPassages.pack(retrieved.passages, budget)
+                evidence(packed.passages.map { DocumentEvidence(id, it.page, it.text) })
+                return excerptJson(id, packed.text, available = true, truncated = retrieved.omitted)
             }
         }
         val full = documents.text(doc.id, SOURCE_CHARS)
-        val (text, cut) = when {
-            full == null -> "" to false
-            // The whole document fits: send it all rather than keyword-picked sentences.
-            fitsWhole -> full.text.take(budget) to (full.text.length > budget)
-            question.isNotBlank() -> Passages.select(full.text, question, budget, full.pageStarts)
-            else -> full.text.take(budget) to (full.text.length > budget)
+            ?: return excerptJson(id, "", available = false, truncated = false)
+        val (text, passages, cut) = if (fitsWhole || question.isBlank()) {
+            val visible = full.text.take(budget)
+            Triple(visible, FilyPassages.pages(visible, full.pageStarts), visible.length < full.text.length)
+        } else {
+            val (selected, incomplete) = Passages.select(full.text, question, budget, full.pageStarts)
+            val packed = FilyPassages.pack(selected, budget)
+            Triple(packed.text, packed.passages, incomplete)
         }
-        return excerptJson(doc, text, available = full != null, truncated = cut || full?.truncated == true)
+        evidence(passages.map { DocumentEvidence(id, it.page, it.text) })
+        return excerptJson(id, text, available = true, truncated = cut || full.truncated)
     }
 
-    private fun excerptJson(doc: FilyDocument, text: String, available: Boolean, truncated: Boolean): String =
+    private fun excerptJson(id: String, text: String, available: Boolean, truncated: Boolean): String =
         buildJsonObject {
-            put("documentId", alias(doc.id))
+            put("documentId", id)
             put("text", text)
             put("available", available)
             put("truncated", truncated)
         }.toString()
 
-    private suspend fun findText(doc: FilyDocument, query: String): String {
+    private suspend fun findText(
+        doc: FilyDocument, query: String, evidence: (List<DocumentEvidence>) -> Unit,
+    ): String {
         val needle = query.take(256)
+        val id = alias(doc.id)
         val full = documents.text(doc.id, SOURCE_CHARS)
         val text = full?.text.orEmpty()
+        val starts = full?.pageStarts.orEmpty()
+        val excerpts = mutableListOf<DocumentEvidence>()
         val matches = generateSequence(text.indexOf(needle, ignoreCase = true).takeIf { it >= 0 }) { previous ->
-            text.indexOf(needle, previous + needle.length, ignoreCase = true).takeIf { it >= 0 }
+            text.indexOf(needle, previous + 1, ignoreCase = true).takeIf { it >= 0 }
         }.take(5).map { found ->
+            val page = starts.indexOfLast { it <= found }
+            val pageStart = starts.getOrNull(page)?.coerceIn(0, found) ?: 0
+            val pageEnd = starts.getOrNull(page + 1)?.coerceIn(found, text.length) ?: text.length
+            val snippet = text.substring((found - 70).coerceAtLeast(pageStart), (found + needle.length + 70).coerceAtMost(pageEnd))
+            excerpts += DocumentEvidence(id, (page + 1).takeIf { page >= 0 }, snippet)
             buildJsonObject {
                 put("offset", found)
-                put("snippet", text.substring((found - 70).coerceAtLeast(0), (found + needle.length + 70).coerceAtMost(text.length)))
+                put("snippet", snippet)
+                if (page >= 0) put("page", page + 1)
             }
         }.toList()
+        evidence(excerpts)
         return buildJsonObject {
-            put("documentId", alias(doc.id))
+            put("documentId", id)
             put("matches", JsonArray(matches))
             put("available", full != null)
             put("partial", full?.truncated ?: false)
@@ -293,7 +320,7 @@ class ToolExecutor(
     private suspend fun handoff(status: String, destination: FilyDestination, extra: JsonObjectBuilder.() -> Unit = {}): String {
         val authorization = access.captureAuthorization()
         access.recheckAuthorization(authorization)
-        if (!navigator.go(destination)) return failed("not_available")
+        navigator.go(destination).failure?.let { return failed(it) }
         return buildJsonObject {
             put("status", status)
             extra()

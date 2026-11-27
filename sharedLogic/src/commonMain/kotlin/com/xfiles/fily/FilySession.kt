@@ -122,7 +122,8 @@ class FilySession(
         val grammar = FilyGrammar.forTools(toolNames)
         tools.question = request
         val exchange = mutableListOf(FilyTurn(FilyRole.User, request))
-        val evidence = StringBuilder()
+        val evidence = mutableListOf<DocumentEvidence>()
+        var requestedEvidence = false
         repeat(MAX_TOOL_STEPS + 1) { step ->
             val current = this.screen
             val state = FilyTurn(FilyRole.User, FilyPrompt.appState(access.enabled.value, access.contentAccess.value, today(), current))
@@ -132,18 +133,24 @@ class FilySession(
             exchange += FilyTurn(FilyRole.Assistant, raw)
             val toolName = response.toolName
             if (response.kind != "tool" || toolName == null || step == MAX_TOOL_STEPS) {
+                if (response.kind == "reply" && requestedEvidence) {
+                    exchange.removeAt(exchange.lastIndex)
+                    return finish(exchange, AfterTool.Say(Grounding.check(spokenTextFor(response), evidence)))
+                }
                 remember(exchange)
                 if (response.kind == "tool") return "I couldn't finish that. Try asking another way."
-                val spoken = spokenTextFor(response)
-                // Answers about file content must come from the text the tools returned.
-                return if (response.kind == "reply" && evidence.isNotEmpty()) Grounding.check(spoken, evidence.toString()) else spoken
+                return spokenTextFor(response)
             }
-            val result = if (toolName in toolNames) tools.execute(toolName, withOpenFile(response.toolArgs, this.screen)) else UNOFFERED_TOOL
+            if (toolName in Grounding.CONTENT_TOOLS) requestedEvidence = true
+            val stepEvidence = mutableListOf<DocumentEvidence>()
+            val result = if (toolName in toolNames) {
+                tools.execute(toolName, withOpenFile(response.toolArgs, this.screen)) { stepEvidence.addAll(it) }
+            } else UNOFFERED_TOOL
             log("Tool $toolName -> ${result.take(300)}")
-            if (toolName in Grounding.CONTENT_TOOLS) evidence.append(Grounding.evidenceOf(result)).append('\n')
             exchange += FilyTurn(FilyRole.Tool, result)
             // Action results get a fixed, accurate sentence; only content answers go back to the model.
             val parsed = recordResult(toolName, result)
+            if (parsed != null && parsed["status"] != JsonPrimitive("failed")) evidence.addAll(stepEvidence)
             when (val next = parsed?.let { FilyReplies.afterTool(toolName, response.toolArgs, it, request, tools::nameOf) }) {
                 is AfterTool.Say -> return finish(exchange, next)
                 is AfterTool.Open -> {

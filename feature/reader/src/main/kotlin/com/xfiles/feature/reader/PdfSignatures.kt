@@ -51,17 +51,17 @@ internal interface PdfSignaturesEntryPoint {
 }
 
 /** What the signatures say as a whole, for the pill's tone. */
-private enum class SignatureTone(val color: Color, val label: String) {
-    Intact(EzColors.Positive, "Signed"),
-    Changed(Color(0xFFF0A020), "Signed · changed after signing"),
-    Damaged(EzColors.Primary, "Signature data damaged"),
+private enum class SignatureTone(val color: Color?, val label: String) {
+    Present(null, "Signature present · unverified"),
+    Changed(Color(0xFFF0A020), "Unverified · signature range ends before the file"),
+    Damaged(EzColors.Primary, "Unverified · invalid signature range"),
 }
 
 private fun toneOf(signatures: List<PdfSignatureInfo>): SignatureTone = when {
     signatures.any { !it.byteRangeOk } -> SignatureTone.Damaged
-    // The newest signature reaching the end means later edits were all signed.
+    // The offsets only describe the file revision that the signature claims to cover.
     signatures.none { it.coversWholeFile } -> SignatureTone.Changed
-    else -> SignatureTone.Intact
+    else -> SignatureTone.Present
 }
 
 /** A pill over the page when the PDF is digitally signed; tapping it opens the details. */
@@ -75,7 +75,6 @@ internal fun PdfSignatureBadge(uri: Uri, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
     AnimatedVisibility(signatures.isNotEmpty(), modifier, enter = fadeIn() + slideInVertically { -it }) {
         val tone = toneOf(signatures)
-        val who = signatures.firstNotNullOfOrNull { it.signer }
         Row(
             Modifier
                 .glass(EzShapes.Bar)
@@ -84,9 +83,9 @@ internal fun PdfSignatureBadge(uri: Uri, modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(EzIcons.Lock, null, tint = tone.color, modifier = Modifier.size(18.dp))
+            Icon(EzIcons.Lock, null, tint = tone.color ?: EzColors.TextSecondary, modifier = Modifier.size(18.dp))
             Text(
-                if (who != null && tone == SignatureTone.Intact) "Signed by $who" else tone.label,
+                tone.label,
                 color = EzColors.Text,
                 style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
@@ -108,8 +107,7 @@ private fun PdfSignatureSheet(signatures: List<PdfSignatureInfo>, onDismiss: () 
         ) {
             Text("Digital signatures", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                "Shown as the file declares them. Xfiles checks that the signed byte ranges are intact, " +
-                    "not the signer's certificate.",
+                "Xfiles checks the layout of the declared byte ranges. The signature and signer's certificate are unverified.",
                 color = EzColors.TextSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -124,15 +122,15 @@ private fun SignatureCard(s: PdfSignatureInfo) {
     val tone = toneOf(listOf(s))
     Column(Modifier.fillMaxWidth().glassCard().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(EzIcons.Lock, null, tint = tone.color, modifier = Modifier.size(20.dp))
-            Text(s.signer ?: "Unknown signer", style = MaterialTheme.typography.titleMedium, color = EzColors.Text)
+            Icon(EzIcons.Lock, null, tint = tone.color ?: EzColors.TextSecondary, modifier = Modifier.size(20.dp))
+            Text(s.signer?.let { "Declared signer: $it" } ?: "No signer declared", style = MaterialTheme.typography.titleMedium, color = EzColors.Text)
         }
         Detail("Status", tone.label)
         Detail("Signed", s.signedAt)
         Detail("Reason", s.reason)
         Detail("Location", s.location)
         Detail("Contact", s.contact)
-        Detail("Covers whole document", if (s.coversWholeFile) "Yes" else "No, content was added later")
+        Detail("Declared range ends at file end", if (s.coversWholeFile) "Yes" else "No")
         Detail("Field", s.field.ifBlank { null })
         Detail("Format", s.format)
     }

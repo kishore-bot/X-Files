@@ -366,8 +366,18 @@ impl SearchIndex {
     /// The best `limit` documents for `query`, with snippets. The last word,
     /// unless followed by a space, also matches words it begins.
     pub fn query(&self, query: &str, limit: usize) -> Vec<Hit> {
+        self.query_filtered(query, limit, None)
+    }
+
+    /// Limit results to keys in the caller's current accessible library.
+    pub fn query_allowed(&self, query: &str, limit: usize, keys: &[String]) -> Vec<Hit> {
+        let allowed: HashSet<&str> = keys.iter().map(String::as_str).collect();
+        self.query_filtered(query, limit, Some(&allowed))
+    }
+
+    fn query_filtered(&self, query: &str, limit: usize, allowed: Option<&HashSet<&str>>) -> Vec<Hit> {
         let terms = query_terms(query);
-        if terms.is_empty() || limit == 0 {
+        if terms.is_empty() || limit == 0 || allowed.is_some_and(HashSet::is_empty) {
             return Vec::new();
         }
         let ranked: Vec<(f32, String, u64, Vec<u32>)> = {
@@ -403,7 +413,7 @@ impl SearchIndex {
                     let idf = (1.0 + (n - df + 0.5) / (df + 0.5)).ln();
                     for p in list {
                         let doc = &inner.docs[p.doc as usize];
-                        if !doc.live {
+                        if !doc.live || allowed.is_some_and(|keys| !keys.contains(doc.key.as_str())) {
                             continue;
                         }
                         let tf = p.tf as f32;
@@ -638,6 +648,17 @@ mod tests {
             assert_eq!(index.add(key, 1, 1, text, &[]).unwrap(), Added::Indexed);
         }
         index
+    }
+
+    #[test]
+    fn allowed_keys_are_applied_before_the_result_limit() {
+        let dir = TempDir::new();
+        let index = SearchIndex::open(&dir.0, IndexConfig::default());
+        index.add("excluded", 22, 1, "invoice totals totals", &[]).unwrap();
+        index.add("allowed", 20, 1, "invoice total", &[]).unwrap();
+        let hits = index.query_allowed("invoice", 1, &[String::from("allowed")]);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].key, "allowed");
     }
 
     #[test]

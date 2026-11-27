@@ -52,14 +52,12 @@ internal object Passages {
     /** The document's opening (who or what it is) is always offered when it fits in this many characters. */
     private const val OPENING_CHARS = 300
 
-    private class Chunk(val text: String, val page: Int?)
-
     /**
      * At most [budget] characters, in document order; a page the question names; or the start of
      * the document when nothing matches. [pageStarts] are PDF page offsets into [text], if any.
      * The second value is true when the document holds more than was returned.
      */
-    fun select(text: String, question: String, budget: Int, pageStarts: List<Int> = emptyList()): Pair<String, Boolean> {
+    fun select(text: String, question: String, budget: Int, pageStarts: List<Int> = emptyList()): Pair<List<FilyPassage>, Boolean> {
         pageText(text, pageStarts, question, budget)?.let { return it }
         val own = terms(question)
         if (text.length <= budget || own.isEmpty()) return start(text, pageStarts, budget)
@@ -94,7 +92,7 @@ internal object Passages {
         // role, parties, invoice number). The answers come first.
         val opening = labelled(chunks.first())
         if (0 !in chosen && opening.length <= OPENING_CHARS && used + opening.length + SEPARATOR.length <= budget) chosen += 0
-        return chosen.sorted().joinToString(SEPARATOR) { labelled(chunks[it]) }.take(budget) to true
+        return chosen.sorted().map { chunks[it] } to true
     }
 
     /** True when the question names a page of the document ("page 3"), which is read directly rather than searched. */
@@ -102,22 +100,23 @@ internal object Passages {
         pageRequest.find(question.lowercase())?.groupValues?.get(1)?.let(::spokenNumber) != null
 
     /** "What does page 3 say?" in a PDF: that page's text. */
-    private fun pageText(text: String, pageStarts: List<Int>, question: String, budget: Int): Pair<String, Boolean>? {
+    private fun pageText(text: String, pageStarts: List<Int>, question: String, budget: Int): Pair<List<FilyPassage>, Boolean>? {
         if (pageStarts.isEmpty()) return null
         val page = pageRequest.find(question.lowercase())?.groupValues?.get(1)?.let(::spokenNumber) ?: return null
         if (page !in 1..pageStarts.size) return null
         val start = pageStarts[page - 1].coerceIn(0, text.length)
         val end = pageStarts.getOrNull(page)?.coerceIn(start, text.length) ?: text.length
-        val body = "[page $page] " + text.substring(start, end).trim()
-        return body.take(budget) to true
+        return listOf(FilyPassage(text.substring(start, end).trim().take(budget), page)) to true
     }
 
-    private fun start(text: String, pageStarts: List<Int>, budget: Int): Pair<String, Boolean> {
-        val body = if (pageStarts.isNotEmpty()) "[page 1] $text" else text
-        return body.take(budget) to (body.length > budget)
+    private fun start(text: String, pageStarts: List<Int>, budget: Int): Pair<List<FilyPassage>, Boolean> {
+        val passages = FilyPassages.pages(text.take(budget), pageStarts)
+        val cost = passages.sumOf { labelled(it).length } + (passages.size - 1).coerceAtLeast(0) * SEPARATOR.length
+        return passages to (text.length > budget || cost > budget)
     }
 
-    private fun labelled(chunk: Chunk): String = if (chunk.page != null) "[page ${chunk.page}] ${chunk.text}" else chunk.text
+    private fun labelled(chunk: FilyPassage): String =
+        if (chunk.page != null) "[page ${chunk.page}] ${chunk.text}" else chunk.text
 
     private fun terms(question: String): Set<String> =
         words(question).filter { it.length >= 3 && it !in stopWords }.map(::stem).toSet()
@@ -136,14 +135,10 @@ internal object Passages {
     }
 
     /** Per PDF page when page starts are known, so no passage spans two pages. */
-    private fun chunks(text: String, pageStarts: List<Int>): List<Chunk> {
-        if (pageStarts.isEmpty()) return chunk(text).map { Chunk(it, null) }
-        return pageStarts.indices.flatMap { index ->
-            val start = pageStarts[index].coerceIn(0, text.length)
-            val end = pageStarts.getOrNull(index + 1)?.coerceIn(start, text.length) ?: text.length
-            chunk(text.substring(start, end)).map { Chunk(it, index + 1) }
+    private fun chunks(text: String, pageStarts: List<Int>): List<FilyPassage> =
+        FilyPassages.pages(text, pageStarts).flatMap { page ->
+            chunk(page.text).map { FilyPassage(it, page.page) }
         }
-    }
 
     /** Paragraphs, merged up to about [CHUNK_CHARS] and split at sentences when longer. */
     private fun chunk(text: String): List<String> {

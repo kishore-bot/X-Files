@@ -1,6 +1,6 @@
 name: PR check
 
-# Builds the app and runs every test on each pull request, so broken code can't be merged.
+# Rust checks run on every PR. Trusted refs also build the Android app with the private Maven artifact.
 # In the dev-deploy ruleset, require the status check "build-and-test".
 on:
   pull_request:
@@ -22,14 +22,29 @@ env:
   SDK_PLATFORM_PACKAGE: "platforms;android-37.2"
 
 jobs:
-  build-and-test:
+  rust-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: Rust engine tests
+        run: cargo test --manifest-path engine/Cargo.toml --locked --workspace
+
+  android-build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
 
       - name: Check out pinned LazyMatrix Maven files
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/checkout@v7
         with:
           repository: kishore-bot/xfiles-maven
@@ -70,14 +85,9 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      - name: Rust engine tests
-        run: cargo test --manifest-path engine/Cargo.toml --locked --workspace
-
       - name: Kotlin tests and app build
         env:
           ORG_GRADLE_PROJECT_lazyMatrixLocalRepo: ${{ github.workspace }}/.ci-maven
-          LAZYMATRIX_MAVEN_USER: ${{ vars.LAZYMATRIX_MAVEN_USER || github.actor }}
-          LAZYMATRIX_MAVEN_TOKEN: ${{ secrets.LAZYMATRIX_MAVEN_TOKEN || github.token }}
         run: ./gradlew --no-configuration-cache :sharedLogic:testAndroidHostTest :androidApp:assembleDevDebug
 
       - name: Test reports on failure
@@ -98,3 +108,22 @@ jobs:
           path: androidApp/build/outputs/apk/dev/debug/*.apk
           if-no-files-found: error
           retention-days: 7
+
+  build-and-test:
+    if: always()
+    needs: [rust-tests, android-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check required job results
+        env:
+          RUST_RESULT: ${{ needs.rust-tests.result }}
+          ANDROID_RESULT: ${{ needs.android-build.result }}
+          FORK_PULL_REQUEST: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          test "$RUST_RESULT" = success
+          if [[ "$FORK_PULL_REQUEST" == true ]]; then
+            test "$ANDROID_RESULT" = skipped
+          else
+            test "$ANDROID_RESULT" = success
+          fi

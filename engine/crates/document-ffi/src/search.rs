@@ -224,17 +224,11 @@ impl NativeSearchIndex {
     }
 
     pub fn query(&self, query: String, limit: u32) -> Vec<NativeSearchHit> {
-        self.0
-            .query(&query, limit as usize)
-            .into_iter()
-            .map(|hit| NativeSearchHit {
-                key: hit.key,
-                score: hit.score,
-                snippet: hit.snippet,
-                ranges: hit.ranges.into_iter().map(|(start, end)| NativeTextRange { start, end }).collect(),
-                page: hit.page,
-            })
-            .collect()
+        self.0.query(&query, limit as usize).into_iter().map(native_hit).collect()
+    }
+
+    pub fn query_allowed(&self, query: String, limit: u32, keys: Vec<String>) -> Vec<NativeSearchHit> {
+        self.0.query_allowed(&query, limit as usize, &keys).into_iter().map(native_hit).collect()
     }
 
     pub fn save(&self) -> Result<(), ReadError> {
@@ -244,6 +238,16 @@ impl NativeSearchIndex {
     /// Deletes the index, in memory and on disk.
     pub fn clear(&self) {
         self.0.clear();
+    }
+}
+
+fn native_hit(hit: document_search::Hit) -> NativeSearchHit {
+    NativeSearchHit {
+        key: hit.key,
+        score: hit.score,
+        snippet: hit.snippet,
+        ranges: hit.ranges.into_iter().map(|(start, end)| NativeTextRange { start, end }).collect(),
+        page: hit.page,
     }
 }
 

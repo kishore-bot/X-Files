@@ -51,13 +51,14 @@ class PdfToolsViewModel @Inject constructor(
     }
 
     /** Fily's hand-off: [action] with [uris] already chosen, shown for the user to review and run. */
-    fun prefill(action: PdfAction, uris: List<Uri>) {
-        if (mutableState.value.busy) return
+    fun prefill(action: PdfAction, uris: List<Uri>): Boolean {
+        if (mutableState.value.busy) return false
         mutableState.value.output?.file?.delete()
         mutableState.value = PdfToolsState(action = action)
         openedFromHub = false
         mutableOpen.value = OpenTool.Pdf(action)
         pick(uris)
+        return true
     }
 
     fun selectAction(action: PdfAction) {

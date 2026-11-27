@@ -7,7 +7,9 @@ import com.xfiles.feature.reader.DocumentAnalysisViewModel
 import com.xfiles.feature.tools.ConvertTool
 import com.xfiles.feature.tools.ConvertViewModel
 import com.xfiles.feature.tools.PdfToolsViewModel
+import com.xfiles.feature.tools.OpenTool
 import com.xfiles.fily.FilyDestination
+import com.xfiles.fily.FilyHandoff
 import com.xfiles.fily.FilyNavigator
 import com.xfiles.fily.FilyTidy
 import com.xfiles.fily.FilyTidySummary
@@ -28,27 +30,30 @@ internal class FilyActions(
     private val tidy: TidyService,
     private val sharing: DocumentSharing,
 ) : FilyNavigator, FilyTidy {
-    override suspend fun go(destination: FilyDestination): Boolean = when (destination) {
-        is FilyDestination.Open -> library.open(destination.documentId, ((destination.page ?: 1) - 1).coerceAtLeast(0))
-        is FilyDestination.Print -> library.open(destination.documentId).also { opened -> if (opened) reader.print() }
+    override suspend fun go(destination: FilyDestination): FilyHandoff = when (destination) {
+        is FilyDestination.Open -> open(destination.documentId, destination.page?.let { (it - 1).coerceAtLeast(0) })
+        is FilyDestination.Print -> open(destination.documentId).also { if (it == FilyHandoff.Accepted) reader.print() }
         is FilyDestination.Share -> destination.documentIds.mapNotNull(library::file).let { files ->
-            files.size == destination.documentIds.size && sharing.share(files.map { it.uri to it.name })
+            if (files.size == destination.documentIds.size && sharing.share(files.map { it.uri to it.name })) {
+                FilyHandoff.Accepted
+            } else FilyHandoff.Unavailable
         }
         // Opens the page; the user taps the bookmark button to keep it.
-        is FilyDestination.AddBookmark -> library.open(destination.documentId, destination.page - 1)
-        is FilyDestination.Tool -> {
-            tool(destination)
-            true
-        }
+        is FilyDestination.AddBookmark -> open(destination.documentId, destination.page - 1)
+        is FilyDestination.Tool -> tool(destination)
     }
 
-    private fun tool(destination: FilyDestination.Tool) {
+    private suspend fun open(id: String, page: Int? = null): FilyHandoff =
+        library.open(id, page).also { if (it == FilyHandoff.Accepted) navigator.show(Route.Reader) }
+
+    private fun tool(destination: FilyDestination.Tool): FilyHandoff {
         val uris = destination.documentIds.map(Uri::parse)
-        when (destination.tool) {
-            FilyTool.NewText -> navigator.openEditor(
-                destination.draftTitle?.takeIf(String::isNotBlank)?.let { "$it.txt" } ?: "Note.txt",
-                destination.draftText.orEmpty(),
-            )
+        return when (destination.tool) {
+            FilyTool.NewText -> {
+                val name = destination.draftTitle?.takeIf(String::isNotBlank)?.let { "$it.txt" } ?: "Note.txt"
+                if (navigator.requestEditorDraft(name, destination.draftText.orEmpty())) FilyHandoff.Accepted
+                else FilyHandoff.AwaitingEditorDecision
+            }
             FilyTool.TextToPdf -> convertTool(ConvertTool.TextToPdf, draft = destination.draftText)
             FilyTool.ScanToPdf -> convertTool(ConvertTool.ScanToPdf)
             FilyTool.ImageToText -> convertTool(ConvertTool.PictureToText)
@@ -56,12 +61,14 @@ internal class FilyActions(
             FilyTool.TidyUp -> {
                 navigator.show(Route.Tidy)
                 if (destination.startScan) tidy.scan()
+                FilyHandoff.Accepted
             }
             FilyTool.PdfTools -> when (destination.pdfOperation) {
                 "ToImages" -> convertTool(ConvertTool.PdfToPictures, uris.firstOrNull())
                 "ToText" -> convertTool(ConvertTool.PdfToText, uris.firstOrNull())
                 "ToZip" -> convertTool(ConvertTool.PdfToZip, uris.firstOrNull())
                 else -> {
+                    if (pdfTools.state.value.busy || convert.state.value.busy) return FilyHandoff.Busy
                     val action = when (destination.pdfOperation) {
                         "Merge" -> PdfAction.Merge
                         "Split" -> PdfAction.Extract
@@ -70,17 +77,20 @@ internal class FilyActions(
                         "AddPassword" -> PdfAction.Protect
                         else -> null
                     }
-                    if (action != null) pdfTools.prefill(action, uris) else pdfTools.open(null)
+                    if (action == null) pdfTools.open(null)
+                    else if (!pdfTools.prefill(action, uris)) return FilyHandoff.Busy
                     navigator.show(Route.Tools)
+                    FilyHandoff.Accepted
                 }
             }
         }
     }
 
-    private fun convertTool(tool: ConvertTool, pdf: Uri? = null, draft: String? = null) {
-        convert.prefill(tool, pdf, draft)
-        pdfTools.open(com.xfiles.feature.tools.OpenTool.Convert(tool))
+    private fun convertTool(tool: ConvertTool, pdf: Uri? = null, draft: String? = null): FilyHandoff {
+        if (pdfTools.state.value.busy || !convert.prefill(tool, pdf, draft)) return FilyHandoff.Busy
+        pdfTools.open(OpenTool.Convert(tool))
         navigator.show(Route.Tools)
+        return FilyHandoff.Accepted
     }
 
     override suspend fun summary(): FilyTidySummary {

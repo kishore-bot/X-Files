@@ -181,11 +181,12 @@ class ConvertViewModel @Inject constructor(
     }
 
     /** Fily's hand-off: [tool] with its PDF or drafted text filled in, waiting for the user to run it. */
-    fun prefill(tool: ConvertTool, pdf: Uri? = null, draft: String? = null) {
-        if (state.value.busy) return
+    fun prefill(tool: ConvertTool, pdf: Uri? = null, draft: String? = null): Boolean {
+        if (state.value.busy) return false
         discardOutput()
         mutableState.value = keptSettings(tool).copy(draft = draft, typedText = draft ?: state.value.typedText)
         pdf?.let(::pickPdf)
+        return true
     }
 
     /** The screen took the drafted text into its field. */

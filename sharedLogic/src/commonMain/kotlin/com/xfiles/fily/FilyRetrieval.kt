@@ -17,8 +17,33 @@ sealed interface FilyRetrieval {
  * [Passages.SEPARATOR]. The character budget is counted the same way by the engine's selection.
  */
 internal object FilyPassages {
-    fun render(passages: List<FilyPassage>, budget: Int): String =
-        passages.joinToString(Passages.SEPARATOR) { passage ->
-            passage.page?.let { "[page $it] ${passage.text}" } ?: passage.text
-        }.take(budget)
+    data class Packed(val text: String, val passages: List<FilyPassage>)
+
+    fun render(passages: List<FilyPassage>, budget: Int): String = pack(passages, budget).text
+
+    /** Keep the model's prompt and the verifier's evidence bounded to the same visible text. */
+    fun pack(passages: List<FilyPassage>, budget: Int): Packed {
+        val text = StringBuilder()
+        val evidence = mutableListOf<FilyPassage>()
+        for (passage in passages) {
+            val prefix = (if (text.isEmpty()) "" else Passages.SEPARATOR) +
+                (passage.page?.let { "[page $it] " } ?: "")
+            val remaining = budget - text.length
+            if (remaining <= 0) break
+            text.append(prefix.take(remaining))
+            val visible = passage.text.take((budget - text.length).coerceAtLeast(0))
+            text.append(visible)
+            if (visible.isNotBlank()) evidence += passage.copy(text = visible)
+        }
+        return Packed(text.toString(), evidence)
+    }
+
+    fun pages(text: String, starts: List<Int>): List<FilyPassage> {
+        if (starts.isEmpty()) return listOf(FilyPassage(text, null))
+        return starts.indices.mapNotNull { index ->
+            val start = starts[index].coerceIn(0, text.length)
+            val end = starts.getOrNull(index + 1)?.coerceIn(start, text.length) ?: text.length
+            if (start == end) null else FilyPassage(text.substring(start, end), index + 1)
+        }
+    }
 }

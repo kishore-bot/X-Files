@@ -3,6 +3,7 @@ package com.xfiles.android
 import android.net.Uri
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
+import com.xfiles.feature.editor.EditorOpenRequest
 import com.xfiles.feature.editor.TextEditorViewModel
 import com.xfiles.feature.reader.DocumentAnalysisViewModel
 
@@ -20,21 +21,46 @@ internal class AppNavigator(
     fun openDocument(uri: Uri, page: Int? = null) {
         analysis.open(uri, page)
         // An external open replaces whatever sat above the library; it never stacks readers.
-        while (stack.size > 1 && stack.last() != Route.Library) stack.removeAt(stack.lastIndex)
-        stack.add(Route.Reader)
+        val keepEditor = editor.hasChanges() || editor.state.value?.saving == true
+        for (index in stack.lastIndex downTo 1) {
+            if (stack[index] != Route.Editor || !keepEditor) stack.removeAt(index)
+        }
+        show(Route.Reader)
     }
+
+    val editorRequestCount: Int get() = editor.incomingCount
 
     fun openEditor(name: String, text: String) {
-        editor.open(name, text)
-        stack.remove(Route.Editor)
-        stack.add(Route.Editor)
+        requestEditorDraft(name, text)
     }
 
-    /** Opens a file's bytes in the editor, so its encoding and line endings are detected on read. */
+    fun requestEditorDraft(name: String, text: String): Boolean = requestEditor(EditorOpenRequest.Draft(name, text))
+
     fun openEditorFile(uri: Uri, name: String) {
-        editor.openFile(name, uri)
-        stack.remove(Route.Editor)
-        stack.add(Route.Editor)
+        requestEditor(EditorOpenRequest.File(uri, name))
+    }
+
+    private fun requestEditor(request: EditorOpenRequest): Boolean {
+        if (editorRequestCount == 0 && editor.state.value?.saving != true && !editor.hasChanges()) {
+            openEditorRequest(request)
+            return true
+        }
+        editor.queueOpen(request)
+        return false
+    }
+
+    fun resolveEditorRequest(replace: Boolean) {
+        if (editor.state.value?.saving == true) return
+        val request = editor.nextOpen() ?: return
+        if (replace) openEditorRequest(request)
+    }
+
+    private fun openEditorRequest(request: EditorOpenRequest) {
+        when (request) {
+            is EditorOpenRequest.Draft -> editor.open(request.name, request.text)
+            is EditorOpenRequest.File -> editor.openFile(request.name, request.uri)
+        }
+        show(Route.Editor)
     }
 
     fun show(route: Route) {
@@ -46,7 +72,10 @@ internal class AppNavigator(
     fun back() {
         when (stack.lastOrNull()) {
             Route.Reader -> analysis.close()
-            Route.Editor -> editor.close()
+            Route.Editor -> {
+                if (editor.hasChanges() || editor.state.value?.saving == true) return
+                editor.close()
+            }
             else -> Unit
         }
         if (stack.size > 1) stack.removeAt(stack.lastIndex)

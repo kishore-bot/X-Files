@@ -9,6 +9,7 @@ import com.xfiles.android.widget.WidgetActions
 import com.xfiles.fily.AssistantAccess
 import com.xfiles.fily.FilyDestination
 import com.xfiles.fily.FilyNavigator
+import com.xfiles.fily.FilyHandoff
 import com.xfiles.fily.FilyTool
 import com.xfiles.fily.ReaderControl
 import com.xfiles.fily.ToolExecutor
@@ -96,8 +97,8 @@ private class RecordingNavigator : FilyNavigator {
     @Volatile
     var destination: FilyDestination? = null
 
-    override suspend fun go(destination: FilyDestination): Boolean {
+    override suspend fun go(destination: FilyDestination): FilyHandoff {
         this.destination = destination
-        return true
+        return FilyHandoff.Accepted
     }
 }
