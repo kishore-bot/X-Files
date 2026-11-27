@@ -10,7 +10,7 @@
 PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that lives on your device.
 
 <p>
-  <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.06"><img alt="Release: 1.0.0-beta.06" src="https://img.shields.io/badge/release-1.0.0--beta.06-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
+  <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.09"><img alt="Release: 1.0.0-beta.09" src="https://img.shields.io/badge/release-1.0.0--beta.09-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-6366F1?style=for-the-badge" /></a>
   <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" />
 </p>
@@ -41,11 +41,11 @@ PDFs, Office, EPUB, media and archives, plus **Fily** 🤖, an AI assistant that
 
 ## ⬇️ Get it
 
-**Xfiles 1.0.0-beta.06** is available as a signed Android APK.
+**Xfiles 1.0.0-beta.09** is available as a signed Android APK.
 
-- [Download the APK](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.06/Xfiles-1.0.0-beta.06.apk)
-- [SHA-256 checksum](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.06/Xfiles-1.0.0-beta.06.apk.sha256)
-- [Release notes](https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.06) · [All releases](https://github.com/kishore-bot/X-Files/releases)
+- [Download the APK](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.09/Xfiles-1.0.0-beta.09.apk)
+- [SHA-256 checksum](https://github.com/kishore-bot/X-Files/releases/download/v1.0.0-beta.09/Xfiles-1.0.0-beta.09.apk.sha256)
+- [Release notes](https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.09) · [All releases](https://github.com/kishore-bot/X-Files/releases)
 
 > 🧪 Xfiles is in **beta** (`1.0.0-beta.xx`). Releases are built, tested and signed automatically by GitHub Actions.
 
