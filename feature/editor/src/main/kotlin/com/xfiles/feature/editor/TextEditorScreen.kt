@@ -5,6 +5,8 @@ package com.xfiles.feature.editor
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +50,7 @@ import com.xfiles.design.EzIcons
 import com.xfiles.design.HapticOnChange
 import com.xfiles.design.EzControlBar
 import com.xfiles.design.EzOptionMenu
+import com.xfiles.design.EzShapes
 import com.xfiles.design.glassCard
 import com.xfiles.design.rememberHaptics
 
@@ -52,6 +58,7 @@ import com.xfiles.design.rememberHaptics
 fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
     var confirmDiscard by rememberSaveable { mutableStateOf(false) }
     var finding by rememberSaveable { mutableStateOf(false) }
+    var formatting by rememberSaveable { mutableStateOf(false) }
     val find = rememberTextFieldState()
     val replacement = rememberTextFieldState()
     var matches by remember { mutableStateOf<Int?>(null) }
@@ -61,8 +68,12 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
         report = null
     }
     val back: () -> Unit = {
-        if (!state.saving) {
-            if (viewModel.hasChanges()) confirmDiscard = true else viewModel.close()
+        when {
+            state.saving -> Unit
+            finding -> finding = false
+            formatting -> formatting = false
+            viewModel.hasChanges() -> confirmDiscard = true
+            else -> viewModel.close()
         }
     }
     BackHandler(onBack = back)
@@ -84,14 +95,45 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
             )
             Button(
                 onClick = { save.launch(viewModel.suggestFileName()) },
-                enabled = !state.saving,
+                enabled = !state.saving && state.blocked == null,
                 modifier = Modifier.padding(end = 8.dp),
             ) { Text("Save copy") }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = viewModel::undo, enabled = viewModel.text.undoState.canUndo && !state.saving) { Icon(EzIcons.Undo, "Undo") }
-            IconButton(onClick = viewModel::redo, enabled = viewModel.text.undoState.canRedo && !state.saving) { Icon(EzIcons.Redo, "Redo") }
-            IconButton(onClick = { finding = !finding }) { Icon(EzIcons.Search, if (finding) "Close find and replace" else "Find and replace") }
+        val editable = !state.saving && state.blocked == null
+        val toggleColors = IconButtonDefaults.iconToggleButtonColors(
+            checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+        Row(
+            Modifier.fillMaxWidth().glassCard(EzShapes.Bar).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = viewModel::undo, enabled = editable && viewModel.text.undoState.canUndo) {
+                Icon(EzIcons.Undo, "Undo")
+            }
+            IconButton(onClick = viewModel::redo, enabled = editable && viewModel.text.undoState.canRedo) {
+                Icon(EzIcons.Redo, "Redo")
+            }
+            IconToggleButton(
+                checked = finding,
+                onCheckedChange = { finding = it; formatting = false },
+                enabled = editable,
+                colors = toggleColors,
+            ) { Icon(EzIcons.Search, "Find and replace") }
+            Text(
+                "${state.encoding.label} · ${state.lineEnding.label}",
+                modifier = Modifier.weight(1f).padding(start = 4.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = EzColors.TextSecondary,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            IconToggleButton(
+                checked = formatting,
+                onCheckedChange = { formatting = it; finding = false },
+                enabled = editable,
+                colors = toggleColors,
+            ) { Icon(EzIcons.Settings, "Text file format") }
         }
         if (finding) {
             Column(Modifier.fillMaxWidth().glassCard().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -112,28 +154,31 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
                 status?.let { Text(it, color = EzColors.TextSecondary, style = MaterialTheme.typography.bodySmall) }
             }
         }
-        androidx.compose.foundation.layout.FlowRow(
-            Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Encoding", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
-                EzOptionMenu(
-                    options = if (state.saving || state.blocked != null) emptyList() else TextEncoding.entries,
-                    selected = state.encoding,
-                    optionLabel = { it.label },
-                    onSelect = viewModel::chooseEncoding,
-                    placeholder = "Encoding",
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Line ending", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
-                EzOptionMenu(
-                    options = if (state.saving || state.blocked != null) emptyList() else LineEnding.entries,
-                    selected = state.lineEnding,
-                    optionLabel = { it.label },
-                    onSelect = viewModel::chooseLineEnding,
-                    placeholder = "Line ending",
-                )
+        if (formatting) {
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.fillMaxWidth().glassCard().padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Encoding", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
+                    EzOptionMenu(
+                        options = if (state.saving || state.blocked != null) emptyList() else TextEncoding.entries,
+                        selected = state.encoding,
+                        optionLabel = { it.label },
+                        onSelect = viewModel::chooseEncoding,
+                        placeholder = "Encoding",
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Line ending", color = EzColors.TextSecondary, style = MaterialTheme.typography.labelMedium)
+                    EzOptionMenu(
+                        options = if (state.saving || state.blocked != null) emptyList() else LineEnding.entries,
+                        selected = state.lineEnding,
+                        optionLabel = { it.label },
+                        onSelect = viewModel::chooseLineEnding,
+                        placeholder = "Line ending",
+                    )
+                }
             }
         }
         state.blocked?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -142,7 +187,11 @@ fun TextEditorScreen(state: EditorState, viewModel: TextEditorViewModel) {
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         BasicTextField(
             state = viewModel.text,
-            modifier = Modifier.fillMaxWidth().weight(1f).glassCard().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f)
+                .clip(EzShapes.Card)
+                .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, EzShapes.Card)
+                .padding(16.dp),
             enabled = !state.saving && state.blocked == null,
             inputTransformation = InputTransformation.maxLengthReject(TextCodec.EDIT_CAP_BYTES),
             lineLimits = TextFieldLineLimits.MultiLine(),

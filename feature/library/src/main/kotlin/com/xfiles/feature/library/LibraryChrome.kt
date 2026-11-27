@@ -116,7 +116,7 @@ internal fun Header(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = EzSpacing.Gutter, end = EzSpacing.Gutter, top = if (compact) 4.dp else 12.dp, bottom = if (compact) 2.dp else 6.dp),
+            .padding(horizontal = EzSpacing.Gutter, vertical = if (compact) 4.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -153,7 +153,7 @@ internal fun LibrarySearch(search: TextFieldState, compact: Boolean, modifier: M
             decorator = { field ->
                 Box {
                     if (search.text.isEmpty()) {
-                        Text("Search files, docs, sheets, and more", color = EzColors.TextSecondary, fontSize = 16.sp, maxLines = 1)
+                        Text("Search files", color = EzColors.TextSecondary, fontSize = 16.sp, maxLines = 1)
                     }
                     field()
                 }

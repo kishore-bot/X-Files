@@ -34,7 +34,7 @@ import com.xfiles.design.glassCard
 private data class UpcomingItem(val icon: ImageVector, val title: String, val description: String)
 
 private val PlannedItems = listOf(
-    UpcomingItem(EzIcons.Lock, "Password-protected ZIPs", "Create and open ZIP files that need a password."),
+    UpcomingItem(EzIcons.Lock, "Create password-protected ZIPs", "Set a password when compressing files into a new ZIP."),
     UpcomingItem(EzIcons.Archive, "7z and TAR archives", "Compress and extract 7z and TAR files with the ZIP tools."),
     UpcomingItem(
         EzIcons.Movie,

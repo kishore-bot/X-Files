@@ -25,4 +25,6 @@ android {
 dependencies {
     api(platform(libs.compose.bom))
     api(libs.compose.material3)
+    implementation(libs.haze.core)
+    implementation(libs.haze.blur)
 }

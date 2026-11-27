@@ -106,7 +106,7 @@ import com.xfiles.design.GlassIconButton
 import com.xfiles.design.LocalFilyOpen
 import com.xfiles.design.LocalHapticsEnabled
 import com.xfiles.design.PrimaryActionButton
-import com.xfiles.design.floatingGlass
+import com.xfiles.design.rememberFrostedBackdrop
 import com.xfiles.design.glass
 import com.xfiles.design.glassCard
 import com.xfiles.design.pressScale
@@ -275,183 +275,182 @@ fun LibraryScreen(
     }
     val markedImage = matching.getOrNull(imageIndex)?.uri
     val imageTab = tab == HomeTab.Library && category == LibraryCategory.Images
-    // Header, search, filters, folders, and list title precede the file rows.
-    val imageStart = 5 + (if (landscape) 0 else 1) + (if (noFolders) 1 else 0) +
+    // Search, filters, folders, and the list title precede the file rows.
+    val imageStart = 4 + (if (landscape) 0 else 1) + (if (noFolders && !library.scanning) 1 else 0) +
         (if (library.error != null) 1 else 0) + (if (library.reachedLimit) 1 else 0)
     LaunchedEffect(imageTab, imageIndex, imageStart, lastImage, query) {
         if (imageTab && query.isEmpty() && imageIndex >= 0) listState.scrollToItem(imageStart + imageIndex)
     }
-    Box(Modifier.fillMaxSize().imePadding()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().padding(start = startClearance),
-            contentPadding = PaddingValues(top = if (landscape) 4.dp else 12.dp, bottom = bottomClearance),
-            verticalArrangement = Arrangement.spacedBy(if (landscape) 4.dp else 8.dp),
-        ) {
-            if (picked.isNotEmpty()) {
-                item(key = "selection", contentType = "actions") {
-                    SelectionBar(
-                        count = picked.size,
-                        onOpen = if (picked.size == 1) ({ openPicked() }) else null,
-                        onShare = { onShareFiles(picked.toList()) },
-                        onClear = { picked.clear() },
-                    )
+    val backdrop = rememberFrostedBackdrop()
+    Column(Modifier.fillMaxSize().imePadding()) {
+        if (picked.isNotEmpty()) {
+            SelectionBar(
+                count = picked.size,
+                onOpen = if (picked.size == 1) ({ openPicked() }) else null,
+                onShare = { onShareFiles(picked.toList()) },
+                onClear = { picked.clear() },
+            )
+        } else {
+            Header(
+                onSettings = onSettings.takeUnless { landscape },
+                onVoice = onFily,
+                compact = landscape,
+            )
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(
+                state = listState,
+                modifier = backdrop.source(Modifier.fillMaxSize().padding(start = startClearance)),
+                contentPadding = PaddingValues(top = if (landscape) 4.dp else 12.dp, bottom = bottomClearance),
+                verticalArrangement = Arrangement.spacedBy(if (landscape) 4.dp else 8.dp),
+            ) {
+                if (tab != HomeTab.Bookmarks) item(key = "search", contentType = "search") {
+                    LibrarySearch(search, compact = landscape, modifier = RowGutter.padding(vertical = 4.dp))
                 }
-            } else {
-                item(key = "header", contentType = "header") {
-                    Header(
-                        onSettings = onSettings.takeUnless { landscape },
-                        onVoice = onFily,
-                        compact = landscape,
-                    )
+                if (tab == HomeTab.Library) item(key = "chips", contentType = "chips") {
+                    FilterRow(category, onCategory, compact = landscape)
                 }
-            }
-            if (tab != HomeTab.Bookmarks) item(key = "search", contentType = "search") {
-                LibrarySearch(search, compact = landscape, modifier = RowGutter.padding(vertical = 4.dp))
-            }
-            if (tab == HomeTab.Library) item(key = "chips", contentType = "chips") {
-                FilterRow(category, onCategory, compact = landscape)
-            }
-            if (tab == HomeTab.Library) {
-                if (!landscape) item(key = "folders-title", contentType = "section") {
-                    EzSectionPill("Your folders", RowGutter)
-                }
-                item(key = "folders", contentType = "strip") {
-                    FolderRow(
-                        folders = library.folders,
-                        searchEnabled = searchEnabled,
-                        scanning = library.scanning,
-                        onAdd = onAddFolder,
-                        onSearchEnabled = onSearchEnabled,
-                        onRefresh = onRefresh,
-                        onRemove = { removingFolder = it },
-                        onReconnect = onReconnectFolder,
-                    )
-                }
-                if (noFolders && !library.scanning) item(key = "no-folders", contentType = "card") {
-                    NoFoldersCard(onAddFolder, RowGutter)
-                }
-            }
-            if (tab == HomeTab.Library || tab == HomeTab.Recent) {
-                item(key = "list-title", contentType = "section") {
-                    val title = when {
-                        tab == HomeTab.Recent -> "Recent files"
-                        category == LibraryCategory.All -> "In your folders"
-                        else -> category.label
+                if (tab == HomeTab.Library) {
+                    if (!landscape) item(key = "folders-title", contentType = "section") {
+                        EzSectionPill("Your folders", RowGutter)
                     }
-                    SectionTitle(
-                        title = title,
-                        count = if (matching.isEmpty()) null else matching.size.toString(),
-                        busy = library.scanning,
-                        onClear = { confirmClear = true }.takeIf { tab == HomeTab.Recent && recentFiles.isNotEmpty() },
-                        compact = landscape,
-                    )
-                }
-            }
-            if (tab == HomeTab.Bookmarks) item(key = "bookmarks-title", contentType = "section") {
-                SectionTitle("Bookmarks", count = if (bookmarks.isEmpty()) null else bookmarks.size.toString(), compact = landscape)
-            }
-            if (tab == HomeTab.Library && library.error != null) item(key = "error", contentType = "note") {
-                SearchNote(library.error.orEmpty(), warning = true)
-            }
-            if (tab == HomeTab.Library && library.reachedLimit) item(key = "limit", contentType = "note") {
-                SearchNote("Your folders are very large, so some files may not be listed. Open file still reaches them.")
-            }
-            if (tab == HomeTab.Bookmarks) {
-                if (bookmarks.isEmpty()) {
-                    item("no-bookmarks") {
-                        EmptyMessage("No bookmarks yet", "Bookmarks you add in documents appear here.", EzIcons.BookmarkOutline)
+                    item(key = "folders", contentType = "strip") {
+                        FolderRow(
+                            folders = library.folders,
+                            searchEnabled = searchEnabled,
+                            scanning = library.scanning,
+                            onAdd = onAddFolder,
+                            onSearchEnabled = onSearchEnabled,
+                            onRefresh = onRefresh,
+                            onRemove = { removingFolder = it },
+                            onReconnect = onReconnectFolder,
+                        )
                     }
-                } else {
-                    items(bookmarks, key = { it.key }, contentType = { "bookmark" }) { bookmark ->
-                        FileRow(
-                            file = bookmark.file,
-                            detail = bookmark.page?.let { page ->
-                                listOfNotNull("Page ${page + 1}", bookmark.label, bookmark.snippet?.let { "\u201C$it\u201D" }).joinToString(" \u00B7 ")
-                            },
-                            isPicked = bookmark.file in picked,
-                            selecting = picked.isNotEmpty(),
-                            onOpen = { onBookmark(bookmark) },
-                            onToggle = { toggle(bookmark.file) },
-                            onLongPress = { longPress(bookmark.file) },
+                    if (noFolders && !library.scanning) item(key = "no-folders", contentType = "card") {
+                        NoFoldersCard(onAddFolder, RowGutter)
+                    }
+                }
+                if (tab == HomeTab.Library || tab == HomeTab.Recent) {
+                    item(key = "list-title", contentType = "section") {
+                        val title = when {
+                            tab == HomeTab.Recent -> "Recent files"
+                            category == LibraryCategory.All -> "In your folders"
+                            else -> category.label
+                        }
+                        SectionTitle(
+                            title = title,
+                            count = if (matching.isEmpty()) null else matching.size.toString(),
+                            busy = library.scanning,
+                            onClear = { confirmClear = true }.takeIf { tab == HomeTab.Recent && recentFiles.isNotEmpty() },
+                            compact = landscape,
                         )
                     }
                 }
-            } else if (tab == HomeTab.Library && matching.isEmpty() && library.scanning) {
-                item("loading") {
-                    SearchNote("Checking linked folders…")
-                    LinearProgressIndicator(RowGutter.fillMaxWidth(), color = EzColors.Primary)
+                if (tab == HomeTab.Bookmarks) item(key = "bookmarks-title", contentType = "section") {
+                    SectionTitle("Bookmarks", count = if (bookmarks.isEmpty()) null else bookmarks.size.toString(), compact = landscape)
                 }
-            } else if (matching.isEmpty()) {
-                item("empty") {
-                    val title = when {
-                        query.isNotEmpty() -> "No matching file names"
-                        tab == HomeTab.Recent -> "No recent files"
-                        noFolders -> "No folders added"
-                        else -> "No matching files"
+                if (tab == HomeTab.Library && library.error != null) item(key = "error", contentType = "note") {
+                    SearchNote(library.error.orEmpty(), warning = true)
+                }
+                if (tab == HomeTab.Library && library.reachedLimit) item(key = "limit", contentType = "note") {
+                    SearchNote("Your folders are very large, so some files may not be listed. Open file still reaches them.")
+                }
+                if (tab == HomeTab.Bookmarks) {
+                    if (bookmarks.isEmpty()) {
+                        item("no-bookmarks") {
+                            EmptyMessage("No bookmarks yet", "Bookmarks you add in documents appear here.", EzIcons.BookmarkOutline)
+                        }
+                    } else {
+                        items(bookmarks, key = { it.key }, contentType = { "bookmark" }) { bookmark ->
+                            FileRow(
+                                file = bookmark.file,
+                                detail = bookmark.page?.let { page ->
+                                    listOfNotNull("Page ${page + 1}", bookmark.label, bookmark.snippet?.let { "\u201C$it\u201D" }).joinToString(" \u00B7 ")
+                                },
+                                isPicked = bookmark.file in picked,
+                                selecting = picked.isNotEmpty(),
+                                onOpen = { onBookmark(bookmark) },
+                                onToggle = { toggle(bookmark.file) },
+                                onLongPress = { longPress(bookmark.file) },
+                            )
+                        }
                     }
-                    val description = when {
-                        query.isNotEmpty() -> "Try another search or category."
-                        tab == HomeTab.Recent -> "Open a file to see it here."
-                        noFolders -> "Add a folder to browse the files in it."
-                        else -> "Try another search or category."
+                } else if (tab == HomeTab.Library && matching.isEmpty() && library.scanning) {
+                    item("loading") {
+                        SearchNote("Checking linked folders…")
+                        LinearProgressIndicator(RowGutter.fillMaxWidth(), color = EzColors.Primary)
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        EmptyMessage(title, description)
-                        if (showsAssistant) FilyMascotCallToAction(onAsk = onFily, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+                } else if (matching.isEmpty()) {
+                    item("empty") {
+                        val title = when {
+                            query.isNotEmpty() -> "No matching file names"
+                            tab == HomeTab.Recent -> "No recent files"
+                            noFolders -> "No folders added"
+                            else -> "No matching files"
+                        }
+                        val description = when {
+                            query.isNotEmpty() -> "Try another search or category."
+                            tab == HomeTab.Recent -> "Open a file to see it here."
+                            noFolders -> "Add a folder to browse the files in it."
+                            else -> "Try another search or category."
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            EmptyMessage(title, description)
+                            if (showsAssistant) FilyMascotCallToAction(onAsk = onFily, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+                        }
+                    }
+                } else {
+                    items(matching, key = { it.uri.toString() }, contentType = { "file" }) { file ->
+                        FileRow(
+                            file = file,
+                            isPicked = file in picked,
+                            selecting = picked.isNotEmpty(),
+                            onOpen = { onFile(file) },
+                            onToggle = { toggle(file) },
+                            onLongPress = { longPress(file) },
+                            actions = actionsFor(file),
+                            marked = imageTab && file.uri == markedImage,
+                        )
                     }
                 }
+                if (searchesInside && contentSearch.query == query) {
+                    item("inside-files", contentType = "section") {
+                        EzSectionPill(
+                            "Inside files",
+                            RowGutter,
+                            count = contentSearch.hits.size.takeIf { it > 0 }?.toString(),
+                            compact = landscape,
+                        )
+                    }
+                    if (contentSearch.indexing) item("indexing", contentType = "note") {
+                        SearchNote("Indexing ${contentSearch.indexed} of ${contentSearch.total}")
+                        LinearProgressIndicator(RowGutter.fillMaxWidth(), color = EzColors.Primary)
+                    } else if (contentSearch.hits.isEmpty()) item("no-inside", contentType = "note") {
+                        SearchNote("No matches inside these files.")
+                    }
+                    val visibleHits = contentSearch.hits.filter {
+                        category == LibraryCategory.All || category in libraryCategories(it.file.name)
+                    }
+                    items(visibleHits, key = { "inside|${it.file.uri}" }, contentType = { "snippet" }) { hit ->
+                        ContentMatchRow(hit, onClick = { onFile(hit.file) }, modifier = RowGutter)
+                    }
+                }
+            }
+            if (landscape) {
+                LandscapeLibraryRail(navItems, onOpen, onSettings, Modifier.align(Alignment.CenterStart))
             } else {
-                items(matching, key = { it.uri.toString() }, contentType = { "file" }) { file ->
-                    FileRow(
-                        file = file,
-                        isPicked = file in picked,
-                        selecting = picked.isNotEmpty(),
-                        onOpen = { onFile(file) },
-                        onToggle = { toggle(file) },
-                        onLongPress = { longPress(file) },
-                        actions = actionsFor(file),
-                        marked = imageTab && file.uri == markedImage,
-                    )
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .onSizeChanged { chromeHeight = it.height }
+                        .navigationBarsPadding()
+                        .padding(start = EzSpacing.Gutter, end = EzSpacing.Gutter, bottom = 10.dp),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (tab != HomeTab.Bookmarks) EzFloatingAction("Open file", EzIcons.Folder, onOpen)
+                    EzNavigationBar(navItems, backdrop.blur(Modifier, EzShapes.Bar))
                 }
-            }
-            if (searchesInside && contentSearch.query == query) {
-                item("inside-files", contentType = "section") {
-                    EzSectionPill(
-                        "Inside files",
-                        RowGutter,
-                        count = contentSearch.hits.size.takeIf { it > 0 }?.toString(),
-                        compact = landscape,
-                    )
-                }
-                if (contentSearch.indexing) item("indexing", contentType = "note") {
-                    SearchNote("Indexing ${contentSearch.indexed} of ${contentSearch.total}")
-                    LinearProgressIndicator(RowGutter.fillMaxWidth(), color = EzColors.Primary)
-                } else if (contentSearch.hits.isEmpty()) item("no-inside", contentType = "note") {
-                    SearchNote("No matches inside these files.")
-                }
-                val visibleHits = contentSearch.hits.filter {
-                    category == LibraryCategory.All || category in libraryCategories(it.file.name)
-                }
-                items(visibleHits, key = { "inside|${it.file.uri}" }, contentType = { "snippet" }) { hit ->
-                    ContentMatchRow(hit, onClick = { onFile(hit.file) }, modifier = RowGutter)
-                }
-            }
-        }
-        if (landscape) {
-            LandscapeLibraryRail(navItems, onOpen, onSettings, Modifier.align(Alignment.CenterStart))
-        } else {
-            Column(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .onSizeChanged { chromeHeight = it.height }
-                    .navigationBarsPadding()
-                    .padding(start = EzSpacing.Gutter, end = EzSpacing.Gutter, bottom = 10.dp),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                if (tab != HomeTab.Bookmarks) EzFloatingAction("Open file", EzIcons.Folder, onOpen)
-                EzNavigationBar(navItems)
             }
         }
     }

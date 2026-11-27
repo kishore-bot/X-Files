@@ -52,7 +52,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     private val openDocument: OpenDocumentUseCase,
     private val pdfPages: PdfPagesUseCase,
     private val sensitiveScan: SensitiveScanUseCase,
-    private val summarize: DocumentSummaryUseCase,
+    summarize: DocumentSummaryUseCase,
     private val bookmarkPlace: BookmarkPlaceUseCase,
     private val markupController: PdfMarkupController,
     private val findController: PdfFindController,
@@ -130,7 +130,7 @@ class DocumentAnalysisViewModel @Inject constructor(
     private var readerJob: Job? = null
     private var pdfJumpId = android.os.SystemClock.elapsedRealtimeNanos()
     private var spreadJob: Job? = null
-    private var summaryJob: Job? = null
+    private val summary = ReaderSummaryController(summarize, mutableState, viewModelScope)
     private var pdfPassword: String? = null
     /** Archives left by [openNested], innermost last; [popNested] returns to them. */
     private val nestedReturn = ArrayDeque<String>()
@@ -150,6 +150,7 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     fun open(uri: Uri, page: Int? = null, password: String? = null) {
         if (markup.value.saving) return
+        summary.cancel()
         discardMarkup()
         clearPdfSearch()
         spreadJob?.cancel()
@@ -216,7 +217,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         spreadJob?.cancel()
         pdfPages.clear()
         readerJob?.cancel()
-        summaryJob?.cancel()
+        summary.cancel()
         saved.remove<String>(OPEN_URI)
         saved.remove<Int>(OPEN_PAGE)
         nestedReturn.clear()
@@ -241,7 +242,10 @@ class DocumentAnalysisViewModel @Inject constructor(
         }
         startReader(
             selection.copy(turningPage = true, pageError = false),
-            onError = selection.copy(turningPage = false, pageError = true),
+            onError = {
+                val current = state.value as? ReaderState.Ready ?: selection
+                current.copy(turningPage = false, pageError = true)
+            },
         ) {
             val page = pdfPages.page(ready.file, index, pdfPassword)
             // The spread partner is read before the turn lands, so both pages appear together.
@@ -371,42 +375,9 @@ class DocumentAnalysisViewModel @Inject constructor(
         }
     }
 
-    fun showSummary() {
-        val ready = state.value as? ReaderState.Ready ?: return
-        val shown = when (val preview = ready.preview) {
-            is FilePreview.Text -> preview.content
-            is FilePreview.Structured -> preview.document.plainText()
-            is FilePreview.Html -> preview.text.content
-            is FilePreview.Pdf -> null // Read below: text layer, or the pages by OCR.
-            else -> return
-        }
-        if (shown != null && shown.isBlank()) return
-        if (ready.summary != null) return
-        mutableState.value = ready.copy(summary = SummaryState.Loading)
-        val password = pdfPassword
-        summaryJob = viewModelScope.launch {
-            val result = try {
-                summarize(ready.file, shown, password)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                Log.w("XfilesReader", "Summary failed", error)
-                SummaryState.Error
-            } catch (error: LinkageError) {
-                Log.e("XfilesReader", "Rust analysis library unavailable", error)
-                SummaryState.Error
-            }
-            // The page may have turned while the summary was read; keep the current page.
-            val current = mutableState.value as? ReaderState.Ready ?: return@launch
-            if (current.file.uri == ready.file.uri) mutableState.value = current.copy(summary = result)
-        }
-    }
+    fun showSummary() = summary.show(pdfPassword)
 
-    fun dismissSummary() {
-        summaryJob?.cancel()
-        val ready = state.value as? ReaderState.Ready ?: return
-        mutableState.value = ready.copy(summary = null)
-    }
+    fun dismissSummary() = summary.dismiss()
 
     /**
      * Registers the scroll viewer on screen; the returned function unregisters it, but only while it is still the
@@ -423,11 +394,10 @@ class DocumentAnalysisViewModel @Inject constructor(
 
     private fun startReader(
         initial: ReaderState,
-        onError: ReaderState? = null,
+        onError: (() -> ReaderState)? = null,
         operation: suspend () -> Unit,
     ) {
         readerJob?.cancel()
-        summaryJob?.cancel()
         mutableState.value = initial
         readerJob = viewModelScope.launch {
             try {
@@ -436,7 +406,7 @@ class DocumentAnalysisViewModel @Inject constructor(
                 throw cancelled
             } catch (error: Exception) {
                 Log.w("XfilesReader", "Document could not be read", error)
-                mutableState.value = onError ?: ReaderState.ReadError
+                mutableState.value = onError?.invoke() ?: ReaderState.ReadError
             } catch (error: LinkageError) {
                 Log.e("XfilesReader", "Rust document library unavailable", error)
                 mutableState.value = ReaderState.EngineUnavailable
@@ -459,7 +429,12 @@ class DocumentAnalysisViewModel @Inject constructor(
      */
     fun showEditedPreview(preview: FilePreview?) {
         val ready = mutableState.value as? ReaderState.Ready ?: return
-        if (preview == null) open(ready.file.uri) else mutableState.value = ready.copy(preview = preview)
+        if (preview == null) {
+            open(ready.file.uri)
+        } else {
+            summary.cancel()
+            mutableState.value = ready.copy(preview = preview, summary = null)
+        }
     }
 
     private companion object {

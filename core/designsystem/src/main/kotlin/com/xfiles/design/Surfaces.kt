@@ -32,14 +32,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/*
- * The glass of the app's chrome. Compose has no cheap backdrop blur on every
- * platform, so the frosted look comes from layers that cost a few gradient
- * fills each: a translucent fill that is lighter at the top, an inner glow
- * under a bright top edge, and a restrained platform shadow. Over the wave
- * backgrounds, which are smooth, a real blur would barely change the result.
- * Nothing here animates or re-renders per frame; each layer is cached by size.
- */
+// Shared tint and edge treatments. Screens that overlap scrolling content can add a
+// FrostedBackdrop beneath selected controls; ordinary rows and cards use these fills alone.
 
 /**
  * Frosted-glass surface. [strength] 0..1 moves from subtle to nearly opaque.
