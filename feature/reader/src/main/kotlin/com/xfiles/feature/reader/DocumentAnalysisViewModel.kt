@@ -26,6 +26,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -165,7 +166,7 @@ class DocumentAnalysisViewModel @Inject constructor(
         saved[OPEN_PAGE] = initialPage
         startReader(ReaderState.Loading) {
             val opened = openDocument(uri, initialPage, password)
-            ensureActive()
+            currentCoroutineContext().ensureActive()
             if (opened is ReaderState.Ready) {
                 val preview = opened.preview
                 if (preview is FilePreview.Pdf) {
