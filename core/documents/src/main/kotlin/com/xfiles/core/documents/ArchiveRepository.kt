@@ -3,6 +3,9 @@ package com.xfiles.core.documents
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import androidx.core.content.FileProvider
 import com.xfiles.documents.archive.ArchiveEntry
 import com.xfiles.documents.archive.ArchiveTree
@@ -86,21 +89,16 @@ class ArchiveRepository @Inject constructor(@ApplicationContext private val cont
 
     /** Builds the folder tree: entries are read on [lane], the tree is built on Default. */
     suspend fun index(uri: Uri): ArchiveTree {
-        val entries = withContext(lane) {
-            openSession(uri).use { session ->
-                session.entries().map {
-                    ArchiveEntry(
-                        path = it.path,
-                        size = it.size.toLong(),
-                        compressedSize = it.compressedSize.toLong(),
-                        isDirectory = it.isDir,
-                        encrypted = it.encrypted,
-                        modifiedDos = it.modifiedDos.toInt(),
-                    )
-                }
+        val records = entries(uri)
+        return withContext(Dispatchers.Default) { ArchiveTree.build(records) }
+    }
+
+    suspend fun entries(uri: Uri): List<ArchiveEntry> = withContext(lane) {
+        openSession(uri).use { session ->
+            session.entries().map {
+                ArchiveEntry(it.path, it.size.toLong(), it.compressedSize.toLong(), it.isDir, it.encrypted, it.modifiedDos.toInt())
             }
         }
-        return withContext(Dispatchers.Default) { ArchiveTree.build(entries) }
     }
 
     /**
@@ -191,22 +189,23 @@ class ArchiveRepository @Inject constructor(@ApplicationContext private val cont
             val resolver = context.contentResolver
             val root = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
             val folders = HashMap<String, Uri>().apply { put("", root) }
-            val files = staging.walkTopDown().filter { it.isFile }.sortedBy { it.path }.toList()
-            val bytesTotal = files.sumOf { it.length() }
+            val entries = staging.walkTopDown().drop(1).toList()
+            val bytesTotal = entries.filter(File::isFile).sumOf(File::length)
             var bytesDone = 0L
-            files.forEachIndexed { index, file ->
+            entries.forEachIndexed { index, file ->
                 currentCoroutineContext().ensureActive()
                 val relative = file.relativeTo(staging).invariantSeparatorsPath
                 val parts = relative.split('/')
                 var parentPath = ""
                 var parentUri = root
-                for (folder in parts.dropLast(1)) {
+                for (folder in if (file.isDirectory) parts else parts.dropLast(1)) {
                     val folderPath = if (parentPath.isEmpty()) folder else "$parentPath/$folder"
                     parentUri = folders[folderPath] ?: DocumentsContract.createDocument(
                         resolver, parentUri, DocumentsContract.Document.MIME_TYPE_DIR, folder,
                     )?.also { folders[folderPath] = it } ?: throw ArchiveException(ArchiveError.Io, "Could not create $folder")
                     parentPath = folderPath
                 }
+                if (file.isDirectory) return@forEachIndexed
                 val target = DocumentsContract.createDocument(
                     resolver, parentUri, "application/octet-stream", parts.last(),
                 ) ?: throw ArchiveException(ArchiveError.Io, "Could not create ${parts.last()}")
@@ -220,7 +219,7 @@ class ArchiveRepository @Inject constructor(@ApplicationContext private val cont
                                 if (read < 0) break
                                 output.write(buffer, 0, read)
                                 bytesDone += read
-                                emit(ArchiveProgress(ArchiveProgress.Phase.Copying, bytesDone, bytesTotal, index, files.size))
+                                emit(ArchiveProgress(ArchiveProgress.Phase.Copying, bytesDone, bytesTotal, index, entries.size))
                             }
                         }
                     } ?: throw ArchiveException(ArchiveError.Io, "Could not write ${parts.last()}")
@@ -233,15 +232,40 @@ class ArchiveRepository @Inject constructor(@ApplicationContext private val cont
         }
     }
 
-    private fun openSession(uri: Uri): ArchiveSession {
+    private suspend fun openSession(uri: Uri): ArchiveSession {
         val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
             ?: throw ArchiveException(ArchiveError.Io, "The archive could not be opened.")
-        // The engine takes ownership of the descriptor and closes it.
-        val fd = descriptor.detachFd()
-        return try {
-            openArchiveFd(fd)
+        try {
+            val seekable = runCatching { Os.lseek(descriptor.fileDescriptor, 0, OsConstants.SEEK_CUR) }.isSuccess
+            if (seekable) return openArchiveFd(descriptor.detachFd())
+
+            val temp = File.createTempFile("archive-provider-", ".tmp", context.cacheDir)
+            try {
+                ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
+                    temp.outputStream().use { output ->
+                        val buffer = ByteArray(COPY_BUFFER)
+                        var size = 0L
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            size += read
+                            if (size > 2L * 1024 * 1024 * 1024) {
+                                throw ArchiveException(ArchiveError.TooLarge, "The archive exceeds the staging limit.")
+                            }
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+                val fd = ParcelFileDescriptor.open(temp, ParcelFileDescriptor.MODE_READ_ONLY)
+                return fd.use { openArchiveFd(it.detachFd()) }
+            } finally {
+                temp.delete()
+            }
         } catch (failure: ReadException) {
             throw failure.toArchive()
+        } finally {
+            runCatching { descriptor.close() }
         }
     }
 

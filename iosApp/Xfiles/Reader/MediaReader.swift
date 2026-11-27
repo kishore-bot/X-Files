@@ -10,6 +10,7 @@ struct MediaReader: View {
     var control: ReaderControl? = nil
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: AVPlayer?
+    @State private var sidecar = MediaSubtitleSession()
     @State private var optionsOpen = false
     @State private var audioTracks: AVMediaSelectionGroup?
     @State private var subtitles: AVMediaSelectionGroup?
@@ -27,10 +28,11 @@ struct MediaReader: View {
         Group {
             if let fallback {
                 CompatibilityPlayer(url: url, seconds: fallback.seconds, resumePlaying: fallback.playing,
-                                    control: control, onTime: onTime, onCheckpoint: onCheckpoint)
+                                    control: control, onTime: onTime, onCheckpoint: onCheckpoint, sidecar: sidecar)
             } else if let player {
                 VStack(spacing: 0) {
                     VideoPlayer(player: player).background(.black)
+                        .overlay { TimedSidecarOverlay(session: sidecar) { player.currentTime().seconds } }
                     Menu {
                         Button("Playback options", systemImage: "slider.horizontal.3") { optionsOpen = true }
                         Button("Use compatibility playback", systemImage: "play.rectangle") { switchToFallback() }
@@ -45,7 +47,13 @@ struct MediaReader: View {
         }
         .sheet(isPresented: $optionsOpen) {
             if let player {
-                MediaOptions(player: player, audio: audioTracks, subtitles: subtitles)
+                MediaOptions(player: player, audio: audioTracks, subtitles: subtitles, sidecar: sidecar)
+            }
+        }
+        .task(id: url) {
+            await sidecar.restore(for: url)
+            if sidecar.enabled, let subtitles, subtitles.allowsEmptySelection {
+                player?.currentItem?.select(nil, in: subtitles)
             }
         }
         .task(id: nativeAttempt) {
@@ -73,6 +81,9 @@ struct MediaReader: View {
                 player = active
                 audioTracks = try? await asset.loadMediaSelectionGroup(for: .audible)
                 subtitles = try? await asset.loadMediaSelectionGroup(for: .legible)
+                if sidecar.enabled, let subtitles, subtitles.allowsEmptySelection {
+                    active.currentItem?.select(nil, in: subtitles)
+                }
                 try Task.checkCancellation()
                 installControl(active)
                 while !Task.isCancelled {
@@ -100,7 +111,7 @@ struct MediaReader: View {
     private func installControl(_ active: AVPlayer) {
         var capabilities: Set<ReaderCommand.Capability> = [.playback, .seek]
         if audioTracks != nil { capabilities.insert(.audio) }
-        if subtitles != nil { capabilities.insert(.subtitles) }
+        capabilities.insert(.subtitles)
         control?.install(owner: owner, supports: capabilities) { [weak active] command in
             guard let active, let item = active.currentItem else { return .unavailable("Playback has closed.") }
             switch command {
@@ -121,11 +132,17 @@ struct MediaReader: View {
                 }
                 item.select(option, in: group)
             case .subtitlesOn:
+                if sidecar.ready {
+                    sidecar.enabled = true
+                    if let subtitles, subtitles.allowsEmptySelection { item.select(nil, in: subtitles) }
+                    return .done
+                }
                 guard let group = subtitles, let option = group.defaultOption ?? group.options.first else {
                     return .unavailable("This file has no available subtitle track.")
                 }
                 item.select(option, in: group)
             case .subtitlesOff:
+                if sidecar.enabled { sidecar.enabled = false; return .done }
                 guard let subtitles, subtitles.allowsEmptySelection else { return .unavailable("These subtitles cannot be turned off.") }
                 item.select(nil, in: subtitles)
             default:
@@ -169,6 +186,7 @@ private struct MediaOptions: View {
     let player: AVPlayer
     let audio: AVMediaSelectionGroup?
     let subtitles: AVMediaSelectionGroup?
+    let sidecar: MediaSubtitleSession
     @Environment(\.dismiss) private var dismiss
     @State private var rate: Float = 1
     @State private var audioIndex: Int?
@@ -190,7 +208,13 @@ private struct MediaOptions: View {
                     trackPicker("Audio", group: audio, selection: $audioIndex)
                 }
                 if let subtitles {
-                    trackPicker("Subtitles", group: subtitles, selection: $subtitleIndex)
+                    trackPicker("Subtitles", group: subtitles, selection: $subtitleIndex, embedded: true)
+                }
+                SidecarTimingOptions(session: sidecar) {
+                    if let subtitles, subtitles.allowsEmptySelection {
+                        player.currentItem?.select(nil, in: subtitles)
+                        subtitleIndex = nil
+                    }
                 }
             }
             .navigationTitle("Playback options")
@@ -209,7 +233,7 @@ private struct MediaOptions: View {
         return group.options.firstIndex(of: selected)
     }
 
-    private func trackPicker(_ title: String, group: AVMediaSelectionGroup, selection: Binding<Int?>) -> some View {
+    private func trackPicker(_ title: String, group: AVMediaSelectionGroup, selection: Binding<Int?>, embedded: Bool = false) -> some View {
         Picker(title, selection: selection) {
             if group.allowsEmptySelection || selection.wrappedValue == nil {
                 Text(group.allowsEmptySelection ? "Off" : "Automatic").tag(nil as Int?)
@@ -220,6 +244,7 @@ private struct MediaOptions: View {
         }
         .onChange(of: selection.wrappedValue) { _, choice in
             if let choice, group.options.indices.contains(choice) {
+                if embedded { sidecar.enabled = false }
                 player.currentItem?.select(group.options[choice], in: group)
             } else if group.allowsEmptySelection {
                 player.currentItem?.select(nil, in: group)

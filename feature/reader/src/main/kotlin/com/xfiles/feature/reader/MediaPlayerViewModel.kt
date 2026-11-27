@@ -23,6 +23,7 @@ import com.xfiles.feature.reader.domain.MediaTextTrack
 import com.xfiles.feature.reader.domain.MediaSubtitleFilesUseCase
 import com.xfiles.feature.reader.domain.MediaTracksUseCase
 import com.xfiles.feature.reader.domain.subtitleMimeFor
+import com.xfiles.feature.reader.domain.SubtitleTimeline
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
@@ -59,7 +60,10 @@ internal class MediaPlayerViewModel @Inject constructor(
     private var resumeAfterScrub = false
     private var pollJob: Job? = null
     private var hideJob: Job? = null
-    private var cueJob: Job? = null
+    private var subtitleClock: Job? = null
+    private var subtitleLoad: Job? = null
+    private val timelines = mutableMapOf<String, SubtitleTimeline>()
+    private var activeTimeline: SubtitleTimeline? = null
 
     private var seekEnd: (() -> Unit)? = null
     private var seekStartedAt = 0L
@@ -74,8 +78,9 @@ internal class MediaPlayerViewModel @Inject constructor(
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
-            readPlayback(player)
             if (events.contains(Player.EVENT_TRACKS_CHANGED)) refreshTracks(player)
+            readPlayback(player)
+            updateTimedCues(player)
         }
 
         override fun onRenderedFirstFrame() {
@@ -86,7 +91,10 @@ internal class MediaPlayerViewModel @Inject constructor(
         }
 
         override fun onCues(cueGroup: CueGroup) {
-            showCues(cueGroup.cues.mapNotNull { it.text?.toString()?.trim()?.takeIf(String::isNotEmpty) })
+            if (activeTimeline == null) {
+                val lines = cueGroup.cues.mapNotNull { it.text?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+                mutableState.update { it.copy(cues = lines) }
+            }
         }
     }
 
@@ -100,6 +108,8 @@ internal class MediaPlayerViewModel @Inject constructor(
         audioToRestore = progress.read(key, "media-audio")
         subtitleToRestore = progress.read(key, "media-subtitle")?.takeIf(String::isNotEmpty)
         loadedFiles.clear()
+        timelines.clear()
+        activeTimeline = null
         nearbyFiles = emptyList()
         mutableState.update { previous ->
             MediaPlayerUiState(
@@ -111,6 +121,8 @@ internal class MediaPlayerViewModel @Inject constructor(
                 rotationLocked = progress.read(key, "video-lock") == "true",
                 repeatOne = progress.read(key, "media-repeat") == "true",
                 subtitleStyle = previous.subtitleStyle,
+                subtitleDelayMs = (progress.read(key, "media-subtitle-offset")?.toLongOrNull() ?: 0L)
+                    .coerceIn(-MAX_DELAY_MS, MAX_DELAY_MS),
             )
         }
         exo.addListener(listener)
@@ -160,7 +172,8 @@ internal class MediaPlayerViewModel @Inject constructor(
         endSeekMeasurement()
         pollJob?.cancel()
         hideJob?.cancel()
-        cueJob?.cancel()
+        subtitleClock?.cancel()
+        subtitleLoad?.cancel()
         player = null
         media = null
         mutableState.update {
@@ -232,14 +245,19 @@ internal class MediaPlayerViewModel @Inject constructor(
                 mutableState.update { it.copy(sheet = null) }
             }
             is MediaPlayerEvent.ChooseSubtitle -> chooseSubtitle(exo, event.track)
-            is MediaPlayerEvent.ChooseNearbySubtitle -> addSubtitle(event.file)
+            is MediaPlayerEvent.ChooseNearbySubtitle -> loadSubtitle(event.file.uri, event.file.name)
             is MediaPlayerEvent.LoadSubtitle -> loadSubtitle(event.uri)
             is MediaPlayerEvent.UpdateStyle -> {
                 mutableState.update { it.copy(subtitleStyle = event.style) }
                 styleStore.save(event.style)
             }
-            is MediaPlayerEvent.SubtitleDelay -> mutableState.update {
-                it.copy(subtitleDelayMs = (it.subtitleDelayMs + event.deltaMs).coerceIn(-MAX_DELAY_MS, MAX_DELAY_MS))
+            is MediaPlayerEvent.SubtitleDelay -> {
+                if (activeTimeline != null) {
+                    val offset = (state.value.subtitleDelayMs + event.deltaMs).coerceIn(-MAX_DELAY_MS, MAX_DELAY_MS)
+                    mutableState.update { it.copy(subtitleDelayMs = offset) }
+                    rememberSetting("media-subtitle-offset", offset.toString())
+                    exo?.let(::updateTimedCues)
+                }
             }
         }
         if (event !is MediaPlayerEvent.SetDragging && event !is MediaPlayerEvent.Scrub && event !is MediaPlayerEvent.Boost) {
@@ -336,6 +354,21 @@ internal class MediaPlayerViewModel @Inject constructor(
             }
         }
         val loadedUris = loadedFiles.map { it.uri }.toSet()
+        val selectedLabel = set.text.firstOrNull { it.selected }?.group?.getTrackFormat(0)?.label
+        val timeline = timelines[selectedLabel]
+        if (activeTimeline !== timeline) {
+            subtitleClock?.cancel()
+            activeTimeline = timeline
+            val cues = timeline?.at(exo.currentPosition, state.value.subtitleDelayMs)
+                ?: exo.currentCues.cues.mapNotNull { it.text?.toString() }
+            mutableState.update { it.copy(cues = cues, canAdjustSubtitleTiming = timeline != null) }
+            if (timeline != null) subtitleClock = viewModelScope.launch {
+                while (isActive) {
+                    updateTimedCues(exo)
+                    delay(50)
+                }
+            }
+        }
         mutableState.update {
             it.copy(
                 audioTracks = set.audio,
@@ -376,12 +409,13 @@ internal class MediaPlayerViewModel @Inject constructor(
         mutableState.update { it.copy(subtitleNotice = null) }
     }
 
-    private fun loadSubtitle(uri: Uri) {
+    private fun loadSubtitle(uri: Uri, knownName: String? = null) {
         val active = player ?: return
-        viewModelScope.launch {
+        subtitleLoad?.cancel()
+        subtitleLoad = viewModelScope.launch {
             mutableState.update { it.copy(subtitleLoading = true) }
             subtitleFiles.keepReadAccess(uri)
-            val name = subtitleFiles.displayName(uri)
+            val name = knownName ?: subtitleFiles.displayName(uri)
             if (player !== active) return@launch
             addSubtitle(MediaSubtitleFile(uri, name))
             mutableState.update { it.copy(subtitleLoading = false) }
@@ -389,7 +423,7 @@ internal class MediaPlayerViewModel @Inject constructor(
     }
 
     /** Adds a subtitle file to the playing video, keeping its place, and turns it on. */
-    private fun addSubtitle(file: MediaSubtitleFile) {
+    private suspend fun addSubtitle(file: MediaSubtitleFile) {
         val exo = player ?: return
         val source = media ?: return
         if (subtitleMimeFor(file.name) == null) {
@@ -398,10 +432,13 @@ internal class MediaPlayerViewModel @Inject constructor(
             }
             return
         }
+        val timeline = subtitleFiles.timeline(file)
+        if (player !== exo || media !== source) return
+        if (loadedFiles.none { it.uri == file.uri }) loadedFiles += file
+        if (timeline != null) timelines[file.label()] = timeline else timelines.remove(file.label())
         subtitleToRestore = null
         rememberSetting("media-subtitle", "")
         rememberSetting("media-sidecar", file.uri.toString())
-        if (loadedFiles.none { it.uri == file.uri }) loadedFiles += file
         val configurations = loadedFiles.map { sub ->
             MediaItem.SubtitleConfiguration.Builder(sub.uri)
                 .setMimeType(subtitleMimeFor(sub.name) ?: MimeTypes.APPLICATION_SUBRIP)
@@ -421,18 +458,12 @@ internal class MediaPlayerViewModel @Inject constructor(
         mutableState.update { it.copy(subtitleNotice = null) }
     }
 
-    private fun showCues(lines: List<String>) {
-        cueJob?.cancel()
-        val delay = state.value.subtitleDelayMs
-        // A later subtitle waits for the delay; an earlier one can't be shown before the player delivers it.
-        if (delay <= 0L) {
-            mutableState.update { it.copy(cues = lines) }
-            return
-        }
-        cueJob = viewModelScope.launch {
-            delay(delay)
-            mutableState.update { it.copy(cues = lines) }
-        }
+    private fun updateTimedCues(player: Player) {
+        val timeline = activeTimeline ?: return
+        val current = state.value
+        val cues = if (player.playbackState == Player.STATE_ENDED) emptyList()
+            else timeline.at(player.currentPosition.coerceAtLeast(0), current.subtitleDelayMs)
+        if (current.cues != cues) mutableState.update { it.copy(cues = cues) }
     }
 
     private fun scheduleHide() {
@@ -456,7 +487,11 @@ internal class MediaPlayerViewModel @Inject constructor(
         mutableState.update { it.copy(controlsVisible = false) }
     }
 
-    private fun MediaSubtitleFile.label(): String = name.substringBeforeLast('.')
+    private fun MediaSubtitleFile.label(): String {
+        val base = name.substringBeforeLast('.')
+        val earlier = loadedFiles.takeWhile { it.uri != uri }.count { it.name.substringBeforeLast('.') == base }
+        return if (earlier == 0) base else "$base (${earlier + 1})"
+    }
 
     private companion object {
         /** How long the controls stay after the last touch while a video plays. */

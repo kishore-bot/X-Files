@@ -177,9 +177,8 @@ private fun ReaderPreview(
             if (ui.showSearch || ui.showSource) TextPreview(preview.text, ui.showSearch, onSearchClose = { onEvent(ReaderUiEvent.SetSearch(false)) })
             // Relative links open the sibling file through the same nested-open path as archive entries.
             else HtmlPreview(preview.html, baseUri = state.file.uri, onOpenSibling = onOpenArchiveEntry)
-        is FilePreview.Structured -> if (isZipName(state.file.name)) {
-            ArchiveBrowser(archive = state.file.uri, onOpenFile = onOpenArchiveEntry)
-        } else {
+        FilePreview.Archive -> ArchiveBrowser(archive = state.file.uri, onOpenFile = onOpenArchiveEntry)
+        is FilePreview.Structured -> {
             if (ui.showSearch || (ui.showSource && preview.source != null)) {
                 val text = preview.source ?: remember(preview.document) {
                     val content = preview.document.plainText(256_000)

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ArchiveReader: View {
     let file: ReaderFile
@@ -10,6 +11,12 @@ struct ArchiveReader: View {
     @State private var problem: String?
     @State private var directory = ""
     @State private var openFile: UUID?
+    @State private var picking = false
+    @State private var picked = Set<String>()
+    @State private var exportFolder: URL?
+    @State private var exportPresented = false
+    @State private var passwordForExport = false
+    @State private var pendingExport: [ArchiveItem] = []
 
     private struct Row: Identifiable {
         let name: String
@@ -29,7 +36,9 @@ struct ArchiveReader: View {
                     }
                     ForEach(rows(entries)) { row in
                         Button {
-                            if let entry = row.entry {
+                            if picking {
+                                if picked.contains(row.path) { picked.remove(row.path) } else { picked.insert(row.path) }
+                            } else if let entry = row.entry {
                                 selected = entry
                                 if !entry.protected { extract(entry, password: nil) }
                             } else {
@@ -39,6 +48,7 @@ struct ArchiveReader: View {
                             HStack {
                                 Label(row.name, systemImage: row.entry == nil ? "folder" : row.entry?.protected == true ? "lock.doc" : "doc")
                                 Spacer()
+                                if picking && picked.contains(row.path) { Image(systemName: "checkmark.circle.fill") }
                                 if let size = row.entry?.size {
                                     Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
                                         .font(.caption).foregroundStyle(.secondary)
@@ -49,12 +59,38 @@ struct ArchiveReader: View {
                     }
                 }
                 .overlay {
-                    if entries.isEmpty { ContentUnavailableView("Empty ZIP", systemImage: "archivebox") }
+                    if entries.isEmpty { ContentUnavailableView("Empty archive", systemImage: "archivebox") }
                 }
             } else if let problem {
-                ContentUnavailableView("ZIP unavailable", systemImage: "archivebox", description: Text(problem))
+                ContentUnavailableView("Archive unavailable", systemImage: "archivebox", description: Text(problem))
             } else {
-                ProgressView("Reading ZIP")
+                ProgressView("Reading archive")
+            }
+        }
+        .toolbar {
+            if entries?.isEmpty == false {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button(picking ? "Stop selecting" : "Select entries") {
+                            picking.toggle()
+                            picked.removeAll()
+                        }
+                        if picking {
+                            Button("Select all") { picked = Set(rows(entries ?? []).map(\.path)) }
+                            Button("Extract selected") { requestExport(selectedEntries) }.disabled(picked.isEmpty)
+                        }
+                        Button("Extract all") { requestExport(entries ?? []) }
+                    } label: { Label("Archive actions", systemImage: "ellipsis.circle") }
+                    .disabled(job != nil)
+                }
+            }
+        }
+        .sheet(isPresented: $exportPresented, onDismiss: {
+            if let exportFolder { OutputFiles.remove(exportFolder.deletingLastPathComponent()) }
+            exportFolder = nil
+        }) {
+            if let exportFolder {
+                ArchiveExportPicker(folder: exportFolder) { exportPresented = false }
             }
         }
         .navigationDestination(item: $openFile) { id in
@@ -63,21 +99,25 @@ struct ArchiveReader: View {
         .safeAreaInset(edge: .bottom) {
             if job != nil {
                 HStack {
-                    ProgressView("Extracting entry")
+                    ProgressView("Extracting archive")
                     Spacer()
                     Button("Cancel") { job?.cancel() }
                 }
                 .padding().background(.regularMaterial)
             }
         }
-        .alert("Unlock ZIP entry", isPresented: Binding(
-            get: { selected?.protected == true && job == nil && problem == nil },
-            set: { if !$0 && job == nil { selected = nil } }
+        .alert("Unlock ZIP", isPresented: Binding(
+            get: { (passwordForExport || selected?.protected == true) && job == nil && problem == nil },
+            set: { if !$0 && job == nil { clearPassword() } }
         )) {
             SecureField("ZIP password", text: $password)
-            Button("Cancel", role: .cancel) { selected = nil; password = "" }
+            Button("Cancel", role: .cancel) { clearPassword() }
             Button("Extract") {
-                if let selected { extract(selected, password: password) }
+                if passwordForExport {
+                    export(pendingExport, password: password)
+                    passwordForExport = false
+                    pendingExport = []
+                } else if let selected { extract(selected, password: password) }
                 password = ""
             }
         }
@@ -93,6 +133,52 @@ struct ArchiveReader: View {
             catch { problem = error.localizedDescription }
         }
         .onDisappear { job?.cancel() }
+    }
+
+    private func clearPassword() {
+        selected = nil
+        passwordForExport = false
+        pendingExport = []
+        password = ""
+    }
+
+    private var selectedEntries: [ArchiveItem] {
+        (entries ?? []).filter { entry in
+            let path = entry.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return picked.contains { path == $0 || path.hasPrefix($0 + "/") }
+        }
+    }
+
+    private func requestExport(_ items: [ArchiveItem]) {
+        guard !items.isEmpty else { return }
+        if items.contains(where: \.protected) {
+            pendingExport = items
+            passwordForExport = true
+        } else {
+            export(items, password: nil)
+        }
+    }
+
+    private func export(_ items: [ArchiveItem], password: String?) {
+        job = Task {
+            defer { job = nil }
+            do {
+                let staging = try OutputFiles.folder()
+                var published = false
+                defer { if !published { OutputFiles.remove(staging) } }
+                let folder = staging.appendingPathComponent("Extracted files", isDirectory: true)
+                _ = try await DocumentEngine.output(EngineRequest(
+                    operation: "extract", path: file.url.path, output: folder.path,
+                    password: password, entries: items.map(\.path)
+                ))
+                try Task.checkCancellation()
+                exportFolder = folder
+                exportPresented = true
+                published = true
+            } catch is CancellationError {
+                return
+            } catch { problem = error.localizedDescription }
+        }
     }
 
     private func rows(_ entries: [ArchiveItem]) -> [Row] {
@@ -125,7 +211,7 @@ struct ArchiveReader: View {
                 let relative = entry.path.replacingOccurrences(of: "\\", with: "/")
                 let output = staging.appendingPathComponent(relative).standardizedFileURL
                 guard output.path.hasPrefix(staging.standardizedFileURL.path + "/") else {
-                    throw EngineError(message: "The ZIP entry path is invalid.")
+                    throw EngineError(message: "The archive entry path is invalid.")
                 }
                 openFile = try await library.importOutput(output)
             } catch is CancellationError {
@@ -134,5 +220,28 @@ struct ArchiveReader: View {
                 problem = error.localizedDescription
             }
         }
+    }
+}
+
+
+private struct ArchiveExportPicker: UIViewControllerRepresentable {
+    let folder: URL
+    let onFinish: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let controller = UIDocumentPickerViewController(forExporting: [folder], asCopy: true)
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onFinish: () -> Void
+        init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { onFinish() }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { onFinish() }
     }
 }

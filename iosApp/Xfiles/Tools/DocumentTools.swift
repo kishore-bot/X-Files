@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DocumentTools: View {
     let library: LibraryModel
@@ -18,6 +19,16 @@ struct DocumentTools: View {
     @State private var searchableImages = false
     @State private var password = ""
     @State private var newPassword = ""
+    @State private var archiveFormat: ArchiveFormat = .zip
+    @State private var protectArchive = false
+    @State private var archiveFolder: URL?
+    @State private var pickArchiveFolder = false
+
+    private enum ArchiveFormat: String, CaseIterable, Identifiable {
+        case zip, tar, gzip = "tar.gz", sevenZip = "7z"
+        var id: String { rawValue }
+        var label: String { self == .sevenZip ? rawValue : rawValue.uppercased() }
+    }
     @State private var signature: [[CGPoint]] = []
     @State private var task: Task<Void, Never>?
     @State private var error: String?
@@ -44,7 +55,7 @@ struct DocumentTools: View {
             case .officeReplace: "Office find and replace"
             case .cellEdit: "Edit XLSX cell"
             case .slides: "Reorder or remove PPTX slides"
-            case .zip: "Create ZIP"
+            case .zip: "Create archive"
             }
         }
 
@@ -100,10 +111,15 @@ struct DocumentTools: View {
                             Button("Cancel", role: .cancel) { task?.cancel() }
                         } else {
                             Button("Create copy") { start(operation) }
-                                .disabled(operation.needsFiles && selected.isEmpty)
+                                .disabled((operation.needsFiles && selected.isEmpty && (operation != .zip || archiveFolder == nil))
+                                    || (operation == .zip && protectArchive && newPassword.isEmpty))
                         }
                     }
                 }
+            }
+            .fileImporter(isPresented: $pickArchiveFolder, allowedContentTypes: [.folder]) { result in
+                do { archiveFolder = try result.get() }
+                catch { self.error = error.localizedDescription }
             }
             .navigationTitle("Document tools")
             .navigationBarTitleDisplayMode(.inline)
@@ -116,6 +132,8 @@ struct DocumentTools: View {
                 password = ""
                 newPassword = ""
                 signature = []
+                protectArchive = false
+                archiveFolder = nil
             }
             .alert("Couldn’t create copy", isPresented: Binding(
                 get: { error != nil }, set: { if !$0 { error = nil } }
@@ -157,6 +175,25 @@ struct DocumentTools: View {
             }
         case .watermark:
             TextField("Watermark text", text: $text)
+        case .zip:
+            if let archiveFolder {
+                LabeledContent("Folder", value: archiveFolder.lastPathComponent)
+                Button("Remove folder", role: .destructive) { self.archiveFolder = nil }
+            } else {
+                Button("Add a folder from Files") { pickArchiveFolder = true }
+            }
+            Picker("Archive format", selection: $archiveFormat) {
+                ForEach(ArchiveFormat.allCases) { Text($0.label).tag($0) }
+            }
+            .onChange(of: archiveFormat) { _, _ in protectArchive = false; newPassword = "" }
+            if archiveFormat == .zip {
+                Toggle("Protect with password", isOn: $protectArchive)
+                    .onChange(of: protectArchive) { _, value in if !value { newPassword = "" } }
+                if protectArchive {
+                    SecureField("ZIP password", text: $newPassword)
+                    Text("File names remain visible.").foregroundStyle(.secondary)
+                }
+            }
         case .imagesPDF:
             Toggle("Recognize text on device", isOn: $searchableImages)
         case .textPDF:
@@ -187,7 +224,9 @@ struct DocumentTools: View {
     private func start(_ operation: Operation) {
         let sourceIDs = selected
         let sourcePassword = password
-        let targetPassword = newPassword
+        let targetPassword = operation == .zip && !protectArchive ? "" : newPassword
+        let format = archiveFormat
+        let folder = archiveFolder
         let body = text
         let replace = replacement
         let sheetName = sheet
@@ -209,7 +248,7 @@ struct DocumentTools: View {
                 let result = try await prepare(
                     operation, files: files, in: directory, sourcePassword: sourcePassword,
                     targetPassword: targetPassword, text: body, replacement: replace, sheetName: sheetName,
-                    row: rowText, column: columnText, pages: requestedPages, degrees: degrees, strokes: lines, searchable: searchable
+                    row: rowText, column: columnText, pages: requestedPages, degrees: degrees, strokes: lines, searchable: searchable, archiveFormat: format, archiveFolder: folder
                 )
                 try Task.checkCancellation()
                 let id = try await library.importOutput(result)
@@ -226,7 +265,7 @@ struct DocumentTools: View {
     private func prepare(
         _ operation: Operation, files: [ReaderFile], in directory: URL,
         sourcePassword: String, targetPassword: String, text: String, replacement: String,
-        sheetName: String, row: String, column: String, pages: String, degrees: Int, strokes: [[Double]], searchable: Bool
+        sheetName: String, row: String, column: String, pages: String, degrees: Int, strokes: [[Double]], searchable: Bool, archiveFormat: ArchiveFormat, archiveFolder: URL?
     ) async throws -> URL {
         switch operation {
         case .textPDF:
@@ -241,8 +280,15 @@ struct DocumentTools: View {
             try await NativeConversions.imagesPDF(files.map(\.url), to: output, searchable: searchable)
             return output
         case .zip:
-            let output = directory.appendingPathComponent("Xfiles archive.zip")
-            try await NativeConversions.zip(files.map(\.url), to: output)
+            let output = directory.appendingPathComponent("Xfiles archive.\(archiveFormat.rawValue)")
+            let scope = archiveFolder?.startAccessingSecurityScopedResource() ?? false
+            defer { if scope { archiveFolder?.stopAccessingSecurityScopedResource() } }
+            let sources = files.map(\.url) + (archiveFolder.map { [$0] } ?? [])
+            _ = try await DocumentEngine.output(EngineRequest(
+                operation: "createArchive", output: output.path,
+                password: targetPassword.isEmpty ? nil : targetPassword,
+                resource: archiveFormat.rawValue, inputs: sources.map { .init(path: $0.path) }
+            ))
             return output
         default:
             break

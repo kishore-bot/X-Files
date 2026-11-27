@@ -3,6 +3,8 @@ package com.xfiles.feature.tools
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -20,7 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.xfiles.core.documents.ArchiveOutputFormat
 import com.xfiles.core.documents.ZipEntryInfo
+import com.xfiles.design.EzChip
 import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzListItem
@@ -71,11 +76,27 @@ internal fun LazyListScope.compressSources(
     }
 }
 
-/** The output name, as a field with the .zip ending the job adds when missing. */
+/** Format and creation options for the supplied files or folder. */
+@OptIn(ExperimentalLayoutApi::class)
 internal fun LazyListScope.outputName(state: ArchiveUiState, onEvent: (ArchiveEvent) -> Unit) {
     item("output") {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            EzSectionHeader("Name the ZIP")
+            EzSectionHeader("Archive format")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ArchiveOutputFormat.entries.forEach { format ->
+                    EzChip(format.label, selected = state.format == format, onClick = { onEvent(ArchiveEvent.SetFormat(format)) })
+                }
+            }
+            if (state.format == ArchiveOutputFormat.Zip) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    EzSwitch(checked = state.passwordProtected, onCheckedChange = { onEvent(ArchiveEvent.SetProtected(it)) })
+                    Text("Protect with password")
+                }
+                if (state.passwordProtected) {
+                    archivePassword(state, onEvent)
+                    Text("File names remain visible.")
+                }
+            }
             OutlinedTextField(
                 value = state.outputName,
                 onValueChange = { onEvent(ArchiveEvent.SetOutputName(it)) },
@@ -93,7 +114,7 @@ internal fun LazyListScope.extractEntries(
     entries: List<ZipEntryInfo>,
     onEvent: (ArchiveEvent) -> Unit,
 ) {
-    val files = entries.filter { !it.isDir }
+    val files = entries
     item("entries-head") {
         Row(
             Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -107,6 +128,7 @@ internal fun LazyListScope.extractEntries(
             )
         }
     }
+    if (state.needsPassword) item("extract-password") { archivePassword(state, onEvent) }
     items(files, key = { it.name }) { entry ->
         EzListItem(
             title = entry.name,
@@ -166,3 +188,15 @@ internal fun archiveDisplayName(context: android.content.Context, uri: Uri): Str
     context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
         if (c.moveToFirst()) c.getString(0) else null
     } ?: (uri.lastPathSegment?.substringAfterLast('/') ?: "File")
+
+@Composable
+private fun archivePassword(state: ArchiveUiState, onEvent: (ArchiveEvent) -> Unit) {
+    OutlinedTextField(
+        value = state.password,
+        onValueChange = { onEvent(ArchiveEvent.SetPassword(it)) },
+        label = { Text("Archive password") },
+        visualTransformation = PasswordVisualTransformation(),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}

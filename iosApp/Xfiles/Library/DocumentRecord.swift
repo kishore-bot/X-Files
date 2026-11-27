@@ -15,12 +15,13 @@ enum DocumentKind: String, CaseIterable, Codable, Sendable {
     }
 
     static func classify(_ name: String, type: UTType? = nil) -> DocumentKind {
+        if name.lowercased().hasSuffix(".tar.gz") { return .archive }
         switch (name as NSString).pathExtension.lowercased() {
         case "epub": return .book
         case "doc", "docx", "odt", "rtf": return .office
         case "xls", "xlsx", "ods", "csv", "tsv": return .sheet
         case "ppt", "pptx", "odp": return .slides
-        case "zip": return .archive
+        case "zip", "tar", "tgz", "7z": return .archive
         case "mkv", "webm", "avi", "ac3", "eac3", "dts", "truehd", "m2ts", "opus", "oga", "ogg": return .media
         default:
             let declared = DocumentKind(type: type)

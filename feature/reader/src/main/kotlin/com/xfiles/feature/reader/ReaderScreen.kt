@@ -213,7 +213,7 @@ fun ReaderScreen(
     // An EPUB book has its own chrome (with Fily), so the parent reader bar stays hidden.
     val epub = (ready?.preview as? FilePreview.Structured)?.document?.info?.format == DocumentFormat.Epub
     val preview = ready?.preview
-    val archive = ready?.file?.name?.let(::isZipName) == true
+    val archive = preview == FilePreview.Archive
     val structuredDocument = preview is FilePreview.Structured && !archive
     val textOf = when (preview) {
         is FilePreview.Text -> preview

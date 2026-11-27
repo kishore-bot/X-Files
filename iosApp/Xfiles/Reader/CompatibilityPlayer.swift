@@ -9,6 +9,7 @@ struct CompatibilityPlayer: View {
     let control: ReaderControl?
     let onTime: (Double) -> Void
     let onCheckpoint: () -> Void
+    let sidecar: MediaSubtitleSession
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var player: MPVKit.Player?
@@ -28,6 +29,7 @@ struct CompatibilityPlayer: View {
                 VStack(spacing: 10) {
                     MPVKit.PlayerView(player: player)
                         .background(.black)
+                        .overlay { TimedSidecarOverlay(session: sidecar) { Self.seconds(player.state.position) } }
                         .overlay { if !ready { ProgressView().tint(.white) } }
                     if ready {
                         let total = Self.seconds(player.state.duration)
@@ -89,7 +91,14 @@ struct CompatibilityPlayer: View {
                             ForEach(player.state.subtitleTracks) { track in
                                 Text(Self.label(track)).tag(Optional(track.id))
                             }
-                        }.onChange(of: textSelection) { _, id in player.selectSubtitle(id: id.map { String($0) }) }
+                        }.onChange(of: textSelection) { _, id in
+                            if id != nil { sidecar.enabled = false }
+                            player.selectSubtitle(id: id.map { String($0) })
+                        }
+                        SidecarTimingOptions(session: sidecar) {
+                            textSelection = nil
+                            player.selectSubtitle(id: nil)
+                        }
                     }
                     .navigationTitle("Media tracks")
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { tracksOpen = false } } }
@@ -169,6 +178,12 @@ struct CompatibilityPlayer: View {
             audioSelection = track.id
             player.selectAudioTrack(id: String(track.id))
         case .subtitlesOn:
+            if sidecar.ready {
+                sidecar.enabled = true
+                textSelection = nil
+                player.selectSubtitle(id: nil)
+                return .done
+            }
             let tracks = player.state.subtitleTracks
             guard let track = tracks.first(where: \.isDefault) ?? tracks.first else {
                 return .unavailable("This file has no available subtitle track.")
@@ -176,6 +191,7 @@ struct CompatibilityPlayer: View {
             textSelection = track.id
             player.selectSubtitle(id: String(track.id))
         case .subtitlesOff:
+            sidecar.enabled = false
             textSelection = nil
             player.selectSubtitle(id: nil)
         default:

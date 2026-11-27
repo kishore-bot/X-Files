@@ -30,20 +30,20 @@ import com.xfiles.design.EzIcons
 import com.xfiles.design.EzShapes
 import com.xfiles.design.glassCard
 
-/** A feature on the About screen's Upcoming tab. Every entry is planned, not yet shipped. */
+/** Features awaiting the device release checks. */
 private data class UpcomingItem(val icon: ImageVector, val title: String, val description: String)
 
-private val PlannedItems = listOf(
+private val ValidationItems = listOf(
     UpcomingItem(EzIcons.Lock, "Create password-protected ZIPs", "Set a password when compressing files into a new ZIP."),
-    UpcomingItem(EzIcons.Archive, "7z and TAR archives", "Compress and extract 7z and TAR files with the ZIP tools."),
+    UpcomingItem(EzIcons.Archive, "7z and TAR archives", "Create and extract TAR, TAR.GZ, and 7z in Archive tools."),
     UpcomingItem(
         EzIcons.Movie,
         "Show subtitles earlier",
-        "Negative subtitle delay, so lines can appear before the speech. Limited by the video engine.",
+        "Adjust timing for external SRT and WebVTT subtitles.",
     ),
 )
 
-/** The Upcoming tab: what the team has planned, one row each with an icon, a line and a Planned chip. */
+/** The Upcoming tab: Changes awaiting device verification. */
 @Composable
 internal fun UpcomingScreen() {
     LazyColumn(
@@ -53,13 +53,13 @@ internal fun UpcomingScreen() {
     ) {
         item("heading") {
             Text(
-                "Planned",
+                "Device checks pending",
                 style = MaterialTheme.typography.titleLarge,
                 color = EzColors.Text,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp).semantics { heading() },
             )
         }
-        items(PlannedItems, key = { it.title }) { UpcomingRow(it) }
+        items(ValidationItems, key = { it.title }) { UpcomingRow(it) }
     }
 }
 
@@ -86,14 +86,5 @@ private fun UpcomingRow(item: UpcomingItem) {
             Spacer(Modifier.height(2.dp))
             Text(item.description, style = MaterialTheme.typography.bodyMedium, color = EzColors.TextSecondary)
         }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            "Planned",
-            style = MaterialTheme.typography.labelLarge,
-            color = EzColors.Accent,
-            modifier = Modifier
-                .background(EzColors.Selected, EzShapes.Pill)
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-        )
     }
 }

@@ -222,7 +222,7 @@ internal fun FileRow(
                             menuOpen = false
                             actions.onPrint()
                         }
-                        FileMenuItem("Compress to ZIP", EzIcons.Archive) {
+                        FileMenuItem("Create archive", EzIcons.Archive) {
                             menuOpen = false
                             actions.onCompress()
                         }

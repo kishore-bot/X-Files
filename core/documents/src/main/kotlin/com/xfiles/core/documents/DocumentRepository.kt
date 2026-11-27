@@ -12,6 +12,7 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.xfiles.documentengine.DocumentAnalyzer
 import com.xfiles.documentengine.StructuredDocumentReader
+import com.xfiles.documents.isArchiveName
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.documentKind
 import com.xfiles.documents.structure.StructuredDocument
@@ -53,6 +54,7 @@ private fun JSONObject.visitTimes(): List<Long> {
 }
 
 sealed interface FilePreview {
+    data object Archive : FilePreview
     data class Text(val content: String, val truncated: Boolean) : FilePreview
     data class Structured(val document: StructuredDocument, val source: Text? = null) : FilePreview
     /** A local web page: [html] for the sandboxed viewer, [text] for search, glance and Fily. */
@@ -178,6 +180,7 @@ class DocumentRepository @Inject constructor(
     }
 
     suspend fun preview(file: FileEntry, initialPage: Int = 0, password: String? = null): FilePreview = withContext(io) {
+        if (isArchiveName(file.name)) return@withContext FilePreview.Archive
         when (file.kind) {
             DocumentKind.Image -> FilePreview.Picture(loadImage(file.uri))
             DocumentKind.Pdf -> pdfs.render(file.uri, initialPage, password)

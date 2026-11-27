@@ -1,4 +1,4 @@
-//! Read-only facade over ZIP archives for the archive browser.
+//! Read-only archive facade for ZIP, TAR, TAR.GZ and 7z.
 //!
 //! Two operations leave the engine: the entry index (central directory only,
 //! nothing decompressed) and bounded extraction of selected entries to a
@@ -10,7 +10,7 @@
 //! call on the same [`ArchiveIndex`] waits for the first.
 
 use std::fs::{self, File};
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
@@ -69,7 +69,15 @@ impl ExtractProgress {
         }
     }
 
-    fn start(&self, bytes_total: u64, entries_total: u32) {
+    pub(crate) fn advance(&self, bytes: u64) {
+        self.bytes_done.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub(crate) fn finish_entry(&self) {
+        self.entries_done.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn start(&self, bytes_total: u64, entries_total: u32) {
         self.bytes_done.store(0, Ordering::Relaxed);
         self.entries_done.store(0, Ordering::Relaxed);
         self.bytes_total.store(bytes_total, Ordering::Relaxed);
@@ -77,13 +85,64 @@ impl ExtractProgress {
     }
 }
 
+/// Format dispatch for the existing archive browser, UniFFI session, and Swift bridge.
 pub struct ArchiveIndex {
+    backend: Backend,
+}
+
+enum Backend {
+    Zip(ZipIndex),
+    Stream(crate::archive_stream::StreamIndex),
+}
+
+impl ArchiveIndex {
+    pub fn open(mut reader: Box<dyn ReadSeek>, byte_size: u64, cancel: CancelToken) -> Result<Self> {
+        use crate::archive_stream::{StreamFormat, StreamIndex};
+        let mut signature = [0u8; 6];
+        let size = (byte_size.min(signature.len() as u64)) as usize;
+        reader.read_exact(&mut signature[..size])?;
+        reader.seek(SeekFrom::Start(0))?;
+        let stream = if size >= 6 && signature == *b"7z\xBC\xAF\x27\x1C" {
+            Some(StreamFormat::SevenZip)
+        } else if size >= 2 && signature.starts_with(&[0x1f, 0x8b]) {
+            Some(StreamFormat::TarGzip)
+        } else if !matches!(&signature[..4], b"PK\x03\x04" | b"PK\x05\x06" | b"PK\x07\x08") && byte_size >= 512 {
+            let mut header = [0; 512];
+            reader.read_exact(&mut header)?;
+            reader.seek(SeekFrom::Start(0))?;
+            crate::archive_stream::is_tar_header(&header).then_some(StreamFormat::Tar)
+        } else {
+            None
+        };
+        let backend = match stream {
+            Some(format) => Backend::Stream(StreamIndex::open(reader, byte_size, format, cancel)?),
+            None => Backend::Zip(ZipIndex::open(reader, byte_size, cancel)?),
+        };
+        Ok(Self { backend })
+    }
+
+    pub fn entries(&self) -> Vec<ArchiveEntryInfo> {
+        match &self.backend {
+            Backend::Zip(index) => index.entries(),
+            Backend::Stream(index) => index.entries().to_vec(),
+        }
+    }
+
+    pub fn extract_to_dir(&mut self, names: &[String], dest: &Path, progress: &ExtractProgress, password: Option<&[u8]>) -> Result<ExtractSnapshot> {
+        match &mut self.backend {
+            Backend::Zip(index) => index.extract_to_dir(names, dest, progress, password),
+            Backend::Stream(index) => index.extract(names, dest, progress),
+        }
+    }
+}
+
+struct ZipIndex {
     archive: ZipArchive,
     cancel: CancelToken,
 }
 
-impl ArchiveIndex {
-    /// Reads the central directory. The session's decompression budget is the
+impl ZipIndex {
+    /// Reads the ZIP central directory. The session's decompression budget is the
     /// extraction batch cap, so a single call can never write more than that.
     pub fn open(reader: Box<dyn ReadSeek>, byte_size: u64, cancel: CancelToken) -> Result<Self> {
         let limits = Limits { max_decompressed_bytes: MAX_BATCH_BYTES, ..Limits::default() };
@@ -121,10 +180,7 @@ impl ArchiveIndex {
         fs::create_dir_all(dest)?;
         for (relative, info) in &plan {
             self.cancel.check()?;
-            let target = dest.join(relative);
-            if !target.starts_with(dest) {
-                return Err(EngineError::malformed(format!("{} resolves outside the staging folder", info.path)));
-            }
+            let target = staging_target(dest, relative)?;
             if info.is_dir {
                 fs::create_dir_all(&target)?;
             } else {
@@ -138,10 +194,7 @@ impl ArchiveIndex {
                 } else {
                     self.write_plain(&info.path, &target, progress)
                 };
-                if let Err(error) = written {
-                    let _ = fs::remove_file(&target);
-                    return Err(error);
-                }
+                written?;
             }
             progress.entries_done.fetch_add(1, Ordering::Relaxed);
         }
@@ -224,20 +277,54 @@ fn info_of(entry: &ZipEntry) -> ArchiveEntryInfo {
     }
 }
 
-fn copy_entry<R: Read>(reader: &mut R, target: &Path, progress: &ExtractProgress, cancel: &CancelToken) -> Result<()> {
-    let mut out = BufWriter::with_capacity(COPY_BUFFER, File::create(target)?);
-    let mut buffer = vec![0u8; COPY_BUFFER];
-    loop {
-        cancel.check()?;
-        let read = reader.read(&mut buffer).map_err(|e| from_io(&e))?;
-        if read == 0 {
-            break;
+pub(crate) fn staging_target(root: &Path, relative: &Path) -> Result<PathBuf> {
+    let mut current = root.to_owned();
+    let is_directory = |path: &Path| -> Result<()> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_dir() => Ok(()),
+            Ok(_) => Err(EngineError::malformed("Archive destination contains an unsafe path")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(path)?;
+                Ok(())
+            }
+            Err(error) => Err(error.into()),
         }
-        out.write_all(&buffer[..read])?;
-        progress.bytes_done.fetch_add(read as u64, Ordering::Relaxed);
+    };
+    is_directory(root)?;
+    if let Some(parent) = relative.parent() {
+        for component in parent.components() {
+            current.push(component);
+            is_directory(&current)?;
+        }
     }
-    out.flush()?;
-    Ok(())
+    let target = root.join(relative);
+    if fs::symlink_metadata(&target).is_ok_and(|metadata| metadata.is_symlink()) {
+        return Err(EngineError::malformed("Archive destination contains a symbolic link"));
+    }
+    Ok(target)
+}
+
+pub(crate) fn copy_entry<R: Read + ?Sized>(reader: &mut R, target: &Path, progress: &ExtractProgress, cancel: &CancelToken) -> Result<()> {
+    let file = File::options().write(true).create_new(true).open(target)?;
+    let result: Result<()> = (|| {
+        let mut out = BufWriter::with_capacity(COPY_BUFFER, file);
+        let mut buffer = vec![0u8; COPY_BUFFER];
+        loop {
+            cancel.check()?;
+            let read = reader.read(&mut buffer).map_err(|e| from_io(&e))?;
+            if read == 0 {
+                break;
+            }
+            out.write_all(&buffer[..read])?;
+            progress.advance(read as u64);
+        }
+        out.flush()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(target);
+    }
+    result
 }
 
 /// Turns an archive name into a relative path that cannot escape its folder.
@@ -245,7 +332,7 @@ fn copy_entry<R: Read>(reader: &mut R, target: &Path, progress: &ExtractProgress
 /// Rejects NUL, backslashes, drive or stream markers (`:`), and any `..`
 /// component. Empty and `.` components are dropped, so `a//./b` becomes `a/b`.
 pub fn safe_relative(name: &str) -> Option<PathBuf> {
-    if name.is_empty() || name.len() > 4096 || name.contains(['\0', '\\', ':']) {
+    if name.is_empty() || name.starts_with('/') || name.len() > 4096 || name.contains(['\0', '\\', ':']) {
         return None;
     }
     let mut out = PathBuf::new();

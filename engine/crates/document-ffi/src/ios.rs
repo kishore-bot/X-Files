@@ -533,6 +533,34 @@ fn dispatch(request: &Value, job: &IosJob) -> Result<Value, ReadError> {
             std::fs::write(target, bytes).map_err(|error| ReadError::Io { detail: error.to_string() })?;
             Ok(json!({"count":0}))
         }
+        "subtitleTimeline" => {
+            use std::io::Read;
+            let file = std::fs::File::open(path()?).map_err(|error| ReadError::Io { detail: error.to_string() })?;
+            let mut text = String::new();
+            file.take(document_parsers::subtitle_timeline::MAX_BYTES as u64 + 1)
+                .read_to_string(&mut text).map_err(|error| ReadError::Io { detail: error.to_string() })?;
+            let cues = crate::subtitle::parse_subtitle_timeline(text)?;
+            Ok(json!(cues.into_iter().map(|cue| json!({
+                "startMs": cue.start_ms, "endMs": cue.end_ms, "text": cue.text,
+            })).collect::<Vec<_>>()))
+        }
+        "createArchive" => {
+            use crate::archive::{NativeArchiveFormat, create_archive};
+            let format = match required(request, "resource")? {
+                "zip" => NativeArchiveFormat::Zip,
+                "tar" => NativeArchiveFormat::Tar,
+                "tar.gz" => NativeArchiveFormat::TarGzip,
+                "7z" => NativeArchiveFormat::SevenZip,
+                _ => return Err(invalid("Unsupported archive format")),
+            };
+            let sources = request["inputs"].as_array().ok_or_else(|| invalid("Pick files first"))?
+                .iter().map(|input| required(input, "path").map(str::to_owned)).collect::<Result<Vec<_>, _>>()?;
+            let cancel = CancelToken::default();
+            job.attach(cancel.clone());
+            let count = create_archive(sources, required(request, "output")?, format,
+                request["password"].as_str().map(str::to_owned), &cancel, &Default::default())?;
+            Ok(json!({"count":count}))
+        }
         "archive" => Ok(json!(
             archive(path()?, job)?
                 .entries()?
@@ -545,9 +573,9 @@ fn dispatch(request: &Value, job: &IosJob) -> Result<Value, ReadError> {
         "extract" => {
             let paths = request["entries"]
                 .as_array()
-                .ok_or_else(|| invalid("pick ZIP entries first"))?
+                .ok_or_else(|| invalid("pick archive entries first"))?
                 .iter()
-                .map(|p| p.as_str().map(str::to_owned).ok_or_else(|| invalid("invalid ZIP entry")))
+                .map(|p| p.as_str().map(str::to_owned).ok_or_else(|| invalid("invalid archive entry")))
                 .collect::<Result<Vec<_>, _>>()?;
             let snapshot = archive(path()?, job)?.extract(
                 paths,

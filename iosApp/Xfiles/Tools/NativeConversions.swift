@@ -3,7 +3,6 @@ import CoreText
 import Foundation
 import ImageIO
 import Vision
-import os
 
 enum NativeConversions {
     static func textPDF(_ text: String, to url: URL) async throws {
@@ -92,30 +91,6 @@ enum NativeConversions {
         return (request.results ?? []).compactMap { observation in
             guard let text = observation.topCandidates(1).first?.string else { return nil }
             return Recognition(text: text, bounds: observation.boundingBox)
-        }
-    }
-
-    static func zip(_ files: [URL], to url: URL) async throws {
-        try await offMain {
-            let folder = try OutputFiles.folder()
-            defer { OutputFiles.remove(folder) }
-            for source in files {
-                try Task.checkCancellation()
-                var copy = folder.appendingPathComponent(source.lastPathComponent)
-                if FileManager.default.fileExists(atPath: copy.path) {
-                    copy = folder.appendingPathComponent("\(UUID().uuidString)-\(source.lastPathComponent)")
-                }
-                try FileManager.default.copyItem(at: source, to: copy)
-            }
-            let result = OSAllocatedUnfairLock(initialState: Optional<Result<Void, any Error>>.none)
-            var coordinationError: NSError?
-            NSFileCoordinator().coordinate(readingItemAt: folder, options: .forUploading, error: &coordinationError) { archive in
-                let copied = Result { try FileManager.default.copyItem(at: archive, to: url) }
-                result.withLock { $0 = copied }
-            }
-            if let coordinationError { throw coordinationError }
-            guard let copy = result.withLock({ $0 }) else { throw EngineError(message: "Couldn’t create the ZIP file.") }
-            try copy.get()
         }
     }
 

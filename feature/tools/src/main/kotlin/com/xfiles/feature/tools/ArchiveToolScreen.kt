@@ -17,7 +17,7 @@ import com.xfiles.design.EzColors
 import com.xfiles.design.EzIcons
 import com.xfiles.design.EzTextButton
 
-private val ZIP_TYPES = arrayOf("application/zip", "application/x-zip-compressed")
+private val ARCHIVE_TYPES = arrayOf("*/*")
 
 /** Compress to ZIP or Extract, chosen by the route. The route owns the system pickers; the content is stateless. */
 @Composable
@@ -47,7 +47,7 @@ fun ArchiveToolScreen(
         onEvent = viewModel::onEvent,
         onPickFiles = { pickFiles.launch(arrayOf("*/*")) },
         onPickFolder = { pickFolder.launch(null) },
-        onPickArchive = { pickArchive.launch(ZIP_TYPES) },
+        onPickArchive = { pickArchive.launch(ARCHIVE_TYPES) },
         onPickDestination = { pickDestination.launch(null) },
     )
 }
@@ -67,7 +67,7 @@ fun ArchiveToolContent(
     onPickDestination: () -> Unit,
 ) {
     val compress = state.mode == ArchiveMode.Compress
-    val title = if (compress) "Compress to ZIP" else "Extract"
+    val title = if (compress) "Create archive" else "Extract"
     val hasInput = if (compress) state.sources.isNotEmpty() || state.sourceFolder != null else state.archive != null
     val step = when {
         state.resultMessage != null -> ToolStep.Save
@@ -85,7 +85,7 @@ fun ArchiveToolContent(
             item("result") {
                 ToolResult(
                     title = state.resultMessage,
-                    outputName = if (compress) state.outputName.zipName() else state.archiveName,
+                    outputName = if (compress) state.outputName else state.archiveName,
                     onDoAnother = { onEvent(ArchiveEvent.DismissResult) },
                 )
             }
@@ -96,9 +96,9 @@ fun ArchiveToolContent(
                     tint = EzColors.Primary,
                     title = title,
                     blurb = if (compress) {
-                        "Zip files or a whole folder into one archive, on this device."
+                        "Archive files or a whole folder on this device."
                     } else {
-                        "Open a ZIP and save all of it, or only the files you pick."
+                        "Open an archive and extract the entries you select."
                     },
                     step = step,
                 )
@@ -123,8 +123,8 @@ fun ArchiveToolContent(
                 if (state.archive == null) {
                     item("pick") {
                         FilePickCard(
-                            title = "Choose a ZIP",
-                            hint = "Open a ZIP and choose what to save from it",
+                            title = "Choose an archive",
+                            hint = "Choose a ZIP, TAR, TAR.GZ, or 7z file",
                             icon = EzIcons.Folder,
                             tint = EzColors.Primary,
                             onClick = onPickArchive,
@@ -133,8 +133,8 @@ fun ArchiveToolContent(
                 } else {
                     item("archive") {
                         PickedFileCard(
-                            name = state.archiveName.ifEmpty { "Archive.zip" },
-                            meta = countOf(state.entries.count { !it.isDir }, "file"),
+                            name = state.archiveName.ifEmpty { "Archive" },
+                            meta = if (state.listing) "Reading archive" else countOf(state.entries.size, "entry", "entries"),
                             thumbnail = null,
                             onRemove = null,
                         )
@@ -153,10 +153,10 @@ private fun ArchiveBottomBar(state: ArchiveUiState, onEvent: (ArchiveEvent) -> U
     val compress = state.mode == ArchiveMode.Compress
     val label = when {
         state.running -> "Working"
-        compress && state.sourceFolder != null -> "Create ZIP · folder"
-        compress && state.sources.isNotEmpty() -> "Create ZIP · ${countOf(state.sources.size, "file")}"
-        compress -> "Create ZIP"
-        state.selected.isNotEmpty() -> "Extract · ${countOf(state.selected.size, "file")}"
+        compress && state.sourceFolder != null -> "Create archive · folder"
+        compress && state.sources.isNotEmpty() -> "Create archive · ${countOf(state.sources.size, "file")}"
+        compress -> "Create archive"
+        state.selected.isNotEmpty() -> "Extract · ${countOf(state.selected.size, "entry", "entries")}"
         else -> "Extract"
     }
     Column(Modifier.fillMaxWidth()) {
@@ -172,9 +172,8 @@ private fun ArchiveBottomBar(state: ArchiveUiState, onEvent: (ArchiveEvent) -> U
     }
 }
 
-private fun countOf(n: Int, noun: String): String = if (n == 1) "1 $noun" else "$n ${noun}s"
+private fun countOf(n: Int, noun: String, plural: String = "${noun}s"): String = if (n == 1) "1 $noun" else "$n $plural"
 
-private fun String.zipName(): String = if (endsWith(".zip", ignoreCase = true)) this else "$this.zip"
 
 private fun progressFraction(p: ZipJobProgress?): Float? {
     if (p == null) return null

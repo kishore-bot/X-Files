@@ -7,7 +7,7 @@
 ### ✨ Premium feel. Faster app. ✨
 
 **Every file, beautifully handled, all on your phone.**
-On Android, read PDFs, Office documents, EPUBs, media and archives, and use **Fily**, the on-device assistant. The [iPhone and iPad app](#ios) includes offline readers, document tools, content search, and Fily.
+On Android, read PDFs, Office documents, EPUBs, media and archives, and use **Fily**, the on-device assistant. The [iPhone and iPad app](#ios) includes offline readers, document tools, content search, and Fily. See the [archive and subtitle design](docs/ARCHIVE_AND_SUBTITLE_DESIGN.md) for format support, implementation boundaries, and release checks.
 
 <p>
   <a href="https://github.com/kishore-bot/X-Files/releases/tag/v1.0.0-beta.09"><img alt="Release: 1.0.0-beta.09" src="https://img.shields.io/badge/release-1.0.0--beta.09-E11D48?style=for-the-badge&logo=android&logoColor=white" /></a>

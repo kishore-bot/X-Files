@@ -10,12 +10,22 @@ enum class DocumentKind {
     Unknown,
 }
 
+fun isArchiveName(name: String): Boolean {
+    val extension = name.substringAfterLast('.', "").lowercase()
+    return when (extension) {
+        "zip", "tar", "tgz", "7z" -> true
+        "gz" -> name.endsWith(".tar.gz", ignoreCase = true)
+        else -> false
+    }
+}
+
 fun documentKindFromName(name: String): DocumentKind = when (name.substringAfterLast('.', "").lowercase()) {
+    "gz" -> if (name.endsWith(".tar.gz", ignoreCase = true)) DocumentKind.Document else DocumentKind.Unknown
     "txt", "md", "markdown", "csv", "tsv", "log", "json", "xml", "kt", "kts", "rs", "py", "js", "ts", "yaml", "yml", "toml", "ini", "java", "c", "h", "cpp", "sh" -> DocumentKind.Text
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "heif", "heic", "avif", "ico" -> DocumentKind.Image
     "pdf" -> DocumentKind.Pdf
     "doc", "docx", "docm", "dotx", "dotm", "xls", "xlsx", "xlsm", "xltx", "ppt", "pptx", "pptm",
-    "ppsx", "potx", "epub", "zip", "rtf", "odt", "ott", "ods", "odp", "html", "htm" -> DocumentKind.Document
+    "ppsx", "potx", "epub", "zip", "tar", "tgz", "7z", "rtf", "odt", "ott", "ods", "odp", "html", "htm" -> DocumentKind.Document
     "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus" -> DocumentKind.Audio
     "mp4", "mkv", "webm", "mov", "avi", "m4v" -> DocumentKind.Video
     else -> DocumentKind.Unknown

@@ -74,7 +74,7 @@ internal fun SubtitleStyleLevel(
                 modifier = Modifier
                     .clickable(role = Role.Button) {
                         restyle(SubtitleStyle())
-                        if (state.subtitleDelayMs != 0L) onEvent(MediaPlayerEvent.SubtitleDelay(-state.subtitleDelayMs))
+                        if (state.canAdjustSubtitleTiming && state.subtitleDelayMs != 0L) onEvent(MediaPlayerEvent.SubtitleDelay(-state.subtitleDelayMs))
                     }
                     .padding(8.dp),
             )
@@ -105,7 +105,9 @@ internal fun SubtitleStyleLevel(
                 OptionPill(position.label, style.position == position) { restyle(style.copy(position = position)) }
             }
         }
-        DelayControl(state.subtitleDelayMs) { onEvent(MediaPlayerEvent.SubtitleDelay(it)) }
+        if (state.canAdjustSubtitleTiming) {
+            DelayControl(state.subtitleDelayMs) { onEvent(MediaPlayerEvent.SubtitleDelay(it)) }
+        }
     }
 }
 
@@ -174,7 +176,7 @@ private fun DelayControl(delayMs: Long, onShift: (Long) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            OptionPill("−0.25 s", selected = false) {
+            OptionPill("Earlier", selected = false) {
                 haptics.tick()
                 onShift(-DELAY_STEP_MS)
             }
@@ -184,16 +186,12 @@ private fun DelayControl(delayMs: Long, onShift: (Long) -> Unit) {
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            OptionPill("+0.25 s", selected = false) {
+            OptionPill("Later", selected = false) {
                 haptics.tick()
                 onShift(DELAY_STEP_MS)
             }
         }
-        Text(
-            "Later subtitles are held back by the delay. Earlier values show text as soon as the player delivers it.",
-            style = MaterialTheme.typography.bodySmall,
-            color = EzColors.TextSecondary,
-        )
+        OptionPill("Reset timing", selected = delayMs == 0L) { onShift(-delayMs) }
     }
 }
 

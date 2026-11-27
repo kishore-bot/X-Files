@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** A subtitle file the user can add to the playing video. */
@@ -20,6 +21,30 @@ class MediaSubtitleFilesUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val resolver = context.contentResolver
+
+    internal suspend fun timeline(file: MediaSubtitleFile): SubtitleTimeline? = withContext(Dispatchers.IO) {
+        if (file.name.substringAfterLast('.').lowercase() !in setOf("srt", "vtt")) return@withContext null
+        try {
+            val input = resolver.openInputStream(file.uri) ?: return@withContext null
+            val text = input.use {
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                while (true) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val count = it.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > 4 * 1024 * 1024) return@withContext null
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray().decodeToString(throwOnInvalidSequence = true)
+            }
+            SubtitleTimeline(com.xfiles.engine.ffi.parseSubtitleTimeline(text))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     suspend fun displayName(uri: Uri): String = withContext(Dispatchers.IO) {
         runCatching {

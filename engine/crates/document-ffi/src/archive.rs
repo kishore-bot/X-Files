@@ -1,4 +1,4 @@
-//! Archive browser surface: index a ZIP once, then extract selected entries to
+//! Archive browser surface: index an archive once, then extract selected entries to
 //! a staging folder that the app copies or opens.
 //!
 //! One [`ArchiveSession`] serves one operation. Opening takes a descriptor the
@@ -142,4 +142,51 @@ pub(crate) fn open_archive_file(file: File, cancel: CancelToken) -> Result<Arc<A
 
 fn poisoned() -> ReadError {
     ReadError::Internal { detail: "this archive hit an internal error earlier and cannot be used further".into() }
+}
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum NativeArchiveFormat {
+    Zip,
+    Tar,
+    TarGzip,
+    SevenZip,
+}
+
+#[derive(uniffi::Object)]
+pub struct ArchiveCreateJob {
+    cancel: CancelToken,
+    progress: ExtractProgress,
+}
+
+#[uniffi::export]
+impl ArchiveCreateJob {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self { cancel: CancelToken::default(), progress: ExtractProgress::default() })
+    }
+
+    pub fn progress(&self) -> NativeArchiveProgress {
+        self.progress.snapshot().into()
+    }
+
+    pub fn write(&self, sources: Vec<String>, output: String, format: NativeArchiveFormat, password: Option<String>) -> Result<u32, ReadError> {
+        create_archive(sources, &output, format, password, &self.cancel, &self.progress)
+    }
+
+    pub fn cancel(&self) {
+        self.cancel.cancel();
+    }
+}
+
+pub(crate) fn create_archive(sources: Vec<String>, output: &str, format: NativeArchiveFormat, password: Option<String>, cancel: &CancelToken, progress: &ExtractProgress) -> Result<u32, ReadError> {
+    use document_parsers::archive_write::{self, ArchiveFormat};
+    let format = match format {
+        NativeArchiveFormat::Zip => ArchiveFormat::Zip,
+        NativeArchiveFormat::Tar => ArchiveFormat::Tar,
+        NativeArchiveFormat::TarGzip => ArchiveFormat::TarGzip,
+        NativeArchiveFormat::SevenZip => ArchiveFormat::SevenZip,
+    };
+    let sources = sources.into_iter().map(std::path::PathBuf::from).collect::<Vec<_>>();
+    let password = password.map(Zeroizing::new);
+    Ok(archive_write::create(format, &sources, Path::new(output), password.as_ref().map(|secret| secret.as_str()), cancel, progress)? as u32)
 }

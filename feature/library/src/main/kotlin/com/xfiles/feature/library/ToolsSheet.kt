@@ -33,7 +33,7 @@ enum class LibraryTool(val title: String, val subtitle: String, val icon: ImageV
     TextToPdf("Text to PDF", "Type or paste text and style it", EzIcons.Lines),
     NewText("New text file", "Write notes or Markdown", EzIcons.NoteAdd),
     TidyUp("Tidy up", "Find copies and look-alikes, gather receipts and tickets", EzIcons.Sparkles),
-    CompressZip("Compress to ZIP", "Zip files and folders, with a name you choose", EzIcons.Archive),
+    CompressZip("Create archive", "ZIP, TAR, TAR.GZ and 7z", EzIcons.Archive),
     ExtractArchive("Extract", "Open a ZIP and save all or selected files", EzIcons.Folder),
 }
 

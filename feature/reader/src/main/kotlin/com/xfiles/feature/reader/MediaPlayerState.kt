@@ -53,6 +53,7 @@ internal data class MediaPlayerUiState(
     /** Set when a subtitle file couldn't be loaded; cleared by the next subtitle action. */
     val subtitleNotice: String? = null,
     val subtitleDelayMs: Long = 0L,
+    val canAdjustSubtitleTiming: Boolean = false,
     val cues: List<String> = emptyList(),
     val subtitleStyle: SubtitleStyle = SubtitleStyle(),
 ) {

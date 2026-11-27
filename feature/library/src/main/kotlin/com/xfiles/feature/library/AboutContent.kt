@@ -40,7 +40,7 @@ val SupportedFiles: List<SupportedGroup> = listOf(
         "Audio and video", EzIcons.Movie, "mp4, mkv, webm, mov, m4v, avi, mp3, m4a, aac, wav, flac, ogg, opus",
         "Played in Xfiles, using the codecs on your phone",
     ),
-    SupportedGroup("ZIP archives", EzIcons.Archive, "zip", "A list of what's inside"),
+    SupportedGroup("Archives", EzIcons.Archive, "zip, tar, tar.gz, 7z", "Browse and extract entries"),
 )
 
 data class Licence(val name: String, val licence: String)

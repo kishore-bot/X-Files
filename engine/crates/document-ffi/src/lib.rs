@@ -36,6 +36,7 @@ mod pdf_tools_ext;
 mod search;
 mod pdf_text_layer;
 mod archive;
+mod subtitle;
 mod office_edit;
 
 /// Caller-supplied limits; `0` selects the engine default for that field.

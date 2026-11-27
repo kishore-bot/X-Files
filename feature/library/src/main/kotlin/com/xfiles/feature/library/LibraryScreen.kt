@@ -123,6 +123,7 @@ import com.xfiles.design.glass
 import com.xfiles.design.glassCard
 import com.xfiles.design.pressScale
 import com.xfiles.design.rememberHaptics
+import com.xfiles.documents.isArchiveName
 import com.xfiles.documents.DocumentKind
 import com.xfiles.documents.library.LibraryCategory
 import com.xfiles.documents.library.libraryCategories
@@ -285,7 +286,7 @@ fun LibraryScreen(
             ArchiveHandoff.stageCompress(listOf(file.uri))
             onTools(LibraryTool.CompressZip)
         },
-        onExtract = if (file.name.endsWith(".zip", ignoreCase = true)) ({
+        onExtract = if (isArchiveName(file.name)) ({
             ArchiveHandoff.stageExtract(file.uri, file.name)
             onTools(LibraryTool.ExtractArchive)
         }) else null,

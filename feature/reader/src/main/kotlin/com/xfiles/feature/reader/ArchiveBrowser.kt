@@ -53,11 +53,8 @@ import com.xfiles.design.glassCard
 import java.text.DateFormat
 import java.util.Date
 
-/** Files the reader sends to the archive browser. Other ZIP-based formats (DOCX, EPUB, ...) keep their own views. */
-internal fun isZipName(name: String): Boolean = name.endsWith(".zip", ignoreCase = true)
-
 /**
- * Folder browser for a ZIP archive.
+ * Folder browser for archives.
  *
  * Folders come first, then names in natural order. Tapping a file extracts
  * just that entry to the app cache and hands the reader a `content://` URI;
