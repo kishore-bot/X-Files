@@ -85,10 +85,19 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      - name: Build FFmpeg audio decoders
+        run: bash scripts/build-ffmpeg.sh
+
       - name: Kotlin tests and app build
         env:
           ORG_GRADLE_PROJECT_lazyMatrixLocalRepo: ${{ github.workspace }}/.ci-maven
         run: ./gradlew --no-configuration-cache :sharedLogic:testAndroidHostTest :androidApp:assembleDevDebug
+
+      - name: Verify FFmpeg libraries in Dev Debug APK
+        run: |
+          for apk in androidApp/build/outputs/apk/dev/debug/*.apk; do
+            bash scripts/verify-ffmpeg-apk.sh "$apk"
+          done
 
       - name: Test reports on failure
         if: failure()

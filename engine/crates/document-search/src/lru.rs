@@ -23,10 +23,6 @@ impl<K: Hash + Eq + Clone, V> Lru<K, V> {
         self.entries.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     /// Returns the value and marks it as the most recently used.
     pub fn get(&mut self, key: &K) -> Option<&V> {
         let stamp = self.entries.get(key)?.0;
@@ -89,6 +85,6 @@ mod tests {
     fn missing_key_is_none_and_changes_nothing() {
         let mut lru: Lru<&str, i32> = Lru::default();
         assert_eq!(lru.get(&"x"), None);
-        assert!(lru.is_empty());
+        assert_eq!(lru.len(), 0);
     }
 }

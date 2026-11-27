@@ -180,7 +180,7 @@ flowchart TD
 **Requirements:** Linux or WSL, JDK 17, Android SDK (compile SDK 37), NDK `29.0.14206865`, Rust (see `rust-toolchain.toml`) and CMake.
 
 ```bash
-ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh   # optional: FFmpeg audio decoders (LGPL)
+ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh   # enables FFmpeg audio fallback (LGPL)
 ./gradlew :androidApp:assembleDevDebug                     # dev build (com.xfiles.dev)
 ./gradlew :androidApp:assembleProdRelease                  # release build, R8-minified
 ```
@@ -196,7 +196,9 @@ GitHub Actions checks out the pinned AAR, POM, and Gradle module metadata from
 the private `kishore-bot/xfiles-maven` artifact repository. The
 `LAZYMATRIX_MAVEN_SSH_KEY` Actions secret is a read-only deploy key for that
 repository. Fork pull requests run the Rust engine checks. Trusted pull requests
-also run Kotlin host tests and build the Android app. To build outside GitHub
+also run Kotlin host tests and build the Android app. GitHub checks that the
+Dev Debug and signed release APKs include FFmpeg audio fallback for both
+`arm64-v8a` and `x86_64`. To build outside GitHub
 Actions, provide a local Maven path or set
 `-PlazyMatrixMavenUrl=https://…` and the `LAZYMATRIX_MAVEN_USER` and
 `LAZYMATRIX_MAVEN_TOKEN` environment variables for a hosted repository.
