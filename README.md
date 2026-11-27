@@ -185,10 +185,12 @@ ANDROID_HOME=~/Android/Sdk bash scripts/build-ffmpeg.sh   # optional: FFmpeg aud
 ./gradlew :androidApp:assembleProdRelease                  # release build, R8-minified
 ```
 
-The reader depends on `dev.lazymatrix:lazymatrix:0.1.1`. Gradle finds the Maven
+The reader depends on `dev.lazymatrix:lazymatrix:0.1.2`. Gradle finds the Maven
 publication at `../../CustomCompose/LazyMatrix/lazymatrix/build/maven` relative to
 Xfiles. Use `-PlazyMatrixLocalRepo=/path/to/lazymatrix/build/maven` for a different
-local checkout.
+local checkout. The `xfiles-maven-0.1.2` branch in LazyMatrix packages upstream
+commit `03e9731` at this version. Its Maven publication includes the
+`arm64-v8a` and `x86_64` native libraries.
 
 GitHub Actions checks out the pinned AAR, POM, and Gradle module metadata from
 the private `kishore-bot/xfiles-maven` artifact repository. The

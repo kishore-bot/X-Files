@@ -25,7 +25,7 @@ android {
 }
 
 dependencies {
-    implementation("dev.lazymatrix:lazymatrix:0.1.1")
+    implementation("dev.lazymatrix:lazymatrix:0.1.2")
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.viewmodel.compose)

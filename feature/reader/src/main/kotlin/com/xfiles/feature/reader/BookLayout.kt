@@ -122,7 +122,12 @@ internal data class BookLayoutKey(val book: String, val layout: ReadingLayout, v
  * One book paginated at one [BookLayoutKey]. Pages are cut on demand by [cutPages]; each block's
  * height is measured once and kept, so turning pages or jumping never re-measures what is known.
  */
-internal class BookLayout(val blocks: List<ContentBlock>, private val pageHeightPx: Int, private val gapPx: Int) {
+internal class BookLayout(
+    val blocks: List<ContentBlock>,
+    private val pageHeightPx: Int,
+    private val gapPx: Int,
+    private val chapterStarts: List<Int>,
+) {
     val index = PageIndex(blocks.size)
     private val heights = IntArray(blocks.size) { UNKNOWN }
 
@@ -135,7 +140,7 @@ internal class BookLayout(val blocks: List<ContentBlock>, private val pageHeight
         var progressed = false
         repeat(pages) {
             val cut = index.extendOnePage { start ->
-                cutPage(start, blocks.size, pageHeightPx, gapPx) { block -> heightOf(block, measure) }
+                cutPage(start, blocks.size, pageHeightPx, gapPx, chapterStarts) { block -> heightOf(block, measure) }
             }
             progressed = progressed || cut
         }

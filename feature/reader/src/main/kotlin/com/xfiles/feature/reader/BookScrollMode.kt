@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,7 +25,6 @@ import com.xfiles.documents.book.MarkRange
 import com.xfiles.documents.book.ReadingSettings
 import com.xfiles.documents.book.TextMark
 import com.xfiles.documents.structure.ContentBlock
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * The scroll reader: the book as one long column. Lazy, so only the blocks on screen are composed,
@@ -40,6 +42,7 @@ internal fun BookScroll(
     jumpTo: Int?,
     onJumpHandled: () -> Unit,
     onBlock: (Int) -> Unit,
+    onProgress: (Float) -> Unit,
 ) {
     val progress = LocalViewerProgress.current
     val saved = remember(progress) { progress?.read("epub-scroll")?.split(':').orEmpty() }
@@ -54,8 +57,14 @@ internal fun BookScroll(
         listState.scrollToItem(target.coerceIn(0, blocks.lastIndex))
         onJumpHandled()
     }
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }.distinctUntilChanged().collect { onBlock(it) }
+    val reportProgress by rememberUpdatedState(onProgress)
+    LaunchedEffect(listState, blocks.size) {
+        snapshotFlow { listState.firstVisibleItemIndex }.collect { onBlock(it) }
+    }
+    LaunchedEffect(listState, blocks.size) {
+        snapshotFlow { listState.visibleBookFraction(blocks.size) }.collect { fraction ->
+            if (fraction != null) reportProgress(fraction)
+        }
     }
     // A selection survives scrolling: it is anchored to blocks and offsets, and its handles and bar are
     // placed again from the text whenever the list is laid out.
@@ -104,4 +113,16 @@ internal fun BookScroll(
             }
         }
     }
+}
+
+
+private fun LazyListState.visibleBookFraction(blockCount: Int): Float? {
+    val layout = layoutInfo
+    if (blockCount <= 0 || layout.visibleItemsInfo.isEmpty()) return null
+    if (!canScrollForward) return 1f
+    // Ignore content passing behind the footer when measuring how far the reader can see.
+    val readingEnd = layout.viewportEndOffset - layout.afterContentPadding
+    val last = layout.visibleItemsInfo.lastOrNull { it.offset < readingEnd } ?: return null
+    val portion = (readingEnd - last.offset).toFloat() / last.size.coerceAtLeast(1)
+    return (last.index + portion.coerceIn(0f, 1f)) / blockCount
 }

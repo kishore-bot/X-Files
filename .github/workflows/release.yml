@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kishore-bot/xfiles-maven
-          ref: 4a70cdb6f8ef71471856e9b9beec6ff6e6f5ca4d
+          ref: d8a5eae29b47000dca495ed9605c2f4405307d05
           path: .ci-maven
           ssh-key: ${{ secrets.LAZYMATRIX_MAVEN_SSH_KEY }}
           persist-credentials: false

@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.boundsInWindow
@@ -25,7 +27,6 @@ import com.xfiles.documents.book.MarkRange
 import com.xfiles.documents.book.TextMark
 import com.xfiles.documents.structure.ContentBlock
 import com.xfiles.feature.reader.domain.BookProgressUseCase
-import kotlin.math.roundToInt
 
 /** What the bars' buttons do. Each one opens a sheet or goes back; the screen decides how. */
 internal class BookChromeActions(
@@ -81,7 +82,9 @@ internal fun BookReaderBody(
         }
     }
     val settings = state.settings
-    val ticks = remember(manifest, blocks.size) { progress.chapterTicks(manifest, blocks.size) }
+    val chapterStarts = remember(manifest, blocks.size) { progress.chapterStarts(manifest, blocks.size) }
+    val ticks = remember(chapterStarts, blocks.size) { chapterStarts.map { progress.fraction(it, blocks.size) } }
+    var scrollFraction by remember(bookKey, paged) { mutableStateOf<Float?>(null) }
     val textMeasurer = rememberTextMeasurer()
 
     BoxWithConstraints(
@@ -100,7 +103,7 @@ internal fun BookReaderBody(
         val layoutKey = BookLayoutKey(bookKey, settings.layout, pageWidthPx, pageHeightPx)
         // Paginated lazily; the cache keeps recent layouts, so returning to one is instant.
         val layout = remember(layoutKey) {
-            vm.layouts.get(layoutKey) ?: BookLayout(blocks, pageHeightPx, gapPx).also { vm.layouts.put(layoutKey, it) }
+            vm.layouts.get(layoutKey) ?: BookLayout(blocks, pageHeightPx, gapPx, chapterStarts).also { vm.layouts.put(layoutKey, it) }
         }
         val measurer = remember(layout, typography, palette, pageWidthPx) {
             BookMeasurer(textMeasurer, density, typography, pageWidthPx, palette.onDark)
@@ -136,13 +139,14 @@ internal fun BookReaderBody(
                 jumpTo = jumpTo,
                 onJumpHandled = onJumpHandled,
                 onBlock = onBlock,
+                onProgress = { scrollFraction = it },
             )
         }
 
         // The page position is read here, so the footer follows pagination as it grows.
         val revision = layout.revision
         val chapter = remember(manifest, current, blocks.size) { progress.chapterBlocks(manifest, current, blocks.size) }
-        val pageInChapter = if (paged && revision >= 0) progress.pageInChapter(layout.index, chapter, current) else null
+        val pageInChapter = if (paged && revision > 0) progress.pageInChapter(layout.index, chapter, current) else null
         val pageText = pageInChapter?.let { info ->
             info.total?.let { "Page ${info.page} of $it in chapter" } ?: "Page ${info.page} in chapter"
         }
@@ -156,7 +160,9 @@ internal fun BookReaderBody(
                 else -> "${total - info.page} pages left in chapter"
             }
         }.orEmpty()
-        val percent = (progress.fraction(current, blocks.size) * 100f).roundToInt()
+        val fraction = if (paged && revision > 0) progress.pageFraction(layout.index, current)
+            else scrollFraction ?: progress.fraction(current, blocks.size)
+        val percent = (fraction * 100f).toInt()
         val chapterTitle = manifest?.let { it.chapterTitle(it.chapterIndexAt(current)) }?.takeIf { it.isNotBlank() } ?: title
         val faint = palette.text.copy(alpha = 0.55f)
 
@@ -187,7 +193,7 @@ internal fun BookReaderBody(
         ) {
             BookBottomBar(
                 chapterTitle = chapterTitle,
-                fraction = progress.fraction(current, blocks.size),
+                fraction = fraction,
                 ticks = ticks,
                 footer = bookFooter(pageText, percent),
                 onScrub = { fraction ->

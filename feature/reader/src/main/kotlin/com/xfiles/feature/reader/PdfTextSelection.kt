@@ -288,7 +288,7 @@ private fun PdfHandle(startHandle: Boolean, selection: PdfTextSelection, transfo
     ) {
         // Draw phase: the range is read here, so a handle moving costs no recomposition.
         val boxes = selection.range.value?.boxes ?: return@Canvas
-        val box = if (startHandle) boxes.first() else boxes.last()
+        val box = (if (startHandle) boxes.firstOrNull() else boxes.lastOrNull()) ?: return@Canvas
         if (box.right <= box.left) return@Canvas
         val centre = Offset(size.width / 2f, size.height / 2f)
         val caretBottom = touchPx / 2f - radiusPx
@@ -300,7 +300,7 @@ private fun PdfHandle(startHandle: Boolean, selection: PdfTextSelection, transfo
 /** The window point where a handle hangs: the bottom of the first character (start) or the last (end). */
 private fun anchorPoint(selection: PdfTextSelection, startHandle: Boolean, transform: () -> PdfPageTransform): Offset? {
     val boxes = selection.range.value?.boxes ?: return null
-    val box = if (startHandle) boxes.first() else boxes.last()
+    val box = (if (startHandle) boxes.firstOrNull() else boxes.lastOrNull()) ?: return null
     val x = if (startHandle) box.left else box.right
     return transform().pageToWindow(x, box.bottom)
 }

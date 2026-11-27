@@ -16,6 +16,17 @@ class BookPaginationTest {
     }
 
     @Test
+    fun pagesStopAtChapterBoundariesEvenWhenMoreBlocksWouldFit() {
+        val index = PageIndex(blockCount = 5)
+        val chapters = listOf(0, 2, 4)
+        while (index.extendOnePage { start -> cutPage(start, 5, 100, 5, chapters) { 10 } }) Unit
+
+        assertEquals(listOf(0, 2, 4), (0 until index.pageCount).map(index::pageStart))
+        assertEquals(listOf(2, 4, 5), (0 until index.pageCount).map(index::pageEnd))
+        assertTrue(index.isComplete)
+    }
+
+    @Test
     fun theFirstBlockAlwaysGoesOnAPageEvenIfItIsTaller() {
         val cut = cutPage(3, heights.size, pageHeight = 50, gap = 5) { heights[it] }
         assertEquals(PageCut(next = 4, oversized = true), cut)

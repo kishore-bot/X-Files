@@ -23,7 +23,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.Icon
+import com.xfiles.design.EzIcons
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xfiles.design.EzColors
@@ -79,7 +81,7 @@ internal fun BookSettingsSheet(
 
             BookSectionLabel("Text size")
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SizeButton("A", 15.sp, "Smaller text", settings.textSizeSp > ReadingSettings.MIN_TEXT_SIZE) {
+                SizeButton(EzIcons.TextDecrease, "Smaller text", settings.textSizeSp > ReadingSettings.MIN_TEXT_SIZE) {
                     onChange(settings.withTextSize(settings.textSizeSp - 1))
                 }
                 Text(
@@ -89,7 +91,7 @@ internal fun BookSettingsSheet(
                     color = EzColors.Text,
                     textAlign = TextAlign.Center,
                 )
-                SizeButton("A", 24.sp, "Larger text", settings.textSizeSp < ReadingSettings.MAX_TEXT_SIZE) {
+                SizeButton(EzIcons.TextIncrease, "Larger text", settings.textSizeSp < ReadingSettings.MAX_TEXT_SIZE) {
                     onChange(settings.withTextSize(settings.textSizeSp + 1))
                 }
             }
@@ -157,9 +159,9 @@ private fun ThemeCircle(theme: ReadingTheme, selected: Boolean, onClick: () -> U
     }
 }
 
-/** A round "A" that makes the text smaller or larger; faded when it cannot go further. */
+/** A text-size action with a disabled state at the supported limit. */
 @Composable
-private fun SizeButton(label: String, size: TextUnit, description: String, enabled: Boolean, onClick: () -> Unit) {
+private fun SizeButton(icon: ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) {
     val haptics = rememberHaptics()
     Box(
         Modifier
@@ -172,11 +174,10 @@ private fun SizeButton(label: String, size: TextUnit, description: String, enabl
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label,
-            fontSize = size,
-            fontFamily = FontFamily.Serif,
-            color = if (enabled) EzColors.Text else EzColors.TextSecondary.copy(alpha = 0.4f),
+        Icon(
+            icon,
+            contentDescription = description,
+            tint = if (enabled) EzColors.Text else EzColors.TextSecondary.copy(alpha = 0.4f),
         )
     }
 }

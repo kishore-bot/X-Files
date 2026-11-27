@@ -6,13 +6,24 @@ data class PageCut(val next: Int, val oversized: Boolean)
 /**
  * Fills one page from block [start]: blocks of height [heightOf] px, separated by [gap] px, go on
  * while the next one still fits in [pageHeight] px. The first block always goes on the page, so the
- * cut always advances. [heightOf] is called only for blocks the page takes or tests.
+ * cut always advances. Sorted [chapterStarts] stop the page before the next chapter.
+ * [heightOf] is called only for blocks the page takes or tests.
  */
-fun cutPage(start: Int, blockCount: Int, pageHeight: Int, gap: Int, heightOf: (Int) -> Int): PageCut {
+fun cutPage(
+    start: Int,
+    blockCount: Int,
+    pageHeight: Int,
+    gap: Int,
+    chapterStarts: List<Int> = emptyList(),
+    heightOf: (Int) -> Int,
+): PageCut {
     if (start >= blockCount) return PageCut(blockCount, false)
+    val match = chapterStarts.binarySearch(start)
+    val nextChapter = if (match >= 0) match + 1 else -match - 1
+    val end = chapterStarts.getOrNull(nextChapter)?.coerceAtMost(blockCount) ?: blockCount
     var used = 0
     var index = start
-    while (index < blockCount) {
+    while (index < end) {
         val height = heightOf(index).coerceAtLeast(0)
         val needed = if (index == start) height else gap + height
         if (index > start && used + needed > pageHeight) break

@@ -183,6 +183,16 @@ fun ReaderScreen(
     val saveAnnotated = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         if (uri != null) onSaveMarkup(uri)
     }
+    var awaitingAnnotatedCopy by rememberSaveable(documentKey) { mutableStateOf(false) }
+    LaunchedEffect(awaitingAnnotatedCopy, ui.editingMarkup, markup.output, markup.error) {
+        if (!awaitingAnnotatedCopy) return@LaunchedEffect
+        if (!ui.editingMarkup || markup.error != null) {
+            awaitingAnnotatedCopy = false
+        } else if (markup.output != null) {
+            awaitingAnnotatedCopy = false
+            saveAnnotated.launch("${fileName.substringBeforeLast('.')}-annotated.pdf")
+        }
+    }
     val closeReader: () -> Unit = {
         if (!markup.saving) {
             if (markup.marks.isNotEmpty()) onEvent(ReaderUiEvent.SetConfirmDiscard(true)) else if (!onNestedBack()) onBack()
@@ -276,12 +286,12 @@ fun ReaderScreen(
             }
             if (preview is FilePreview.Text && (!isSvgName(fileName) || ui.showSource || ui.showSearch)) {
                 val percent = (textScale * 100).toInt()
-                if (textScale < TEXT_SCALE_MAX) add(ReaderAction("Larger text ($percent%)", EzIcons.TextT) {
+                if (textScale < TEXT_SCALE_MAX) add(ReaderAction("Larger text ($percent%)", EzIcons.TextIncrease) {
                     val next = (textScale + TEXT_SCALE_STEP).coerceAtMost(TEXT_SCALE_MAX)
                     textScale = next
                     progress?.save("text-scale", next.toString())
                 })
-                if (textScale > TEXT_SCALE_MIN) add(ReaderAction("Smaller text ($percent%)", EzIcons.TextT) {
+                if (textScale > TEXT_SCALE_MIN) add(ReaderAction("Smaller text ($percent%)", EzIcons.TextDecrease) {
                     val next = (textScale - TEXT_SCALE_STEP).coerceAtLeast(TEXT_SCALE_MIN)
                     textScale = next
                     progress?.save("text-scale", next.toString())
@@ -329,16 +339,6 @@ fun ReaderScreen(
                         onClose = { onEvent(ReaderUiEvent.SetOffice(false)) },
                     )
                 }
-                if (!inPip && ui.editingMarkup && ready?.preview is FilePreview.Pdf) {
-                    PdfMarkupControls(
-                        mode = ui.markupMode,
-                        state = markup,
-                        onMode = { onEvent(ReaderUiEvent.SetMarkupMode(it)) },
-                        onUndo = onUndoMarkup,
-                        onPrepare = onPrepareMarkup,
-                        onSave = { saveAnnotated.launch("${ready.file.name.substringBeforeLast('.')}-annotated.pdf") },
-                    )
-                }
                 if (!inPip && ui.showPdfFind && ready?.preview is FilePreview.Pdf) {
                     PdfFindBar(pdfFind, onPdfQuery, onPdfMatch, onClose = {
                         onEvent(ReaderUiEvent.SetPdfFind(false))
@@ -381,7 +381,19 @@ fun ReaderScreen(
                 val pdf = ready?.preview as? FilePreview.Pdf
                 if (ready != null && pdf != null) {
                     if (ready.pageError) Text("This page could not be opened.", color = MaterialTheme.colorScheme.error)
-                    if (!ui.editingMarkup) PdfToolbar(
+                    if (ui.editingMarkup) {
+                        PdfMarkupControls(
+                            mode = ui.markupMode,
+                            state = markup,
+                            onMode = { onEvent(ReaderUiEvent.SetMarkupMode(it)) },
+                            onUndo = onUndoMarkup,
+                            onSave = {
+                                if (markup.output == null) onPrepareMarkup()
+                                awaitingAnnotatedCopy = true
+                            },
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    } else PdfToolbar(
                         page = (ui.visiblePdfPage ?: pdf.page).coerceIn(0, (pdf.pageCount - 1).coerceAtLeast(0)),
                         pageCount = pdf.pageCount,
                         zoom = ui.pdfZoom,

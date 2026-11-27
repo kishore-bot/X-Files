@@ -17,7 +17,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -26,10 +25,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.lazymatrix.LazyMatrixX
-import dev.lazymatrix.LazyMatrixXY
-import dev.lazymatrix.LazyMatrixY
-import dev.lazymatrix.rememberGridScrollState
+import bot.lazymatrix.GridScrollState
+import bot.lazymatrix.LazyMatrixX
+import bot.lazymatrix.LazyMatrixXY
+import bot.lazymatrix.LazyMatrixY
+import bot.lazymatrix.rememberGridScrollState
 import kotlinx.coroutines.flow.first
 import kotlin.math.roundToLong
 
@@ -41,13 +41,13 @@ internal object LazyMatrixSheetGrid : SheetGridRenderer {
             val topLimit = (maxHeight - 48.dp).coerceAtLeast(spec.labelHeight)
             var left = spec.labelWidth
             var pinnedColumns = 0
-            while (pinnedColumns < spec.frozenColumns && left + spec.columnWidth <= leftLimit) {
+            while (pinnedColumns < minOf(spec.frozenColumns, spec.columnCount) && left + spec.columnWidth <= leftLimit) {
                 left += spec.columnWidth
                 pinnedColumns++
             }
             var top = spec.labelHeight
             var pinnedRows = 0
-            while (pinnedRows < spec.frozenRows && top + spec.height(pinnedRows) <= topLimit) {
+            while (pinnedRows < minOf(spec.frozenRows, spec.rowCount) && top + spec.height(pinnedRows) <= topLimit) {
                 top += spec.height(pinnedRows)
                 pinnedRows++
             }
@@ -78,37 +78,55 @@ internal object LazyMatrixSheetGrid : SheetGridRenderer {
             rowHeightOverrides = heights,
         )
         val progress = LocalViewerProgress.current
-        val field = "${spec.progressField}:matrix"
+        val field = "${spec.progressField}:matrix-dp"
         val density = LocalDensity.current
-        var restored by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(state, progress, field) {
-            if (restored || (rows == 0 && columns == 0)) return@LaunchedEffect
+        val originX = with(density) { spec.frozenColumns.toLong() * spec.columnWidth.roundToPx() }
+        val originY = with(density) {
+            val base = spec.rowHeight.roundToPx()
+            spec.frozenRows.toLong() * base + spec.rowHeights.entries.sumOf { (row, height) ->
+                if (row < spec.frozenRows) (height.roundToPx() - base).toLong() else 0L
+            }
+        }
+        val viewport = remember(state, originX, originY, density.density) {
+            SheetViewport(state, originX, originY, density.density)
+        }
+        var restored by remember(progress, field) { mutableStateOf<SheetViewport?>(null) }
+        LaunchedEffect(viewport, progress, field) {
+            if (rows == 0 && columns == 0) return@LaunchedEffect
             snapshotFlow { state.isReady }.first { it }
             val saved = progress?.read(field)?.split(':').orEmpty()
-            val oldColumn = progress?.number("${spec.progressField}:column")?.coerceAtLeast(0) ?: 0
+            val previous = restored
+            val savedX = previous?.x ?: saved.getOrNull(0)?.toDoubleOrNull()?.takeIf { it.isFinite() }
+            val savedY = previous?.y ?: saved.getOrNull(1)?.toDoubleOrNull()?.takeIf { it.isFinite() }
+
+            // Migrate offsets saved relative to the body in earlier versions.
+            val old = progress?.read("${spec.progressField}:matrix")?.split(':').orEmpty()
+            val oldColumn = progress?.number("${spec.progressField}:column")?.coerceIn(0, columns) ?: 0
             val oldRow = progress?.read("${spec.progressField}:rows")?.split(':').orEmpty()
             val oldRowIndex = (oldRow.getOrNull(0)?.toIntOrNull() ?: 0).coerceIn(0, rows)
-            val x = saved.getOrNull(0)?.toLongOrNull() ?: with(density) {
+            val x = savedX?.let { viewport.relativeX(it) } ?: old.getOrNull(0)?.toLongOrNull() ?: with(density) {
                 oldColumn.toLong() * spec.columnWidth.roundToPx() +
                     (progress?.number("${spec.progressField}:x:${originalFrozenColumns + oldColumn}") ?: 0)
             }
-            val y = saved.getOrNull(1)?.toLongOrNull() ?: with(density) {
-                val defaultHeight = spec.rowHeight.roundToPx()
+            val y = savedY?.let { viewport.relativeY(it) } ?: old.getOrNull(1)?.toLongOrNull() ?: with(density) {
+                val base = spec.rowHeight.roundToPx()
                 val extra = heights.entries.sumOf { (row, height) ->
-                    if (row < oldRowIndex) (height.roundToPx() - defaultHeight).toLong() else 0L
+                    if (row < oldRowIndex) (height.roundToPx() - base).toLong() else 0L
                 }
-                oldRowIndex.toLong() * defaultHeight + extra + (oldRow.getOrNull(1)?.toIntOrNull() ?: 0)
+                oldRowIndex.toLong() * base + extra + (oldRow.getOrNull(1)?.toIntOrNull() ?: 0)
             }
             state.scrollTo(if (columns > 0) x else 0L, if (rows > 0) y else 0L)
-            restored = true
+            restored = viewport
         }
         SaveViewerProgress(field) {
-            if (restored && state.isReady) "${state.scrollX}:${state.scrollY}" else null
+            val current = restored
+            if (current != null) "${current.x}:${current.y}" else null
         }
+        var bodyHeight by remember(state) { mutableStateOf(0) }
         val onScroller by rememberUpdatedState(spec.onScroller)
         DisposableEffect(state, rows) {
             if (rows > 0) onScroller(object : SheetGridScroller {
-                override val viewportHeight: Int get() = state.layoutInfo?.viewportSize?.height ?: 0
+                override val viewportHeight: Int get() = bodyHeight
                 override suspend fun scrollBy(dy: Float) {
                     state.animateScrollTo(state.scrollX, state.scrollY + dy.roundToLong())
                 }
@@ -133,7 +151,11 @@ internal object LazyMatrixSheetGrid : SheetGridRenderer {
                     }
                 }
                 if (columns > 0) {
-                    LazyMatrixX(state, Modifier.weight(1f).fillMaxHeight()) { row, column ->
+                    LazyMatrixX(
+                        state,
+                        Modifier.weight(1f).fillMaxHeight(),
+                        prefetchPadding = 64.dp,
+                    ) { row, column ->
                         if (row == 0L) {
                             val index = spec.frozenColumns + column.toInt()
                             Column(Modifier.matrixPaneContent(height = with(density) { topHeight.roundToPx() })) {
@@ -146,7 +168,12 @@ internal object LazyMatrixSheetGrid : SheetGridRenderer {
             }
             if (rows > 0) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
-                    LazyMatrixY(state, Modifier.width(leftWidth).fillMaxHeight()) { row, column ->
+                    LazyMatrixY(
+                        state,
+                        Modifier.width(leftWidth).fillMaxHeight(),
+                        prefetchPadding = 64.dp,
+                        onLayoutInfo = { bodyHeight = it.viewportSize.height },
+                    ) { row, column ->
                         if (column == 0L) {
                             val index = spec.frozenRows + row.toInt()
                             Row(Modifier.matrixPaneContent(width = with(density) { leftWidth.roundToPx() })) {
@@ -166,6 +193,29 @@ internal object LazyMatrixSheetGrid : SheetGridRenderer {
     }
 
     private fun SheetGridSpec.height(row: Int) = rowHeights[row] ?: rowHeight
+}
+
+/** Retains a sheet-relative anchor when a freeze toggle moves the origin of the scrolling panes. */
+private class SheetViewport(
+    private val state: GridScrollState,
+    private val originX: Long,
+    private val originY: Long,
+    density: Float,
+) {
+    private val pixelsPerDp = density.toDouble()
+
+    val x: Double get() = absolute(state.scrollX, originX)
+    val y: Double get() = absolute(state.scrollY, originY)
+
+    fun relativeX(value: Double) = relative(value, originX)
+    fun relativeY(value: Double) = relative(value, originY)
+
+    // Keep the start pinned to the start, even when there are more or fewer frozen cells.
+    private fun absolute(offset: Long, origin: Long): Double =
+        if (offset == 0L) 0.0 else (origin + offset) / pixelsPerDp
+
+    private fun relative(value: Double, origin: Long): Long =
+        ((value * pixelsPerDp).roundToLong() - origin).coerceAtLeast(0L)
 }
 
 // The cell owns a regular lazy slot while its pinned content fills the pane's other axis.

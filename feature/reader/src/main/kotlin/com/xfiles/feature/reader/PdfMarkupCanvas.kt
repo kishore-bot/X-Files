@@ -7,18 +7,25 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.maxLengthReject
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -48,7 +55,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.xfiles.design.EzColors
-import com.xfiles.design.glassBar
+import com.xfiles.design.EzControlBar
+import com.xfiles.design.EzIcons
 import com.xfiles.documents.PdfBox
 import com.xfiles.documents.PdfMarkup
 import com.xfiles.documents.PdfMarkupKind
@@ -61,27 +69,65 @@ internal fun PdfMarkupControls(
     state: PdfMarkupState,
     onMode: (PdfMarkupKind) -> Unit,
     onUndo: () -> Unit,
-    onPrepare: () -> Unit,
     onSave: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        Modifier.fillMaxWidth().glassBar().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        PdfMarkupKind.entries.forEach { item ->
-            FilterChip(selected = item == mode, onClick = { onMode(item) }, enabled = !state.working, label = { Text(item.name) })
-        }
-        TextButton(onClick = onUndo, enabled = !state.working && state.marks.isNotEmpty()) { Text("Undo") }
-        if (state.output == null) {
-            TextButton(onClick = onPrepare, enabled = !state.working && state.marks.isNotEmpty()) { Text("Prepare copy") }
-        } else {
-            TextButton(onClick = onSave, enabled = !state.working) { Text("Save PDF") }
+    val canEdit = !state.working
+    val canUndo = canEdit && state.marks.isNotEmpty()
+    val colors = MaterialTheme.colorScheme
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (state.working) LinearProgressIndicator(Modifier.fillMaxWidth())
+        state.error?.let { Text(it, color = colors.error, modifier = Modifier.padding(horizontal = 12.dp)) }
+        if (state.saved) Text("Annotated PDF saved.", color = EzColors.TextSecondary, modifier = Modifier.padding(horizontal = 12.dp))
+        EzControlBar {
+            PdfMarkupKind.entries.forEach { item ->
+                val icon = when (item) {
+                    PdfMarkupKind.Pen -> EzIcons.Edit
+                    PdfMarkupKind.Highlight -> EzIcons.Highlight
+                    PdfMarkupKind.Note -> EzIcons.NoteAdd
+                    PdfMarkupKind.Signature -> EzIcons.Signature
+                }
+                PdfMarkupTooltip(item.name, Modifier.weight(1f)) {
+                    IconToggleButton(
+                        checked = item == mode,
+                        onCheckedChange = { if (it) onMode(item) },
+                        enabled = canEdit,
+                        colors = IconButtonDefaults.iconToggleButtonColors(
+                            checkedContainerColor = colors.primaryContainer,
+                            checkedContentColor = colors.onPrimaryContainer,
+                        ),
+                    ) { Icon(icon, item.name) }
+                }
+            }
+            PdfMarkupTooltip("Undo", Modifier.weight(1f)) {
+                IconButton(onClick = onUndo, enabled = canUndo) { Icon(EzIcons.Undo, "Undo") }
+            }
+            val saveLabel = "Save annotated PDF"
+            PdfMarkupTooltip(saveLabel, Modifier.weight(1f)) {
+                IconButton(
+                    onClick = onSave,
+                    enabled = canEdit && (state.output != null || state.marks.isNotEmpty()),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = colors.primaryContainer,
+                        contentColor = colors.onPrimaryContainer,
+                    ),
+                ) { Icon(EzIcons.SaveCopy, saveLabel) }
+            }
         }
     }
-    if (state.working) LinearProgressIndicator(Modifier.fillMaxWidth())
-    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    if (state.saved) Text("Annotated PDF saved.", color = EzColors.TextSecondary)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PdfMarkupTooltip(label: String, modifier: Modifier, content: @Composable () -> Unit) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+            tooltip = { PlainTooltip { Text(label) } },
+            state = rememberTooltipState(),
+            content = content,
+        )
+    }
 }
 
 @Composable
@@ -122,7 +168,7 @@ internal fun PdfMarkupCanvas(
             ) { change, _ ->
                 if (pending.isNotEmpty()) {
                     val point = bounds.point(change.position, clamp = true)
-                    if (point != null && point != pending.last()) {
+                    if (point != null && point != pending.lastOrNull()) {
                         if (mode == PdfMarkupKind.Highlight && pending.size == 2) {
                             pending[1] = point
                         } else if (pending.size < MAX_STROKE_POINTS) {
@@ -135,7 +181,7 @@ internal fun PdfMarkupCanvas(
         }
     }
     Box(Modifier.fillMaxSize().clipToBounds().then(gesturing)) {
-        Image(image, "Annotating page ${page + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit, colorFilter = colorFilter)
+        Image(image, "Annotating page ${page + 1}", Modifier.fillMaxSize(), alignment = Alignment.TopCenter, contentScale = ContentScale.Fit, colorFilter = colorFilter)
         Canvas(Modifier.fillMaxSize()) {
             val bounds = fitPdfPage(size.width, size.height, bitmap)
             marks.forEach { mark -> drawMarkup(bounds, mark) }
@@ -201,7 +247,7 @@ private fun fitPdfPage(width: Float, height: Float, bitmap: Bitmap): PdfPageBoun
     val scale = minOf(width / bitmap.width, height / bitmap.height)
     val pageWidth = bitmap.width * scale
     val pageHeight = bitmap.height * scale
-    return PdfPageBounds((width - pageWidth) / 2, (height - pageHeight) / 2, pageWidth, pageHeight)
+    return PdfPageBounds((width - pageWidth) / 2, 0f, pageWidth, pageHeight)
 }
 
 private fun DrawScope.drawMarkup(page: PdfPageBounds, mark: PdfMarkup) {
@@ -215,7 +261,8 @@ private fun DrawScope.drawMarkup(page: PdfPageBounds, mark: PdfMarkup) {
         }
         is PdfMarkup.Note -> drawCircle(Color(0xFFFFC928), radius = 8.dp.toPx(), center = page.offset(mark.anchor))
         is PdfMarkup.Ink -> {
-            val start = page.offset(mark.points.first())
+            val firstPoint = mark.points.firstOrNull() ?: return
+            val start = page.offset(firstPoint)
             val path = Path().apply {
                 moveTo(start.x, start.y)
                 for (index in 1 until mark.points.size) {
