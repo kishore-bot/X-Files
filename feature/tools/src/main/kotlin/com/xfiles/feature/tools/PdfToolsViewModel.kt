@@ -27,6 +27,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Longest page list Fily may fill into a page field. */
+private const val MAX_SUGGESTED_PAGES = 200
+
 @HiltViewModel
 class PdfToolsViewModel @Inject constructor(
     private val documents: DocumentRepository,
@@ -404,7 +407,6 @@ abstract class PdfSingleFileToolViewModel<T>(
 
     companion object {
         const val PREVIEW_EDGE = 1024
-        private const val MAX_SUGGESTED_PAGES = 200
         const val SOURCE_PREVIEW_EDGE = 360
     }
 }

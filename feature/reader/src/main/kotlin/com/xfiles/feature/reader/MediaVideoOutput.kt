@@ -53,7 +53,7 @@ internal fun rememberHdrDisplay(): String? {
     return result
 }
 
-private fun Display?.hdrLabel(): String? = this?.hdrCapabilities?.supportedHdrTypes?.mapNotNull {
+private fun Display?.hdrLabel(): String? = this?.hdrCapabilities?.supportedHdrTypes?.asList()?.mapNotNull {
     when (it) {
         Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION -> "Dolby Vision"
         Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS -> "HDR10+"

@@ -277,7 +277,7 @@ internal class MediaOutputMonitor(
         return UsbLossless(name, status, confirmed)
     }
 
-    private data class UsbLossless(val device: String, val status: String, val enabled: Boolean)
+    private data class UsbLossless(val device: String, val status: String, val enabled: Boolean = false)
     private data class UsbFormat(val device: Int, val encoding: Int, val rate: Int, val channelMask: Int)
 
     private fun clearUsbDirect() {
