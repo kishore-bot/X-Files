@@ -54,9 +54,7 @@ private enum class AboutPanel { Feedback, Licenses, Privacy, Formats }
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     var panel by rememberSaveable { mutableStateOf<AboutPanel?>(null) }
-    var upcoming by rememberSaveable { mutableStateOf(false) }
-    val close = { if (upcoming) upcoming = false else onBack() }
-    BackHandler(onBack = close)
+    BackHandler(onBack = onBack)
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val (version, build) = remember(context) { packageVersion(context) }
@@ -69,49 +67,43 @@ fun AboutScreen(onBack: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        EzTopBar(if (upcoming) "Upcoming" else "About Xfiles", close, backLabel = if (upcoming) "Back to About" else "Back to settings")
+        EzTopBar("About Xfiles", onBack, backLabel = "Back to settings")
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.TopCenter) {
-            if (upcoming) {
-                UpcomingScreen()
-            } else {
-                LazyColumn(
-                    modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    item("identity") {
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Image(painterResource(com.xfiles.design.R.drawable.ic_xfiles_mark), null, Modifier.size(108.dp))
-                            Text("Xfiles", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium, color = EzColors.Text)
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-                                verticalArrangement = Arrangement.Center,
-                            ) {
-                                if (version.isNotBlank()) {
-                                    Text("Version $version", Modifier.align(Alignment.CenterVertically), color = EzColors.TextSecondary)
-                                    Text("Build $build", Modifier.align(Alignment.CenterVertically), color = EzColors.TextSecondary)
-                                }
-                                TextButton(onClick = { open("$SOURCE/releases") }) { Text("Release notes") }
+            LazyColumn(
+                modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item("identity") {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Image(painterResource(com.xfiles.design.R.drawable.ic_xfiles_mark), null, Modifier.size(108.dp))
+                        Text("Xfiles", Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineMedium, color = EzColors.Text)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            if (version.isNotBlank()) {
+                                Text("Version $version", Modifier.align(Alignment.CenterVertically), color = EzColors.TextSecondary)
+                                Text("Build $build", Modifier.align(Alignment.CenterVertically), color = EzColors.TextSecondary)
                             }
+                            TextButton(onClick = { open("$SOURCE/releases") }) { Text("Release notes") }
                         }
                     }
-                    item("links") {
-                        Column(Modifier.fillMaxWidth().glassCard()) {
-                            SettingsLink(EzIcons.Feedback, "Feedback", "Report a bug or suggest an idea") { panel = AboutPanel.Feedback }
-                            HorizontalDivider(color = EzColors.Hairline)
-                            SettingsLink(EzIcons.Code, "Source code", "Open the Xfiles repository") { open(SOURCE) }
-                            HorizontalDivider(color = EzColors.Hairline)
-                            SettingsLink(EzIcons.Book, "Licenses") { panel = AboutPanel.Licenses }
-                            HorizontalDivider(color = EzColors.Hairline)
-                            SettingsLink(EzIcons.Lock, "Privacy") { panel = AboutPanel.Privacy }
-                        }
+                }
+                item("links") {
+                    Column(Modifier.fillMaxWidth().glassCard()) {
+                        SettingsLink(EzIcons.Feedback, "Feedback", "Report a bug or suggest an idea") { panel = AboutPanel.Feedback }
+                        HorizontalDivider(color = EzColors.Hairline)
+                        SettingsLink(EzIcons.Code, "Source code", "Open the Xfiles repository") { open(SOURCE) }
+                        HorizontalDivider(color = EzColors.Hairline)
+                        SettingsLink(EzIcons.Book, "Licenses") { panel = AboutPanel.Licenses }
+                        HorizontalDivider(color = EzColors.Hairline)
+                        SettingsLink(EzIcons.Lock, "Privacy") { panel = AboutPanel.Privacy }
                     }
-                    item("more") {
-                        Column(Modifier.fillMaxWidth().glassCard()) {
-                            SettingsLink(EzIcons.Document, "Supported files") { panel = AboutPanel.Formats }
-                            HorizontalDivider(color = EzColors.Hairline)
-                            SettingsLink(EzIcons.Info, "Upcoming") { upcoming = true }
-                        }
+                }
+                item("more") {
+                    Column(Modifier.fillMaxWidth().glassCard()) {
+                        SettingsLink(EzIcons.Document, "Supported files") { panel = AboutPanel.Formats }
                     }
                 }
             }
