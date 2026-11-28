@@ -5,7 +5,7 @@ import random
 from collections import Counter
 from pathlib import Path
 from catalog import TOOLS, system
-from leakage import near_signature
+from leakage import hold_out
 
 ROOT = Path(__file__).resolve().parent
 SEED = 14112026
@@ -294,16 +294,15 @@ def main():
     for split, count in [("train", 24), ("validation", 3), ("test", 3)]:
         rows = make_cases(split, count)
         unique = []
-        near_removed = 0
+        near_removed = near_reworded = 0
         for row in rows:
-            signature = json.dumps(row["messages"], sort_keys=True)
-            near = near_signature(row["messages"])
-            if split == "train":
-                train_near.add(near)
-            elif near in train_near:
-                # The same conversation as a train row with only IDs and numbers changed: not held out.
+            # A held-out row that repeats a train row with only IDs and numbers changed gets held-out wording.
+            row, reworded = hold_out(row, split, train_near)
+            if row is None:
                 near_removed += 1
                 continue
+            near_reworded += reworded
+            signature = json.dumps(row["messages"], sort_keys=True)
             if signature not in seen:
                 unique.append(row)
                 seen.add(signature)
@@ -314,7 +313,7 @@ def main():
         with path.open("w", encoding="utf-8", newline="\n") as f:
             for row in rows:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        report["splits"][split] = {"duplicates_removed": removed, "near_duplicates_removed": near_removed, "conversations": len(rows), "assistant_turns": sum(sum(m["role"] == "assistant" for m in r["messages"]) for r in rows),
+        report["splits"][split] = {"duplicates_removed": removed, "near_duplicates_reworded": near_reworded, "near_duplicates_removed": near_removed, "conversations": len(rows), "assistant_turns": sum(sum(m["role"] == "assistant" for m in r["messages"]) for r in rows),
             "families": dict(Counter(r["family"] for r in rows)), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     (dest / "manifest.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (ROOT / "tool_catalog.json").write_text(json.dumps(TOOLS, indent=2) + "\n", encoding="utf-8")
