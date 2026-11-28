@@ -1,0 +1,13 @@
+[package]
+name = "fily-inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+android-opencl = ["llama-cpp-2/opencl"]
+
+[target.'cfg(all(target_os = "android", target_pointer_width = "64"))'.dependencies]
+llama-cpp-2 = { version = "=0.1.161", default-features = false, features = ["android-static-stdcxx"] }
+serde_json = "1"

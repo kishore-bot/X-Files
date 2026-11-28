@@ -1,0 +1,25 @@
+[package]
+name = "ffmpeg-jni"
+description = "JNI bridge from Media3's FFmpeg audio decoder to FFmpeg's libavcodec, libavutil and libswresample."
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# libffmpegJNI.so, the name FfmpegLibrary loads. FFmpeg itself stays in its own LGPL shared libraries.
+[lib]
+name = "ffmpegJNI"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21.1"
+libc = "0.2"
+
+[build-dependencies]
+bindgen = "0.72"
+
+# Standalone on purpose: FFmpeg is only available for Android ABIs, so this crate must not join the engine workspace.
+[workspace]
+
+[profile.release]
+# The JNI entry points catch panics and turn them into error codes. "abort" would take the app down instead.
+panic = "unwind"

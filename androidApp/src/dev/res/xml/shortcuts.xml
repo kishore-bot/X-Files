@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Long-press launcher shortcuts for the dev build (applicationId com.xfiles.dev). Same entries as
+  src/prod/res/xml/shortcuts.xml; only the target package differs, so these open the installed dev app.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_scan"
+        android:shortcutShortLabel="@string/widget_scan"
+        android:shortcutLongLabel="@string/widget_scan">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.xfiles.dev"
+            android:targetClass="com.xfiles.android.MainActivity">
+            <extra android:name="xfiles.action" android:value="scan" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="fily"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_fily"
+        android:shortcutShortLabel="@string/widget_fily"
+        android:shortcutLongLabel="@string/widget_fily">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.xfiles.dev"
+            android:targetClass="com.xfiles.android.MainActivity">
+            <extra android:name="xfiles.action" android:value="fily" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="open"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_open"
+        android:shortcutShortLabel="@string/widget_open"
+        android:shortcutLongLabel="@string/widget_open">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetPackage="com.xfiles.dev"
+            android:targetClass="com.xfiles.android.MainActivity">
+            <extra android:name="xfiles.action" android:value="open" />
+        </intent>
+    </shortcut>
+</shortcuts>

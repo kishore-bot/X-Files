@@ -1,0 +1,54 @@
+rules_version = '2';
+
+// Client submissions are write-only. The team reads reports in the Firebase console.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function validFeedback() {
+      let data = request.resource.data;
+      let keys = data.keys();
+      return keys.hasOnly([
+          'category', 'message', 'createdAt',
+          'appVersion', 'versionCode', 'deviceModel', 'androidSdk', 'flavor', 'locale'
+        ])
+        && keys.hasAll(['category', 'message', 'createdAt'])
+        // Required fields.
+        && data.category in ['bug', 'idea', 'other']
+        && data.message is string
+        && data.message.size() > 0
+        && data.message.size() <= 2000
+        && data.createdAt == request.time
+        // Optional device details, attached only when the user keeps the option on.
+        && (!('appVersion' in keys) || (data.appVersion is string && data.appVersion.size() <= 40))
+        && (!('versionCode' in keys) || (data.versionCode is int && data.versionCode >= 0))
+        && (!('deviceModel' in keys) || (data.deviceModel is string && data.deviceModel.size() <= 100))
+        && (!('androidSdk' in keys) || (data.androidSdk is int && data.androidSdk >= 0))
+        && (!('flavor' in keys) || (data.flavor is string && data.flavor.size() <= 16))
+        && (!('locale' in keys) || (data.locale is string && data.locale.size() <= 35));
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if validFeedback();
+      allow read, update, delete: if false;
+    }
+
+    match /crash_reports/{reportId} {
+      allow create: if reportId.matches('^[0-9a-f]{64}$') && validCrashReport();
+      allow read, update, delete: if false;
+    }
+
+    function validCrashReport() {
+      let data = request.resource.data;
+      let fields = ['report', 'appVersion', 'platform', 'createdAt'];
+      return data.keys().hasOnly(fields)
+        && data.keys().hasAll(fields)
+        && data.report is string
+        && data.report.size() > 0
+        && data.report.size() <= 65536
+        && data.appVersion is string
+        && data.appVersion.size() <= 40
+        && data.platform == 'android'
+        && data.createdAt == request.time;
+    }
+  }
+}

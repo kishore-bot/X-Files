@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  App-level description for AppFunctions agents (the "Android MCP server" entry). Lead with the domain and the
+  tasks; agents may read only the start. Referenced from the manifest as android.app.appfunctions.app_metadata.
+  The attribute form follows the AppFunctions guidance (appfn:instructions); the text is in strings.xml.
+-->
+<app-metadata
+    xmlns:appfn="http://schemas.android.com/apk/res-auto"
+    appfn:instructions="@string/appfunctions_app_instructions" />

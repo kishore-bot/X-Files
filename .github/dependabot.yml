@@ -1,0 +1,54 @@
+# Dependency update pull requests, grouped and monthly, so they stay reviewable.
+# Every update goes through the PR check (build + all tests) before it can merge.
+version: 2
+updates:
+  # Gradle: the version catalog (gradle/libs.versions.toml) and build scripts.
+  - package-ecosystem: gradle
+    directory: "/"
+    target-branch: dev-deploy
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    labels: [dependencies, android]
+    groups:
+      androidx-and-compose:
+        patterns: ["androidx.*", "org.jetbrains.compose*", "com.google.android.material*"]
+      kotlin-and-build:
+        patterns: ["org.jetbrains.kotlin*", "com.android.*", "com.google.devtools.ksp*", "com.google.dagger*"]
+      everything-else:
+        patterns: ["*"]
+    ignore:
+      # Major upgrades of the build toolchain are done by hand, in their own PR.
+      - dependency-name: "com.android.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin*"
+        update-types: ["version-update:semver-major"]
+
+  # Rust engine workspace.
+  - package-ecosystem: cargo
+    directory: "/engine"
+    target-branch: dev-deploy
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    labels: [dependencies, rust]
+    groups:
+      rust-crates:
+        patterns: ["*"]
+        update-types: ["patch"]
+    ignore:
+      # Most crates are 0.x, where a "minor" bump (0.8 -> 0.9) is breaking. Upgrade those by hand,
+      # especially the crypto crates (aes, cbc, sha1, ...) behind PDF and ZIP encryption.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  # GitHub Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: dev-deploy
+    schedule:
+      interval: monthly
+    labels: [dependencies, ci]
+    groups:
+      actions:
+        patterns: ["*"]

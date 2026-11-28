@@ -1,0 +1,118 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [dev-deploy]
+  pull_request:
+    branches: [dev-deploy]
+  schedule:
+    - cron: "24 5 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java-kotlin:
+    name: Analyze (java-kotlin)
+    # The LazyMatrix Maven checkout needs a deploy key. Fork PRs still get the other scans.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CMAKE_VERSION: "3.22.1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned LazyMatrix Maven files
+        uses: actions/checkout@v7
+        with:
+          repository: kishore-bot/xfiles-maven
+          ref: d8a5eae29b47000dca495ed9605c2f4405307d05
+          path: .ci-maven
+          ssh-key: ${{ secrets.LAZYMATRIX_MAVEN_SSH_KEY }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK packages
+        shell: bash
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdk" ] || sdk=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          catalog=gradle/libs.versions.toml
+          ndk_version=$(sed -n 's/^ndk = "\(.*\)"/\1/p' "$catalog")
+          compile_sdk=$(sed -n 's/^compile-sdk = "\(.*\)"/\1/p' "$catalog")
+          minor_api=$(sed -n 's/^sdk-minor-api = "\(.*\)"/\1/p' "$catalog")
+          sdk_platform="$compile_sdk"
+          if [[ "$minor_api" != 0 ]]; then sdk_platform="$compile_sdk.$minor_api"; fi
+          yes | "$sdk" --licenses > /dev/null || true
+          "$sdk" --install "platforms;android-$sdk_platform" "ndk;$ndk_version" "cmake;$CMAKE_VERSION" > /dev/null
+          ndk="$ANDROID_HOME/ndk/$ndk_version"
+          {
+            echo "ANDROID_NDK_HOME=$ndk"
+            echo "ANDROID_NDK_ROOT=$ndk"
+            echo "ANDROID_NDK=$ndk"
+            echo "ANDROID_NDK_LATEST_HOME=$ndk"
+            echo "NDK_HOME=$ndk"
+            echo "LIBCLANG_PATH=$ndk/toolchains/llvm/prebuilt/linux-x86_64/lib"
+          } >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmake/$CMAKE_VERSION/bin" >> "$GITHUB_PATH"
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      - name: Build Android for analysis
+        env:
+          ORG_GRADLE_PROJECT_lazyMatrixLocalRepo: ${{ github.workspace }}/.ci-maven
+        run: >
+          ./gradlew --no-configuration-cache --no-build-cache --no-daemon
+          -Pkotlin.compiler.execution.strategy=in-process :androidApp:assembleDevDebug
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:java-kotlin"
+
+  source:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, python, rust]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

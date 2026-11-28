@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Xfiles</string>
+    <string name="open_document">Open document</string>
+    <string name="at_a_glance">At a glance</string>
+    <string name="analysis_read_error">This document could not be analyzed.</string>
+    <string name="analysis_engine_error">Document analysis is unavailable on this device.</string>
+    <string name="analysis_no_text">This document has no text available for analysis.</string>
+    <string name="widget_label">Xfiles quick</string>
+    <string name="widget_description">Scan, ask Fily, open a file or jump back into a recent one.</string>
+    <string name="widget_scan">Scan to PDF</string>
+    <string name="widget_fily">Ask Fily</string>
+    <string name="widget_open">Open a file</string>
+    <string name="widget_empty">Recent files appear here.</string>
+    <string name="appfunctions_app_instructions">Xfiles is a document reader and file manager that works on this phone. Find files by name or kind, list recent files, open a file for reading, summarize the start of a document when the user allows reading inside files, create a text note for review, or scan pages to PDF. Nothing is saved, shared or printed without the user\'s confirmation on screen.</string>
+</resources>

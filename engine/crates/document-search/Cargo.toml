@@ -1,0 +1,9 @@
+[package]
+name = "document-search"
+description = "Offline search for EzFiles: typo-tolerant file names, a BM25 full-text index and snippets. std only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]

@@ -1,0 +1,91 @@
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+captures/
+.cxx/
+.externalNativeBuild/
+
+# Rust (every crate's target, including engine/ and ffmpeg/rust/)
+**/target/
+**/*.rs.bk
+*.profraw
+
+# IDEs and assistants
+.idea/
+*.iml
+.vscode/
+.fleet/
+*.swp
+.DS_Store
+Thumbs.db
+.claude/settings.local.json
+
+# Local machine config
+local.properties
+
+# Secrets: Firebase config, signing keys, service accounts, env files
+google-services.json
+GoogleService-Info.plist
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+secrets.properties
+kaggle.json
+.env
+.env.*
+
+# Firebase CLI (firebase.json and firestore.rules are committed)
+.firebase/
+.firebaserc
+node_modules/
+
+# Android outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+mapping.txt
+
+# Models / large artifacts (downloaded at runtime, never committed)
+*.gguf
+*.onnx
+*.tflite
+*.safetensors
+
+# Logs, heap dumps, traces
+*.log
+hs_err_pid*
+replay_pid*
+*.hprof
+*.trace
+*.perfetto-trace
+
+# FFmpeg built by scripts/build-ffmpeg.sh
+.cache/
+
+# Local-only build additions (optional modules kept outside the repository)
+private.settings.gradle.kts
+private.app.gradle.kts
+
+# Fily training: scripts, catalog and docs are tracked; the venv, generated data,
+# checkpoints, exported models and tool binaries are not (see AI.md for rebuilding).
+/training/.venv/
+/training/__pycache__/
+/training/cache/
+/training/runs/
+/training/exports/
+/training/tools/
+/training/data/**/*.jsonl
+/training/data/**/*.txt
+/training/*.log
+
+# Xcode local settings and build output
+iosApp/**/xcuserdata/
+iosApp/DerivedData/

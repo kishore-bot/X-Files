@@ -1,0 +1,10 @@
+[package]
+name = "document-core"
+description = "Format detection, document model, parser contract and extraction coordinator."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Intentionally dependency-free: FFI types live in document-ffi.
+[dependencies]

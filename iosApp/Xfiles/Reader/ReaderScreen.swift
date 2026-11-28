@@ -1,0 +1,139 @@
+import SwiftUI
+
+struct ReaderScreen: View {
+    let id: UUID
+    let library: LibraryModel
+    var startPage: Int? = nil
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var file: ReaderFile?
+    @State private var progress: ReaderProgress?
+    @State private var failure: String?
+    @State private var panel: Panel?
+    @State private var next: ReadDestination?
+    @State private var pageJump: PDFPageJump?
+    @State private var currentPDFPage = 0
+    @State private var control = ReaderControl()
+    @State private var commandAfterDismissal: ReaderCommand?
+    @State private var destinationAfterDismissal: FilyDestination?
+    @State private var toolPreset: DocumentTools.Operation?
+
+    private enum Panel: String, Identifiable {
+        case tools, fily, signatures, editText, markup, scanner, duplicates, contents
+        var id: Self { self }
+    }
+
+    var body: some View {
+        Group {
+            if let file, let progress {
+                switch file.record.viewerKind {
+                case .pdf:
+                    PDFReader(
+                        url: file.url, page: startPage ?? file.record.position.page,
+                        jump: pageJump, control: control, onPage: { page in
+                            currentPDFPage = page
+                            progress.update(page: page)
+                        }
+                    )
+                case .media:
+                    MediaReader(
+                        url: file.url,
+                        seconds: file.record.position.seconds,
+                        onTime: progress.update(seconds:),
+                        onCheckpoint: progress.flush,
+                        control: control
+                    )
+                case .text:
+                    TextReader(url: file.url, textOffset: file.record.position.textOffset,
+                               onScroll: progress.update(textOffset:), control: control)
+                case .book, .office, .sheet, .slides:
+                    StructuredReader(file: file, store: library.store, control: control, onPosition: progress.update(block:section:offset:))
+                case .archive:
+                    ArchiveReader(file: file, library: library)
+                case .image:
+                    PhotoReader(file: file, photos: library.documents.filter { $0.viewerKind == .image },
+                                control: control, onOpen: { next = $0 })
+                case .other:
+                    QuickLookReader(url: file.url).preview
+                }
+            } else if let failure {
+                ContentUnavailableView("File unavailable", systemImage: "doc.badge.ellipsis", description: Text(failure))
+            } else {
+                ProgressView("Opening file")
+            }
+        }
+        .navigationTitle(file?.record.name ?? "Reader")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let file {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    ShareLink(item: file.url) { Label("Share file", systemImage: "square.and.arrow.up") }
+                    Menu {
+                        Button("Ask Fily", systemImage: "sparkles") { panel = .fily }
+                        Button("Document tools", systemImage: "wrench.and.screwdriver") { toolPreset = nil; panel = .tools }
+                        if file.record.viewerKind == .pdf {
+                            Button("Annotate page", systemImage: "pencil.tip") { panel = .markup }
+                            Button("Digital signatures", systemImage: "signature") { panel = .signatures }
+                        }
+                        if file.record.viewerKind == .text {
+                            Button("Edit text copy", systemImage: "square.and.pencil") { panel = .editText }
+                        }
+                    } label: { Label("Reader actions", systemImage: "ellipsis.circle") }
+                }
+            }
+        }
+        .navigationDestination(item: $next) { destination in
+            ReaderScreen(id: destination.id, library: library, startPage: destination.page)
+        }
+        .sheet(item: $panel, onDismiss: handleFilyDismissal) { choice in
+            if let file {
+                switch choice {
+                case .tools: DocumentTools(library: library, initial: file, preset: toolPreset) { next = $0 }
+                case .scanner: DocumentScanner(library: library) { next = $0 }
+                case .duplicates: DuplicateFiles(library: library)
+                case .contents: ContentSearch(library: library) { next = $0 }
+                case .fily:
+                    FilyScreen(
+                        library: library, selected: file, openFile: { next = $0 },
+                        goToPage: { pageJump = PDFPageJump(page: $0) },
+                        control: control, presentReaderAction: { commandAfterDismissal = $0 },
+                        openDestination: { destinationAfterDismissal = $0 }
+                    )
+                case .signatures: PDFSignatures(url: file.url)
+                case .markup: PDFMarkupEditor(file: file, page: currentPDFPage, library: library) { next = $0 }
+                case .editText: TextCopyEditor(file: file, library: library) { next = $0 }
+                }
+            }
+        }
+        .task(id: id) {
+            do {
+                let opened = try await library.open(id)
+                if Task.isCancelled { return }
+                progress = ReaderProgress(record: opened.record, store: library.store)
+                currentPDFPage = startPage ?? opened.record.position.page
+                file = opened
+            } catch {
+                failure = error.localizedDescription
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { progress?.flush() }
+        }
+        .onDisappear { progress?.flush() }
+    }
+
+    private func handleFilyDismissal() {
+        if let command = commandAfterDismissal {
+            commandAfterDismissal = nil
+            _ = control.send(command)
+        }
+        guard let destination = destinationAfterDismissal else { return }
+        destinationAfterDismissal = nil
+        switch destination {
+        case .tools(let operation): toolPreset = operation; panel = .tools
+        case .scanner: panel = .scanner
+        case .duplicates: panel = .duplicates
+        case .contents: panel = .contents
+        }
+    }
+
+}

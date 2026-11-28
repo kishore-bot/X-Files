@@ -1,0 +1,11 @@
+[package]
+name = "document-tidy"
+description = "Offline, classical algorithms for keeping folders tidy: duplicates, near-duplicates, collections and sensitive-content hints."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Standard library only: every algorithm here is small enough to own, and a
+# dependency-free crate keeps the native library small on low-end phones.
+[dependencies]

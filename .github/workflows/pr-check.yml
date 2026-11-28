@@ -1,0 +1,138 @@
+name: PR check
+
+# Rust checks run on every PR. Trusted refs also build the Android app with the private Maven artifact.
+# In the dev-deploy ruleset, require the status check "build-and-test".
+on:
+  pull_request:
+    branches: [dev-deploy]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: "29.0.14206865"
+  CMAKE_VERSION: "3.22.1"
+  # Not ANDROID_PLATFORM: llama.cpp's build script reads that name as an API level.
+  SDK_PLATFORM_PACKAGE: "platforms;android-37.2"
+
+jobs:
+  rust-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: Rust engine tests
+        run: cargo test --manifest-path engine/Cargo.toml --locked --workspace
+
+  android-build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out pinned LazyMatrix Maven files
+        uses: actions/checkout@v7
+        with:
+          repository: kishore-bot/xfiles-maven
+          ref: d8a5eae29b47000dca495ed9605c2f4405307d05
+          path: .ci-maven
+          ssh-key: ${{ secrets.LAZYMATRIX_MAVEN_SSH_KEY }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK packages
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdk" ] || sdk=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdk" --licenses > /dev/null || true
+          "$sdk" --install "$SDK_PLATFORM_PACKAGE" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION" "build-tools;36.0.0" > /dev/null
+          ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
+          {
+            echo "ANDROID_NDK_HOME=$ndk"
+            echo "ANDROID_NDK_ROOT=$ndk"
+            echo "ANDROID_NDK=$ndk"
+            echo "ANDROID_NDK_LATEST_HOME=$ndk"
+            echo "NDK_HOME=$ndk"
+            echo "LIBCLANG_PATH=$ndk/toolchains/llvm/prebuilt/linux-x86_64/lib"
+          } >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmake/$CMAKE_VERSION/bin" >> "$GITHUB_PATH"
+
+      # rust-toolchain.toml pins the toolchain and the Android targets; rustup installs them here.
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build FFmpeg audio decoders
+        run: bash scripts/build-ffmpeg.sh
+
+      - name: Kotlin tests and app build
+        env:
+          ORG_GRADLE_PROJECT_lazyMatrixLocalRepo: ${{ github.workspace }}/.ci-maven
+        run: ./gradlew --no-configuration-cache :sharedLogic:testAndroidHostTest :androidApp:assembleDevDebug
+
+      - name: Verify FFmpeg libraries in Dev Debug APK
+        run: |
+          for apk in androidApp/build/outputs/apk/dev/debug/*.apk; do
+            bash scripts/verify-ffmpeg-apk.sh "$apk"
+          done
+
+      - name: Test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Dev Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: xfiles-dev-debug
+          path: androidApp/build/outputs/apk/dev/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  build-and-test:
+    if: always()
+    needs: [rust-tests, android-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check required job results
+        env:
+          RUST_RESULT: ${{ needs.rust-tests.result }}
+          ANDROID_RESULT: ${{ needs.android-build.result }}
+          FORK_PULL_REQUEST: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          test "$RUST_RESULT" = success
+          if [[ "$FORK_PULL_REQUEST" == true ]]; then
+            test "$ANDROID_RESULT" = skipped
+          else
+            test "$ANDROID_RESULT" = success
+          fi
