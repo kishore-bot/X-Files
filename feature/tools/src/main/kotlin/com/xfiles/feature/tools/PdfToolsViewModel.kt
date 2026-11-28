@@ -40,6 +40,14 @@ class PdfToolsViewModel @Inject constructor(
     private val mutableOpen = MutableStateFlow<OpenTool?>(null)
     val open: StateFlow<OpenTool?> = mutableOpen.asStateFlow()
 
+    /** A page list Fily filled in for the open tool's page field; the screen takes it once. */
+    private val mutableSuggestedPages = MutableStateFlow<String?>(null)
+    val suggestedPages: StateFlow<String?> = mutableSuggestedPages.asStateFlow()
+
+    fun consumeSuggestedPages() {
+        mutableSuggestedPages.value = null
+    }
+
     /** True when the open tool was picked in the PDF tools grid: back returns there. Otherwise back leaves Tools. */
     var openedFromHub = false
         private set
@@ -51,10 +59,13 @@ class PdfToolsViewModel @Inject constructor(
     }
 
     /** Fily's hand-off: [action] with [uris] already chosen, shown for the user to review and run. */
-    fun prefill(action: PdfAction, uris: List<Uri>): Boolean {
+    fun prefill(action: PdfAction, uris: List<Uri>, pages: String? = null): Boolean {
         if (mutableState.value.busy) return false
         mutableState.value.output?.file?.delete()
         mutableState.value = PdfToolsState(action = action)
+        // Only page-list characters: the user still sees and edits the range before running.
+        mutableSuggestedPages.value = pages?.filter { it.isDigit() || it in ", -" }?.trim()?.take(MAX_SUGGESTED_PAGES)
+            ?.takeIf(String::isNotEmpty)
         openedFromHub = false
         mutableOpen.value = OpenTool.Pdf(action)
         pick(uris)
@@ -393,6 +404,7 @@ abstract class PdfSingleFileToolViewModel<T>(
 
     companion object {
         const val PREVIEW_EDGE = 1024
+        private const val MAX_SUGGESTED_PAGES = 200
         const val SOURCE_PREVIEW_EDGE = 360
     }
 }

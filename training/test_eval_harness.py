@@ -31,8 +31,13 @@ class EvalHarnessTest(unittest.TestCase):
         self.assertFalse(s["valid_json"])
         self.assertIsNone(s["kind_correct"])
 
-    def test_page_numbers_ignored(self):
-        self.assertTrue(numbers_grounded("See page 7.", "nothing numeric"))
+    def test_cited_page_must_exist_in_evidence(self):
+        self.assertFalse(numbers_grounded("See page 7.", "nothing numeric"))
+        self.assertTrue(numbers_grounded("See page 2.", "[page 2] amount due"))
+
+    def test_number_must_match_whole(self):
+        self.assertFalse(numbers_grounded("It costs 12.", "founded in 2012"))
+        self.assertTrue(numbers_grounded("Rs 1,250 is due.", "amount due rs 1250"))
 
 
 if __name__ == "__main__":

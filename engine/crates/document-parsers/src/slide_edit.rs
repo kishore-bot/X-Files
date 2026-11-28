@@ -107,11 +107,6 @@ pub fn delete_pptx_slide(data: &[u8], index: u32) -> Result<Vec<u8>, EngineError
         edit.remove.insert(name.clone());
         edit.remove.insert(rels_path_for(name));
     }
-    let overrides: Vec<String> = dropped.iter().map(|name| format!("/{name}")).collect();
-    let content_types = remove_elements(&content_types, "Override", |tag| {
-        attr(tag, "PartName").is_some_and(|p| overrides.iter().any(|o| o == p))
-    });
-
     // Media (and any other part) that only the deleted slide references goes too. A target survives
     // when some remaining part's relationships still point at it.
     let mut candidates: Vec<String> = Vec::new();
@@ -145,10 +140,49 @@ pub fn delete_pptx_slide(data: &[u8], index: u32) -> Result<Vec<u8>, EngineError
         }
     }
 
+    // Every removed part loses its content-type override; a dangling override (a chart the slide owned, say)
+    // is enough for PowerPoint to offer a repair.
+    let gone: HashSet<String> = edit.remove.iter().filter(|n| !n.ends_with(".rels")).cloned().collect();
+    let overrides: HashSet<String> = gone.iter().map(|name| format!("/{name}")).collect();
+    let content_types =
+        remove_elements(&content_types, "Override", |tag| attr(tag, "PartName").is_some_and(|p| overrides.contains(p)));
+
+    // Remaining parts that link to a removed one, such as another slide's "jump to slide" hyperlink.
+    let names: Vec<String> = archive.entries().iter().map(|e| e.name.clone()).collect();
+    for rels_name in names.iter().filter(|n| n.ends_with(".rels")) {
+        if edit.remove.contains(rels_name) || rels_name == PRES_RELS_PART {
+            continue;
+        }
+        let Some(source) = part_of_rels(rels_name) else { continue };
+        let stale: HashSet<String> = relationships(&mut archive, &source)?
+            .into_iter()
+            .filter(|r| !r.external && gone.contains(&r.target))
+            .map(|r| r.id)
+            .collect();
+        if stale.is_empty() || archive.find(&source).is_none() {
+            continue;
+        }
+        let xml = read_text(&mut archive, &source)?;
+        let is_stale = |tag: &str| attr(tag, "r:id").is_some_and(|id| stale.contains(id));
+        let xml = remove_elements(&xml, "a:hlinkClick", is_stale);
+        let xml = remove_elements(&xml, "a:hlinkHover", is_stale);
+        // A relationship the part still uses elsewhere stays: removing it would break that use instead.
+        let unused: HashSet<String> = stale.into_iter().filter(|id| !xml.contains(&format!("\"{id}\""))).collect();
+        if unused.is_empty() {
+            continue;
+        }
+        let rels_xml = read_text(&mut archive, rels_name)?;
+        let rels_xml = remove_elements(&rels_xml, "Relationship", |tag| attr(tag, "Id").is_some_and(|id| unused.contains(id)));
+        edit.replace.insert(source.clone(), xml.into_bytes());
+        edit.replace.insert(rels_name.clone(), rels_xml.into_bytes());
+    }
+
     let pres_rels = remove_elements(&pres_rels, "Relationship", |tag| attr(tag, "Id") == Some(rid.as_str()));
     let kept: Vec<&str> = entries.iter().enumerate().filter(|(i, _)| *i != idx).map(|(_, e)| *e).collect();
     let pres = rebuild_slide_id_list(&pres, &kept);
     let pres = remove_elements(&pres, "p14:sldId", |tag| attr(tag, "id") == Some(removed_id.as_str()));
+    // Custom shows list slides by the presentation relationship that was just removed.
+    let pres = remove_elements(&pres, "p:sld", |tag| attr(tag, "r:id") == Some(rid.as_str()));
 
     edit.replace.insert(PRES_PART.to_owned(), pres.into_bytes());
     edit.replace.insert(PRES_RELS_PART.to_owned(), pres_rels.into_bytes());
@@ -538,6 +572,38 @@ mod tests {
         let out = delete_pptx_slide(&with_media, 1).unwrap();
         assert!(part_text(&out, "ppt/media/only2.png").is_none());
         assert!(part_text(&out, "ppt/media/both.png").is_some());
+    }
+
+    #[test]
+    fn delete_unlinks_jumps_and_overrides_to_removed_parts() {
+        let base = linked_pptx();
+        let mut edit = PackageEdit::default();
+        // Slide 1 jumps to slide 2; slide 2 owns a chart with its own content-type override.
+        edit.replace.insert(
+            "ppt/slides/slide1.xml".to_owned(),
+            br#"<p:sld><a:r><a:rPr><a:hlinkClick r:id="rId7" action="ppaction://hlinksldjump"/></a:rPr><a:t>go</a:t></a:r></p:sld>"#.to_vec(),
+        );
+        edit.add.push((
+            "ppt/slides/_rels/slide1.xml.rels".to_owned(),
+            br#"<Relationships><Relationship Id="rId7" Type="http://x/slide" Target="slide2.xml"/></Relationships>"#.to_vec(),
+        ));
+        edit.replace.insert(
+            "ppt/slides/_rels/slide2.xml.rels".to_owned(),
+            br#"<Relationships><Relationship Id="rId2" Type="http://x/notesSlide" Target="../notesSlides/notesSlide1.xml"/><Relationship Id="rId3" Type="http://x/chart" Target="../charts/chart1.xml"/></Relationships>"#.to_vec(),
+        );
+        edit.add.push(("ppt/charts/chart1.xml".to_owned(), b"<c:chartSpace/>".to_vec()));
+        let types = part_text(&base, "[Content_Types].xml").unwrap()
+            .replace("</Types>", r#"<Override PartName="/ppt/charts/chart1.xml" ContentType="chart"/></Types>"#);
+        edit.replace.insert("[Content_Types].xml".to_owned(), types.into_bytes());
+        let deck = rewrite_package(&base, &edit).unwrap();
+
+        let out = delete_pptx_slide(&deck, 1).unwrap();
+        assert!(part_text(&out, "ppt/charts/chart1.xml").is_none());
+        assert!(!part_text(&out, "[Content_Types].xml").unwrap().contains("chart1"));
+        assert!(!part_text(&out, "ppt/slides/_rels/slide1.xml.rels").unwrap().contains("rId7"));
+        let slide1 = part_text(&out, "ppt/slides/slide1.xml").unwrap();
+        assert!(!slide1.contains("hlinkClick"));
+        assert!(slide1.contains("<a:t>go</a:t>"));
     }
 
     #[test]

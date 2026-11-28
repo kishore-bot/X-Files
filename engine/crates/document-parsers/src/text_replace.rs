@@ -321,13 +321,18 @@ fn replace_text(text: &str, find: &str, replace: &str, case_sensitive: bool) -> 
     }
 }
 
+const MIMETYPE: &str = "mimetype";
+
 pub(crate) fn rebuild_zip_pub(original: &[u8], modified: &[(String, Vec<u8>)]) -> Result<Vec<u8>, EngineError> {
     rebuild_zip(original, modified)
 }
 
 fn rebuild_zip(original: &[u8], modified: &[(String, Vec<u8>)]) -> Result<Vec<u8>, EngineError> {
     let mut archive = open(original)?;
-    let entries: Vec<_> = archive.entries().to_vec();
+    let mut entries: Vec<_> = archive.entries().to_vec();
+    // OpenDocument (and EPUB) require `mimetype` as the first entry, stored uncompressed, so readers can
+    // identify the package from its leading bytes. A stable sort keeps every other entry in place.
+    entries.sort_by_key(|entry| entry.name != MIMETYPE);
     let mut out = Cursor::new(Vec::new());
     let mut central = Vec::new();
 
@@ -340,10 +345,13 @@ fn rebuild_zip(original: &[u8], modified: &[(String, Vec<u8>)]) -> Result<Vec<u8
 
         let offset = out.position() as u32;
         let crc = crc32fast::hash(&raw_data);
-        let mut enc = DeflateEncoder::new(Vec::new(), Compression::default());
-        enc.write_all(&raw_data).map_err(EngineError::from)?;
-        let compressed = enc.finish().map_err(EngineError::from)?;
-        let method: u16 = 8;
+        let (method, compressed): (u16, Vec<u8>) = if entry.name == MIMETYPE {
+            (0, raw_data.clone())
+        } else {
+            let mut enc = DeflateEncoder::new(Vec::new(), Compression::default());
+            enc.write_all(&raw_data).map_err(EngineError::from)?;
+            (8, enc.finish().map_err(EngineError::from)?)
+        };
 
         // Local file header
         let mut local = Vec::new();
@@ -544,5 +552,16 @@ mod tests {
         let mut out = open(&report.output).unwrap();
         let result = String::from_utf8(out.read_to_vec("content.xml").unwrap()).unwrap();
         assert!(result.contains("New Text"));
+    }
+
+    #[test]
+    fn rebuild_stores_mimetype_first() {
+        let original = zip(&[("content.xml", b"<x/>".as_slice()), ("mimetype", b"application/vnd.oasis.opendocument.text".as_slice())]);
+        let out = rebuild_zip(&original, &[]).unwrap();
+        // First local header: method at byte 8, name length at 26, name at 30.
+        assert_eq!(u16::from_le_bytes([out[8], out[9]]), 0, "mimetype must be stored");
+        let name_len = u16::from_le_bytes([out[26], out[27]]) as usize;
+        assert_eq!(&out[30..30 + name_len], b"mimetype");
+        assert_eq!(&out[30 + name_len..30 + name_len + 8], b"applicat");
     }
 }

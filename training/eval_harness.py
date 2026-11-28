@@ -73,10 +73,24 @@ def evidence_of(messages):
     return "\n".join(m["content"] for m in messages if m["role"] == "tool").lower()
 
 
+PAGE_MENTION = re.compile(r"\b(?:pages?|pp?\.)\s*(\d+(?:\s*(?:[,–-]|\band\b|\bto\b|\bor\b)\s*\d+)*)", re.I)
+PAGE_LABEL = re.compile(r"\[page (\d+)\]|\"page\"\s*:\s*(\d+)", re.I)
+
+
+def number_tokens(text):
+    """Whole numbers as the app's Grounding sees them: thousands commas dropped, never a digit substring."""
+    return {n.replace(",", "").rstrip(".:/-") for n in NUMBER.findall(text)}
+
+
 def numbers_grounded(text, evidence):
-    digits = "".join(ch for ch in evidence if ch.isalnum())
-    cleaned = re.sub(r"\bpages?\s+\d+", "", text, flags=re.I)
-    return all("".join(filter(str.isdigit, n)) in digits for n in NUMBER.findall(cleaned))
+    """Like the app: every number must appear whole in the evidence, and every cited page must be a page the
+    evidence labels. "12" is not grounded by "2012", and "page 7" needs a page 7 in what the tools returned."""
+    pages = {int(a or b) for a, b in PAGE_LABEL.findall(evidence)}
+    for mention in PAGE_MENTION.findall(text):
+        if any(int(p) not in pages for p in re.findall(r"\d+", mention)):
+            return False
+    cleaned = PAGE_MENTION.sub("", text)
+    return number_tokens(cleaned) <= number_tokens(PAGE_LABEL.sub("", evidence))
 
 
 def score(expected, prediction, history):

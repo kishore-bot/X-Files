@@ -558,6 +558,31 @@ fn fixed<'a>(dict: &'a Dict, key: &str, len: usize) -> Result<&'a [u8]> {
     bytes_entry(dict, key).and_then(|bytes| bytes.get(..len)).ok_or_else(damaged)
 }
 
+/// A revision 6 password as hashed (ISO 32000-2, 7.6.4.3.2): SASLprep (RFC 4013), UTF-8, cut at 127 bytes.
+/// SASLprep maps non-ASCII spaces to a space, drops characters "commonly mapped to nothing" (soft hyphen,
+/// zero-width and variation selectors) and applies NFKC, so "é" typed composed or decomposed opens the same
+/// file. Bytes that are not UTF-8 are only cut.
+fn r6_form(password: &[u8]) -> Zeroizing<Vec<u8>> {
+    use unicode_normalization::UnicodeNormalization;
+    let Ok(text) = std::str::from_utf8(password) else { return cut_r6(password) };
+    let prepared: Zeroizing<String> = Zeroizing::new(
+        text.chars()
+            .filter_map(|c| match c {
+                '\u{00AD}' | '\u{034F}' | '\u{1806}' | '\u{180B}'..='\u{180D}' | '\u{200B}'..='\u{200D}' | '\u{2060}'
+                | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' => None,
+                '\u{00A0}' | '\u{1680}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => Some(' '),
+                c => Some(c),
+            })
+            .nfkc()
+            .collect(),
+    );
+    cut_r6(prepared.as_bytes())
+}
+
+fn cut_r6(password: &[u8]) -> Zeroizing<Vec<u8>> {
+    Zeroizing::new(password[..password.len().min(MAX_R6_PASSWORD)].to_vec())
+}
+
 fn unlock_r6(
     dict: &Dict,
     bits: u32,
@@ -567,19 +592,28 @@ fn unlock_r6(
     let (o, u) = (fixed(dict, "O", 48)?, fixed(dict, "U", 48)?);
     let (oe, ue) = (fixed(dict, "OE", 32)?, fixed(dict, "UE", 32)?);
     let perms = fixed(dict, "Perms", AES_BLOCK)?;
-    let raw = password.unwrap_or("").as_bytes();
-    let cut = Zeroizing::new(raw[..raw.len().min(MAX_R6_PASSWORD)].to_vec());
+    let typed = password.unwrap_or("");
+    // The SASLprep form is the standard one; the bytes as typed still open files from writers that skip it.
+    let mut forms = vec![r6_form(typed.as_bytes())];
+    let raw = cut_r6(typed.as_bytes());
+    if *raw != *forms[0] {
+        forms.push(raw);
+    }
 
     let mut unlocked = None;
-    if password.is_some() && *hash_r6(&cut, &o[32..40], u)? == o[..32] {
-        let mut key = Zeroizing::new(oe.to_vec());
-        aes256_cbc_no_iv_decrypt(&*hash_r6(&cut, &o[40..48], u)?, &mut key)?;
-        unlocked = Some((key, true));
-    }
-    if unlocked.is_none() && *hash_r6(&cut, &u[32..40], b"")? == u[..32] {
-        let mut key = Zeroizing::new(ue.to_vec());
-        aes256_cbc_no_iv_decrypt(&*hash_r6(&cut, &u[40..48], b"")?, &mut key)?;
-        unlocked = Some((key, false));
+    for cut in &forms {
+        if password.is_some() && *hash_r6(cut, &o[32..40], u)? == o[..32] {
+            let mut key = Zeroizing::new(oe.to_vec());
+            aes256_cbc_no_iv_decrypt(&*hash_r6(cut, &o[40..48], u)?, &mut key)?;
+            unlocked = Some((key, true));
+        } else if *hash_r6(cut, &u[32..40], b"")? == u[..32] {
+            let mut key = Zeroizing::new(ue.to_vec());
+            aes256_cbc_no_iv_decrypt(&*hash_r6(cut, &u[40..48], b"")?, &mut key)?;
+            unlocked = Some((key, false));
+        }
+        if unlocked.is_some() {
+            break;
+        }
     }
     let Some((key, is_owner)) = unlocked else { return Ok(None) };
 
@@ -653,8 +687,9 @@ impl Encryptor {
 
         let mut salts = [0u8; 32];
         secure_random(&mut salts)?;
-        let (u, ue) = seal_r6(spec.user, &salts[0..8], &salts[8..16], b"", &key)?;
-        let (o, oe) = seal_r6(owner, &salts[16..24], &salts[24..32], &u, &key)?;
+        let (user, owner) = (r6_form(spec.user), r6_form(owner));
+        let (u, ue) = seal_r6(&user, &salts[0..8], &salts[8..16], b"", &key)?;
+        let (o, oe) = seal_r6(&owner, &salts[16..24], &salts[24..32], &u, &key)?;
 
         let mut perms = [0u8; AES_BLOCK];
         perms[..4].copy_from_slice(&spec.permissions.to_le_bytes());
@@ -962,6 +997,16 @@ mod tests {
         assert_eq!(wrong.kind, ErrorKind::WrongPassword);
         let none = Decryptor::unlock(dict, b"", Some(9), None).err().unwrap();
         assert_eq!(none.kind, ErrorKind::PasswordRequired);
+    }
+
+    #[test]
+    fn r6_passwords_are_saslprepped() {
+        // Composed "é" with a no-break space, opened with decomposed "e\u{301}" and a plain space.
+        let encryptor = Encryptor::new("caf\u{e9}\u{a0}2026").unwrap();
+        let unlocked = Decryptor::unlock(encryptor.dict(), b"", Some(9), Some("cafe\u{301} 2026")).unwrap();
+        assert!(unlocked.is_owner);
+        assert_eq!(&*r6_form("a\u{ad}b".as_bytes()), b"ab");
+        assert_eq!(&*r6_form("\u{fb01}".as_bytes()), b"fi");
     }
 
     #[test]

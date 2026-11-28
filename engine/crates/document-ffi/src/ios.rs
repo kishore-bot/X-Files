@@ -603,6 +603,17 @@ fn dispatch(request: &Value, job: &IosJob) -> Result<Value, ReadError> {
                 }))
                 .collect::<Vec<_>>()
         )),
-        _ => tool(request, operation, job),
+        _ => {
+            let result = tool(request, operation, job);
+            // Some engine calls here (Office replace, markup, slide and cell edits) take no cancel token and
+            // run to the end. A cancel during them still wins: the output is removed and the job reports it.
+            if job.token.is_cancelled() {
+                if let Some(output) = request["output"].as_str() {
+                    let _ = std::fs::remove_file(output);
+                }
+                cancelled(job)?;
+            }
+            result
+        }
     }
 }

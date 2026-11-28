@@ -114,6 +114,8 @@ private struct EmbeddedSlideMedia: View {
                 let output = OutputFiles.resource(in: staging, name: part)
                 _ = try await DocumentEngine.output(EngineRequest(operation: "resource", path: file.url.path, output: output.path, password: password, resource: part))
                 try Task.checkCancellation()
+                // Switching to another media part on the same slide replaces the earlier copy; remove it.
+                if let previous = folder, previous != staging { OutputFiles.remove(previous) }
                 folder = staging
                 resource = output
             } catch is CancellationError {

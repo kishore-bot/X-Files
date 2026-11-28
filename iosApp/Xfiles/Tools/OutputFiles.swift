@@ -23,4 +23,20 @@ enum OutputFiles {
     }
 
     static func remove(_ folder: URL) { try? FileManager.default.removeItem(at: folder) }
+
+    /// Removes output folders an earlier run left behind (a crash, or the app killed while a view held one).
+    /// Only folders untouched for [age] go, so anything this run just made is kept.
+    static func sweepStale(olderThan age: TimeInterval = 3_600) {
+        let fileManager = FileManager.default
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isDirectoryKey]
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: URL.temporaryDirectory, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]
+        ) else { return }
+        let cutoff = Date().addingTimeInterval(-age)
+        for item in items where item.lastPathComponent.hasPrefix("Xfiles-") {
+            guard let values = try? item.resourceValues(forKeys: keys), values.isDirectory == true,
+                  let modified = values.contentModificationDate, modified < cutoff else { continue }
+            remove(item)
+        }
+    }
 }

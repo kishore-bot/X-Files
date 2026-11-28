@@ -9,6 +9,7 @@ from build_hard_dataset import build as hard_cases
 from build_domain_dataset import make as domain_cases, FACTS
 from catalog import system
 from validate_dataset import validate_row
+from leakage import near_signature
 
 
 def deep_cases(split, count):
@@ -211,11 +212,12 @@ def main():
     dest.mkdir(parents=True,exist_ok=True)
     caps=json.loads((ROOT/"data/app_capabilities.json").read_text(encoding="utf-8"))
     global_hashes={}
+    train_near=set()
     manifest={"version":5,"seed":20261114,"synthetic":True,"personal_files_read":False,
               "scope":"English Xfiles/file tasks, verified capability facts and proposed review-only experiences",
               "limitations":"Large synthetic curriculum; many families/templates shared across splits. Exact dedup is not semantic independence. Separate human/audio/device evaluation remains necessary.","splits":{}}
     for split,n in [("train",200),("validation",8),("test",8)]:
-        families=Counter(); tools=Counter(); tags=Counter(); total=targets=removed=0
+        families=Counter(); tools=Counter(); tags=Counter(); total=targets=removed=near_removed=0
         ids=set()
         sources=[lambda:make_cases(split,n),
                  lambda:hard_cases("hard_"+split,n+16 if split=="test" else n),
@@ -232,6 +234,12 @@ def main():
                     row["split"]=split
                     row["source"]="synthetic_authored_edge_curriculum_v5"
                     signature=hashlib.sha256(json.dumps(row["messages"],sort_keys=True).encode()).hexdigest()
+                    near=near_signature(row["messages"])
+                    if split=="train":train_near.add(near)
+                    elif near in train_near:
+                        # A train conversation with only IDs and numbers changed is not held-out data.
+                        near_removed+=1
+                        continue
                     if signature in global_hashes:
                         removed+=1
                         continue
@@ -260,7 +268,7 @@ def main():
                 validate_row(row)
                 out.write(json.dumps(row)+"\n");total+=1;targets+=1;families[row["family"]]+=1
         manifest["splits"][split]={"conversations":total,"assistant_targets":targets,"families":dict(families),"tools":dict(tools),
-            "tags":dict(tags),"exact_duplicates_removed":removed,"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"bytes":path.stat().st_size}
+            "tags":dict(tags),"exact_duplicates_removed":removed,"near_duplicates_removed":near_removed,"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"bytes":path.stat().st_size}
         print(json.dumps({"split":split,"conversations":total,"assistant_targets":targets,"families":len(families),"tools":len(tools)}),flush=True)
     (dest/"manifest.json").write_text(json.dumps(manifest,indent=2)+"\n",encoding="utf-8")
 

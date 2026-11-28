@@ -462,6 +462,7 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
+ "unicode-normalization",
  "zeroize",
  "zip",
  "zune-jpeg",

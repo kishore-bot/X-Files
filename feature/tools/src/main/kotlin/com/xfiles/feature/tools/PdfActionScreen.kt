@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +43,13 @@ internal fun PdfActionScreen(viewModel: PdfToolsViewModel, onBack: () -> Unit) {
     HapticOnChange(state.error) { if (it != null) reject() }
     val action = state.action
     val input = key(action) { rememberTextFieldState() }
+    val suggestedPages by viewModel.suggestedPages.collectAsStateWithLifecycle()
+    LaunchedEffect(suggestedPages, input) {
+        suggestedPages?.let {
+            input.setTextAndPlaceCursorAtEnd(it)
+            viewModel.consumeSuggestedPages()
+        }
+    }
     val sourcePassword = remember(action, state.inputs) { TextFieldState() }
     val newPassword = remember(action) { TextFieldState() }
     val confirmPassword = remember(action) { TextFieldState() }

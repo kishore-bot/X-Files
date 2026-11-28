@@ -78,7 +78,7 @@ internal class FilyActions(
                         else -> null
                     }
                     if (action == null) pdfTools.open(null)
-                    else if (!pdfTools.prefill(action, uris)) return FilyHandoff.Busy
+                    else if (!pdfTools.prefill(action, uris, destination.pageRange)) return FilyHandoff.Busy
                     navigator.show(Route.Tools)
                     FilyHandoff.Accepted
                 }

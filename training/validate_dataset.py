@@ -1,10 +1,11 @@
-"""Validate schema, grounding references, authorization and exact split leakage."""
+"""Validate schema, grounding references, authorization, and exact and near-duplicate split leakage."""
 import hashlib
 import json
 from collections import Counter
 from pathlib import Path
 import jsonschema
 from catalog import TOOLS
+from leakage import near_signature
 
 ROOT = Path(__file__).resolve().parent
 
@@ -49,6 +50,7 @@ def validate_row(row):
 
 def main():
     seen_ids, hashes = set(), {}
+    train_near = set()
     report = {}
     for split in ["train", "validation", "test"]:
         rows = [json.loads(s) for s in (ROOT / "data" / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -67,6 +69,11 @@ def main():
             signature = hashlib.sha256(json.dumps(row["messages"], sort_keys=True).encode()).hexdigest()
             assert signature not in hashes or hashes[signature] == split, "Cross-split duplicate"
             hashes[signature] = split
+            near = near_signature(row["messages"])
+            if split == "train":
+                train_near.add(near)
+            else:
+                assert near not in train_near, (row["id"], "near duplicate of a train row")
         assert set(tools) == set(TOOLS), (split, set(TOOLS) - set(tools))
         report[split] = {"conversations": len(rows), "families": len(families), "tools_covered": len(tools), "outputs": dict(kinds)}
     (ROOT / "data" / "validation_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

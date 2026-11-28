@@ -57,6 +57,8 @@ sealed interface FilyDestination {
         val draftText: String? = null,
         val draftTitle: String? = null,
         val startScan: Boolean = false,
+        /** One-based page list for the Split review, as the model wrote it; the user edits it before running. */
+        val pageRange: String? = null,
     ) : FilyDestination
 }
 
@@ -163,7 +165,7 @@ class ToolExecutor(
                     "createPdfFromText" -> draft(FilyTool.TextToPdf, arguments.required("text"), arguments.string("title").orEmpty())
                     "openPdfTools" -> pdfTool(null, arguments.string("documentId"))
                     "mergePdfDocuments" -> mergePdfs(arguments.ids("documentIds"))
-                    "extractPdfPages" -> pdfTool("Split", arguments.string("documentId"))
+                    "extractPdfPages" -> pdfTool("Split", arguments.string("documentId"), arguments.string("pageRange"))
                     "prepareOrganizePdf" -> pdfTool("Organize", arguments.string("documentId"))
                     "prepareResizePdf" -> pdfTool("PageSize", arguments.string("documentId"))
                     "preparePdfToImages" -> pdfTool("ToImages", arguments.string("documentId"))
@@ -199,6 +201,7 @@ class ToolExecutor(
             .filter { doc -> query.modifiedAfter == null || (doc.modifiedAt ?: 0) >= query.modifiedAfter }
             .filter { doc -> query.modifiedBefore == null || (doc.modifiedAt ?: Long.MAX_VALUE) < query.modifiedBefore }
             .filter { doc -> query.minBytes == null || (doc.sizeBytes ?: 0) >= query.minBytes }
+            .filter { doc -> query.folder == null || inFolder(doc.id, query.folder) }
             .map { doc ->
                 val name = doc.name.lowercase()
                 doc to if (words.isEmpty()) 1 else words.count { it in name } + if (query.query.isNotBlank() && query.query.lowercase() in name) words.size else 0
@@ -364,10 +367,10 @@ class ToolExecutor(
         handoff("draft_ready", FilyDestination.Tool(tool, draftText = text.take(MAX_DRAFT_CHARS), draftTitle = title.take(120)))
 
     /** [operation] null opens the PDF tools list. */
-    private suspend fun pdfTool(operation: String?, documentId: String?): String {
+    private suspend fun pdfTool(operation: String?, documentId: String?, pageRange: String? = null): String {
         val doc = documentId?.takeIf(String::isNotBlank)?.let(::document)
         require(doc == null || doc.name.endsWith(".pdf", ignoreCase = true))
-        return handoff(if (operation == null) "opened" else "review_pending", FilyDestination.Tool(FilyTool.PdfTools, listOfNotNull(doc?.id), operation))
+        return handoff(if (operation == null) "opened" else "review_pending", FilyDestination.Tool(FilyTool.PdfTools, listOfNotNull(doc?.id), operation, pageRange = pageRange))
     }
 
     private suspend fun mergePdfs(ids: List<String>): String {
@@ -407,6 +410,8 @@ class ToolExecutor(
         modifiedAfter = args.string("after")?.let(::parseIsoDate),
         modifiedBefore = args.string("before")?.let(::parseIsoDate),
         minBytes = (args["minBytes"] as? JsonPrimitive)?.longOrNull,
+        // A named folder must narrow the search: ignoring it would list files from elsewhere as if they were inside.
+        folder = args.string("folderId")?.takeIf(String::isNotBlank)?.let { originals[it] ?: it }?.trimEnd('/'),
         sort = when (args.string("sort")) {
             "modified_desc" -> Sort.ModifiedNewest
             "opened_desc" -> Sort.OpenedNewest
@@ -452,8 +457,17 @@ internal data class LibraryQuery(
     val modifiedAfter: Long? = null,
     val modifiedBefore: Long? = null,
     val minBytes: Long? = null,
+    /** Id of a folder; only documents whose id lies under it match. */
+    val folder: String? = null,
     val sort: Sort = Sort.Relevance,
 )
+
+/** True when [documentId] is below [folder], split at a path separator, plain or URI-encoded. */
+internal fun inFolder(documentId: String, folder: String): Boolean {
+    if (!documentId.startsWith(folder)) return false
+    val rest = documentId.substring(folder.length)
+    return rest.startsWith("/") || rest.startsWith("%2F", ignoreCase = true)
+}
 
 /** Name keywords for the categories the model asks for; names only, never file contents. */
 internal fun categoryKeywords(category: String): List<String> = when (val key = category.lowercase().trim()) {

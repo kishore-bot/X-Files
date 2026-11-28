@@ -20,6 +20,7 @@ md-5.workspace = true
 rc4.workspace = true
 getrandom.workspace = true
 zeroize.workspace = true
+unicode-normalization = "0.1.26"
 zune-jpeg.workspace = true
 jpeg-encoder.workspace = true
 zip = { version = "=9.8.2", default-features = false, features = ["aes-crypto", "deflate-flate2-zlib-rs"] }

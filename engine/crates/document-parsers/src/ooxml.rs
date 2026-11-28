@@ -32,7 +32,9 @@ pub(crate) fn rewrite_package(original: &[u8], edit: &PackageEdit) -> std::resul
         document_core::Limits { max_part_bytes: u64::MAX, ..document_core::Limits::default() },
         CancelToken::default(),
     )?;
-    let names: Vec<String> = archive.entries().iter().map(|e| e.name.clone()).collect();
+    let mut names: Vec<String> = archive.entries().iter().map(|e| e.name.clone()).collect();
+    // OpenDocument packages (ODS sheet edits come through here) need `mimetype` first and stored.
+    names.sort_by_key(|name| name != "mimetype");
     let mut out = Cursor::new(Vec::new());
     let mut central = Vec::new();
     let mut count: u16 = 0;
@@ -40,10 +42,13 @@ pub(crate) fn rewrite_package(original: &[u8], edit: &PackageEdit) -> std::resul
     let write_part = |name: &str, data: &[u8], out: &mut Cursor<Vec<u8>>, central: &mut Vec<u8>| -> std::result::Result<(), EngineError> {
         let offset = out.position() as u32;
         let crc = crc32fast::hash(data);
-        let mut enc = DeflateEncoder::new(Vec::new(), Compression::default());
-        enc.write_all(data).map_err(EngineError::from)?;
-        let compressed = enc.finish().map_err(EngineError::from)?;
-        let method: u16 = 8;
+        let (method, compressed): (u16, Vec<u8>) = if name == "mimetype" {
+            (0, data.to_vec())
+        } else {
+            let mut enc = DeflateEncoder::new(Vec::new(), Compression::default());
+            enc.write_all(data).map_err(EngineError::from)?;
+            (8, enc.finish().map_err(EngineError::from)?)
+        };
         let mut local = Vec::with_capacity(30 + name.len());
         local.extend(0x0403_4b50u32.to_le_bytes());
         local.extend([20, 0, 0, 0]);

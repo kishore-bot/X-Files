@@ -6,6 +6,10 @@ struct XfilesApp: App {
     @State private var library = LibraryModel()
     @AppStorage("xfiles.appearance") private var appearance = Appearance.system
 
+    init() {
+        Task.detached(priority: .background) { OutputFiles.sweepStale() }
+    }
+
     var body: some Scene {
         WindowGroup {
             LibraryScreen(model: library, appearance: $appearance)

@@ -190,22 +190,32 @@ def main():
     prior_elapsed=max(resume['elapsed_seconds'],observed_elapsed) if resume else 0.0
     if resume:
         # Only the job's own local checkpoint is accepted; no downloaded pickle state.
-        state=torch.load(adapter/'training_state.pt',map_location='cpu',weights_only=False)
+        state=torch.load(adapter/'training_state.pt',map_location='cpu',weights_only=True)
         optimizer.load_state_dict(state['optimizer']);scaler.load_state_dict(state['scaler'])
         for values in optimizer.state.values():
             for key,value in values.items():
                 if isinstance(value,torch.Tensor) and key!='step':values[key]=value.to('cuda')
         torch.set_rng_state(state['torch_rng']);torch.cuda.set_rng_state(state['cuda_rng'])
-    baseline=evaluate_loss(model,val,indices)
+    # The run's baseline is the loss before its first step; a resume measures its checkpoint, not that.
+    baseline_file=output/'baseline.json'
+    resumed_loss=evaluate_loss(model,val,indices)
+    if baseline_file.exists():baseline=json.loads(baseline_file.read_text())['validation_loss']
+    else:baseline=resumed_loss;atomic_json(baseline_file,{'validation_loss':baseline,'step':step})
     best=json.loads((output/'best.json').read_text()) if (output/'best.json').exists() else None
     if best is None:
-        best=checkpoint(model,optimizer,scaler,tokenizer,output,step,sampler,prior_elapsed,train.info['sha256'],val.info['sha256'],baseline,signature)
+        best=checkpoint(model,optimizer,scaler,tokenizer,output,step,sampler,prior_elapsed,train.info['sha256'],val.info['sha256'],resumed_loss,signature)
         atomic_json(output/'best.json',best)
     atomic_json(output/'arguments.json',vars(args))
     started=time.monotonic();next_check=prior_elapsed+args.interval
     started_utc=datetime.now(timezone.utc)
     torch.cuda.reset_peak_memory_stats();model.train()
-    log=(output/'metrics.jsonl').open('a',encoding='utf-8')
+    metrics=output/'metrics.jsonl'
+    if resume and metrics.exists():
+        # Steps after the checkpoint were lost with the crash and will run again; keep one entry per step.
+        kept=[line for line in metrics.read_text(encoding='utf-8').splitlines() if line.strip() and json.loads(line).get('step',0)<=step]
+        metrics.write_text(''.join(line+'\n' for line in kept),encoding='utf-8')
+    (output/'failure.json').unlink(missing_ok=True)
+    log=metrics.open('a',encoding='utf-8')
     reason='time_budget'
     try:
         if os.name=='nt':ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
